@@ -1,13 +1,13 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/actions";
-import { DashboardHeader } from "@/components/dashboard/header";
-import { DashboardSidebar } from "@/components/dashboard/sidebar";
+import Header from "./_features/Header";
+import Sidebar from "./_features/Sidebar";
 
 export default async function EducatorLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   const profile = await getCurrentUser();
 
   if (!profile) redirect("/login");
@@ -16,11 +16,11 @@ export default async function EducatorLayout({
   }
 
   return (
-    <div className="flex h-screen flex-col">
-      <DashboardHeader profile={profile} />
-      <div className="flex flex-1 overflow-hidden">
-        <DashboardSidebar role="teacher" />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+    <div className="min-h-screen bg-zinc-50 text-zinc-900">
+      <Header />
+      <div className="flex">
+        <Sidebar />
+        <main className="flex-1 px-8 py-6">{children}</main>
       </div>
     </div>
   );
