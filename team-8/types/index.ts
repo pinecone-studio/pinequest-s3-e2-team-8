@@ -109,3 +109,29 @@ export interface ExamSchedule {
   end_time: string;
   created_at: string;
 }
+
+export type GroupType = "class" | "elective" | "mixed";
+
+export interface StudentGroup {
+  id: string;
+  name: string;
+  grade: number | null;
+  group_type: GroupType;
+  subject_id: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface StudentGroupMember {
+  group_id: string;
+  student_id: string;
+  joined_at: string;
+}
+
+export interface ExamAssignment {
+  id: string;
+  exam_id: string;
+  group_id: string;
+  assigned_by: string | null;
+  assigned_at: string;
+}

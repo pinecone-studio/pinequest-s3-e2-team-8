@@ -1,1 +1,3 @@
-# pinequest-s3-e2-team-8
+# PineExam
+
+Learning management and online exam MVP for school environments.

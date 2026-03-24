@@ -5,8 +5,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { getEducatorStats } from "@/lib/dashboard/actions";
 
-export default function EducatorDashboard() {
+export default async function EducatorDashboard() {
+  const stats = await getEducatorStats();
+
   return (
     <div className="space-y-6">
       <div>
@@ -19,7 +22,7 @@ export default function EducatorDashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Нийт шалгалт</CardDescription>
-            <CardTitle className="text-3xl">0</CardTitle>
+            <CardTitle className="text-3xl">{stats.totalExams}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">Үүсгэсэн</p>
@@ -28,7 +31,7 @@ export default function EducatorDashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Асуултын сан</CardDescription>
-            <CardTitle className="text-3xl">0</CardTitle>
+            <CardTitle className="text-3xl">{stats.totalQuestions}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">Нийт асуулт</p>
@@ -37,7 +40,7 @@ export default function EducatorDashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Идэвхтэй шалгалт</CardDescription>
-            <CardTitle className="text-3xl">0</CardTitle>
+            <CardTitle className="text-3xl">{stats.activeExams}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">Одоо явагдаж байгаа</p>
@@ -46,7 +49,7 @@ export default function EducatorDashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Дүн гаргаагүй</CardDescription>
-            <CardTitle className="text-3xl">0</CardTitle>
+            <CardTitle className="text-3xl">{stats.pendingGrading}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">Шалгах хэрэгтэй</p>
