@@ -267,6 +267,29 @@ export async function submitExam(sessionId: string) {
 }
 
 /**
+ * Шалгалтын үр дүнг DB-ээс авах (URL param биш)
+ */
+export async function getExamResult(examId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data } = await supabase
+    .from("exam_sessions")
+    .select("*, exams(title, passing_score)")
+    .eq("exam_id", examId)
+    .eq("user_id", user.id)
+    .in("status", ["submitted", "graded"])
+    .order("submitted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return data;
+}
+
+/**
  * Оюутны шалгалтын үр дүн авах
  */
 export async function getStudentResults() {

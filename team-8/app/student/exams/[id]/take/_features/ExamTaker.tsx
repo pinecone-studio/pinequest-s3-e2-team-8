@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,6 +32,14 @@ export default function ExamTaker({
   savedAnswers,
 }: ExamTakerProps) {
   const router = useRouter();
+  // Shuffle-г mount дээр нэг л удаа хийх (useRef ашиглан тогтвортой байлгах)
+  const displayQuestionsRef = useRef<QuestionItem[]>(
+    exam.shuffle_questions
+      ? [...questions].sort(() => Math.random() - 0.5)
+      : questions
+  );
+  const displayQuestions = displayQuestionsRef.current;
+
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>(savedAnswers);
   const [timeLeft, setTimeLeft] = useState(
@@ -40,7 +48,7 @@ export default function ExamTaker({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
 
-  const currentQuestion = questions[currentIndex];
+  const currentQuestion = displayQuestions[currentIndex];
 
   // Timer
   useEffect(() => {
@@ -97,9 +105,7 @@ export default function ExamTaker({
 
     const result = await submitExam(sessionId);
     if (result.success) {
-      router.push(
-        `/student/exams/${exam.id}/result?score=${result.totalScore}&max=${result.maxScore}&pct=${result.percentage}`
-      );
+      router.push(`/student/exams/${exam.id}/result`);
     } else {
       setIsSubmitting(false);
       alert(result.error || "Алдаа гарлаа");
@@ -113,7 +119,9 @@ export default function ExamTaker({
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  const answeredCount = Object.keys(answers).length;
+  const answeredCount = Object.keys(answers).filter((id) =>
+    displayQuestions.some((q) => q.id === id)
+  ).length;
   const isTimeWarning = timeLeft < 300; // 5 минутаас бага
 
   return (
@@ -124,7 +132,7 @@ export default function ExamTaker({
           <div>
             <h1 className="text-lg font-semibold">{exam.title as string}</h1>
             <p className="text-sm text-muted-foreground">
-              {answeredCount}/{questions.length} хариулсан
+              {answeredCount}/{displayQuestions.length} хариулсан
             </p>
           </div>
           <div className="flex items-center gap-4">
@@ -161,7 +169,7 @@ export default function ExamTaker({
               Асуултууд
             </p>
             <div className="grid grid-cols-5 gap-1.5">
-              {questions.map((q, i) => {
+              {displayQuestions.map((q, i) => {
                 const qId = q.id as string;
                 const isAnswered = !!answers[qId];
                 const isCurrent = i === currentIndex;
@@ -191,7 +199,7 @@ export default function ExamTaker({
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">
-                  Асуулт {currentIndex + 1}/{questions.length}
+                  Асуулт {currentIndex + 1}/{displayQuestions.length}
                 </CardTitle>
                 <Badge variant="outline">
                   {currentQuestion.points} оноо
@@ -297,10 +305,10 @@ export default function ExamTaker({
                 <Button
                   onClick={() =>
                     setCurrentIndex((p) =>
-                      Math.min(questions.length - 1, p + 1)
+                      Math.min(displayQuestions.length - 1, p + 1)
                     )
                   }
-                  disabled={currentIndex === questions.length - 1}
+                  disabled={currentIndex === displayQuestions.length - 1}
                 >
                   Дараах
                 </Button>

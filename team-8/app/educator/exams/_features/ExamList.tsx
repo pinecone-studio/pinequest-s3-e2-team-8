@@ -65,6 +65,11 @@ export default function ExamList({ exams }: Props) {
                     <Link href={`/educator/exams/${exam.id}/questions`}>Асуулт засах</Link>
                   </DropdownMenuItem>
                   {!exam.is_published && (
+                    <DropdownMenuItem asChild>
+                      <Link href={`/educator/exams/${exam.id}/edit`}>Шалгалт засах</Link>
+                    </DropdownMenuItem>
+                  )}
+                  {!exam.is_published && (
                     <DropdownMenuItem onClick={() => publishExam(exam.id)}>
                       Нийтлэх
                     </DropdownMenuItem>
