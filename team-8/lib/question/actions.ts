@@ -41,7 +41,6 @@ export async function addQuestion(examId: string, formData: FormData) {
     exam_id: examId,
     type,
     content,
-    content_type: "text",
     options,
     correct_answer,
     points,

@@ -5,8 +5,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { getStudentStats } from "@/lib/dashboard/actions";
 
-export default function StudentDashboard() {
+export default async function StudentDashboard() {
+  const stats = await getStudentStats();
+
   return (
     <div className="space-y-6">
       <div>
@@ -19,7 +22,7 @@ export default function StudentDashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Идэвхтэй шалгалт</CardDescription>
-            <CardTitle className="text-3xl">0</CardTitle>
+            <CardTitle className="text-3xl">{stats.activeExams}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">Одоо өгөх боломжтой</p>
@@ -28,7 +31,7 @@ export default function StudentDashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Өгсөн шалгалт</CardDescription>
-            <CardTitle className="text-3xl">0</CardTitle>
+            <CardTitle className="text-3xl">{stats.completedExams}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">Нийт</p>
@@ -37,7 +40,9 @@ export default function StudentDashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Дундаж оноо</CardDescription>
-            <CardTitle className="text-3xl">—</CardTitle>
+            <CardTitle className="text-3xl">
+              {stats.avgScore !== null ? `${stats.avgScore}%` : "—"}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">Бүх шалгалтаар</p>

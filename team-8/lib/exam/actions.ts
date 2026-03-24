@@ -12,8 +12,9 @@ export async function createExam(formData: FormData) {
   const title = formData.get("title") as string;
   const description = formData.get("description") as string;
   const duration_minutes = parseInt(formData.get("duration_minutes") as string);
-  const start_time = formData.get("start_time") as string;
-  const end_time = formData.get("end_time") as string;
+  // datetime-local input өгөгдлийг UB цагаар хадгалах (+08:00)
+  const start_time = (formData.get("start_time") as string) + "+08:00";
+  const end_time = (formData.get("end_time") as string) + "+08:00";
   const passing_score = parseFloat(formData.get("passing_score") as string) || 60;
   const shuffle_questions = formData.get("shuffle_questions") === "on";
 
@@ -54,8 +55,8 @@ export async function updateExam(examId: string, formData: FormData) {
       title: formData.get("title") as string,
       description: (formData.get("description") as string) || null,
       duration_minutes: parseInt(formData.get("duration_minutes") as string),
-      start_time: formData.get("start_time") as string,
-      end_time: formData.get("end_time") as string,
+      start_time: (formData.get("start_time") as string) + "+08:00",
+      end_time: (formData.get("end_time") as string) + "+08:00",
       passing_score: parseFloat(formData.get("passing_score") as string) || 60,
       shuffle_questions: formData.get("shuffle_questions") === "on",
     })

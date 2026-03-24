@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { deleteExam, publishExam } from "@/lib/exam/actions";
+import { formatDateTimeUB } from "@/lib/utils/date";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,7 +49,7 @@ export default function ExamList({ exams }: Props) {
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       {exams.map((exam) => {
         const qCount = exam.questions?.[0]?.count ?? 0;
-        const startDate = new Date(exam.start_time).toLocaleString("mn-MN");
+        const startDate = formatDateTimeUB(exam.start_time);
         return (
           <Card key={exam.id} className="flex flex-col">
             <CardHeader className="flex-row items-start justify-between space-y-0 pb-2">

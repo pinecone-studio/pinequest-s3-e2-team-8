@@ -21,14 +21,14 @@ interface NavItem {
 }
 
 const ALL_NAV_ITEMS: NavItem[] = [
-  { href: "/educator", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/educator/question-bank", label: "Question Bank", icon: Database },
-  { href: "/educator/create-exam", label: "Create Exam", icon: FilePlus },
-  { href: "/educator/exam-schedule", label: "Exam Schedule", icon: Calendar },
-  { href: "/educator/submissions", label: "Submissions", icon: FileText },
-  { href: "/educator/grading", label: "Grading", icon: CheckSquare },
-  { href: "/educator/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/educator/settings", label: "Settings", icon: Settings },
+  { href: "/educator", label: "Хянах самбар", icon: LayoutDashboard },
+  { href: "/educator/exams", label: "Шалгалтууд", icon: FileText },
+  { href: "/educator/create-exam", label: "Шалгалт үүсгэх", icon: FilePlus },
+  { href: "/educator/question-bank", label: "Асуултын сан", icon: Database },
+  { href: "/educator/grading", label: "Дүн шалгах", icon: CheckSquare },
+  { href: "/educator/exam-schedule", label: "Хуваарь", icon: Calendar },
+  { href: "/educator/analytics", label: "Тайлан", icon: BarChart3 },
+  { href: "/educator/settings", label: "Тохиргоо", icon: Settings },
 ];
 
 export default function Sidebar() {
