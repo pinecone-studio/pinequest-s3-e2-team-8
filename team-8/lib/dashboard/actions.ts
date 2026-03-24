@@ -61,13 +61,19 @@ export async function getStudentStats() {
 
   const now = new Date().toISOString();
 
-  const [activeRes, sessionsRes] = await Promise.all([
+  const [activeAssignmentsRes, sessionsRes] = await Promise.all([
     supabase
-      .from("exams")
-      .select("id", { count: "exact", head: true })
-      .eq("is_published", true)
-      .lte("start_time", now)
-      .gte("end_time", now),
+      .from("exam_recipients")
+      .select(
+        `
+        exam_id,
+        exams!inner(id)
+      `
+      )
+      .eq("student_id", user.id)
+      .eq("exams.is_published", true)
+      .lte("exams.start_time", now)
+      .gte("exams.end_time", now),
     supabase
       .from("exam_sessions")
       .select("total_score, max_score")
@@ -75,6 +81,9 @@ export async function getStudentStats() {
       .in("status", ["submitted", "graded"]),
   ]);
 
+  const activeExams = new Set(
+    (activeAssignmentsRes.data ?? []).map((assignment) => assignment.exam_id)
+  ).size;
   const sessions = sessionsRes.data ?? [];
   let avgScore: number | null = null;
   if (sessions.length > 0) {
@@ -88,7 +97,7 @@ export async function getStudentStats() {
   }
 
   return {
-    activeExams: activeRes.count ?? 0,
+    activeExams,
     completedExams: sessions.length,
     avgScore,
   };

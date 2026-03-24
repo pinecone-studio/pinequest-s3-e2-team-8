@@ -41,7 +41,7 @@ export async function getAllUsers(role?: string) {
 
   let query = supabase
     .from("profiles")
-    .select("id, email, full_name, role, grade, created_at")
+    .select("id, email, full_name, role, created_at")
     .order("created_at", { ascending: false });
 
   if (role) {

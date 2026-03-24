@@ -5,17 +5,30 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { saveAnswer, submitExam } from "@/lib/student/actions";
+import MathContent from "@/components/math/MathContent";
+import {
+  logProctorEvent,
+  saveAnswer,
+  submitExam,
+} from "@/lib/student/actions";
 
 interface QuestionItem {
   id: string;
   type: string;
+  passage_id?: string | null;
   content: string;
   content_html: string | null;
   image_url: string | null;
   options: string[] | null;
   points: number;
   order_index: number;
+  question_passages?: {
+    id: string;
+    title: string | null;
+    content: string;
+    content_html: string | null;
+    image_url: string | null;
+  } | null;
 }
 
 interface ExamTakerProps {
@@ -23,6 +36,45 @@ interface ExamTakerProps {
   questions: QuestionItem[];
   sessionId: string;
   savedAnswers: Record<string, string>;
+  initialTimeLeftSeconds: number;
+}
+
+function getShuffleWeight(seed: string, questionId: string) {
+  let hash = 2166136261;
+  const value = `${seed}:${questionId}`;
+
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function getDisplayQuestions(
+  questions: QuestionItem[],
+  shouldShuffle: boolean,
+  seed: string
+) {
+  if (!shouldShuffle) return questions;
+
+  return [...questions].sort(
+    (a, b) =>
+      getShuffleWeight(seed, a.id) - getShuffleWeight(seed, b.id)
+  );
+}
+
+function getDisplayOptions(
+  options: string[],
+  shouldShuffle: boolean,
+  seed: string
+) {
+  if (!shouldShuffle) return options;
+
+  return [...options].sort(
+    (a, b) =>
+      getShuffleWeight(seed, a) - getShuffleWeight(seed, b)
+  );
 }
 
 export default function ExamTaker({
@@ -30,25 +82,175 @@ export default function ExamTaker({
   questions,
   sessionId,
   savedAnswers,
+  initialTimeLeftSeconds,
 }: ExamTakerProps) {
   const router = useRouter();
-  // Shuffle-г mount дээр нэг л удаа хийх (useRef ашиглан тогтвортой байлгах)
-  const displayQuestionsRef = useRef<QuestionItem[]>(
-    exam.shuffle_questions
-      ? [...questions].sort(() => Math.random() - 0.5)
-      : questions
+  const draftStorageKey = `exam-session:${sessionId}:drafts`;
+  const [displayQuestions] = useState(() =>
+    getDisplayQuestions(
+      questions,
+      Boolean(exam.shuffle_questions),
+      sessionId
+    )
   );
-  const displayQuestions = displayQuestionsRef.current;
 
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string>>(savedAnswers);
-  const [timeLeft, setTimeLeft] = useState(
-    (exam.duration_minutes as number) * 60
-  );
+  const [answers, setAnswers] = useState<Record<string, string>>(() => {
+    if (typeof window === "undefined") return savedAnswers;
+
+    const localAnswers = window.localStorage.getItem(draftStorageKey);
+    if (!localAnswers) return savedAnswers;
+
+    try {
+      const parsed = JSON.parse(localAnswers) as Record<string, string>;
+      return { ...savedAnswers, ...parsed };
+    } catch {
+      window.localStorage.removeItem(draftStorageKey);
+      return savedAnswers;
+    }
+  });
+  const [timeLeft, setTimeLeft] = useState(initialTimeLeftSeconds);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
+  const saveTimersRef = useRef<Record<string, number>>({});
+  const dirtyAnswersRef = useRef<Record<string, string>>({});
+  const activeSavePromisesRef = useRef<Record<string, Promise<unknown>>>({});
+  const currentQuestionRef = useRef<QuestionItem | null>(
+    displayQuestions[0] ?? null
+  );
+  const currentIndexRef = useRef(0);
+  const tabSwitchCountRef = useRef(0);
+  const isSubmittingRef = useRef(false);
+  const proctorThrottleRef = useRef<Record<string, number>>({});
 
   const currentQuestion = displayQuestions[currentIndex];
+  const currentPassage = currentQuestion.question_passages;
+
+  useEffect(() => {
+    currentQuestionRef.current = currentQuestion;
+  }, [currentQuestion]);
+
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+  }, [currentIndex]);
+
+  const emitProctorEvent = useCallback(
+    (
+      eventType:
+        | "tab_hidden"
+        | "window_blur"
+        | "copy_attempt"
+        | "paste_attempt"
+        | "context_menu",
+      metadata: Record<string, string | number | boolean | null> = {},
+      throttleMs = 0
+    ) => {
+      if (isSubmittingRef.current) return;
+
+      const now = Date.now();
+      const lastLoggedAt = proctorThrottleRef.current[eventType] ?? 0;
+      if (throttleMs > 0 && now - lastLoggedAt < throttleMs) return;
+
+      proctorThrottleRef.current[eventType] = now;
+
+      void logProctorEvent(sessionId, eventType, {
+        question_id: currentQuestionRef.current?.id ?? null,
+        question_number: currentIndexRef.current + 1,
+        ...metadata,
+      });
+    },
+    [sessionId]
+  );
+
+  const persistAnswer = useCallback(
+    (questionId: string, answer: string) => {
+      const request = saveAnswer(sessionId, questionId, answer).finally(() => {
+        if (dirtyAnswersRef.current[questionId] === answer) {
+          delete dirtyAnswersRef.current[questionId];
+        }
+
+        if (activeSavePromisesRef.current[questionId] === request) {
+          delete activeSavePromisesRef.current[questionId];
+        }
+      });
+
+      activeSavePromisesRef.current[questionId] = request;
+      return request;
+    },
+    [sessionId]
+  );
+
+  const queueSave = useCallback(
+    (questionId: string, answer: string, questionType: string) => {
+      dirtyAnswersRef.current[questionId] = answer;
+
+      const existingTimer = saveTimersRef.current[questionId];
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+
+      const delay =
+        questionType === "essay" || questionType === "fill_blank" ? 700 : 0;
+
+      if (delay === 0) {
+        delete saveTimersRef.current[questionId];
+        void persistAnswer(questionId, answer);
+        return;
+      }
+
+      saveTimersRef.current[questionId] = window.setTimeout(() => {
+        delete saveTimersRef.current[questionId];
+        void persistAnswer(questionId, answer);
+      }, delay);
+    },
+    [persistAnswer]
+  );
+
+  const flushPendingAnswers = useCallback(async () => {
+    const pendingDirtyAnswers = { ...dirtyAnswersRef.current };
+
+    for (const timerId of Object.values(saveTimersRef.current)) {
+      clearTimeout(timerId);
+    }
+    saveTimersRef.current = {};
+
+    const pendingRequests = Object.entries(pendingDirtyAnswers).map(
+      ([questionId, answer]) =>
+        activeSavePromisesRef.current[questionId] ??
+        persistAnswer(questionId, answer)
+    );
+
+    await Promise.all([
+      ...Object.values(activeSavePromisesRef.current),
+      ...pendingRequests,
+    ]);
+  }, [persistAnswer]);
+
+  // Шалгалт дуусгах
+  const handleSubmit = useCallback(async () => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+
+    await flushPendingAnswers();
+    const result = await submitExam(sessionId);
+    if (result.success) {
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(draftStorageKey);
+      }
+      router.push(`/student/exams/${exam.id as string}/result`);
+    } else {
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
+      alert(result.error || "Алдаа гарлаа");
+    }
+  }, [
+    draftStorageKey,
+    exam.id,
+    flushPendingAnswers,
+    router,
+    sessionId,
+  ]);
 
   // Timer
   useEffect(() => {
@@ -56,61 +258,111 @@ export default function ExamTaker({
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          handleSubmit();
+          void handleSubmit();
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleSubmit]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(draftStorageKey, JSON.stringify(answers));
+  }, [answers, draftStorageKey]);
+
+  useEffect(() => {
+    return () => {
+      for (const timerId of Object.values(saveTimersRef.current)) {
+        clearTimeout(timerId);
+      }
+    };
   }, []);
 
   // Proctoring: Tab switch detection
   useEffect(() => {
     const handleVisibility = () => {
       if (document.hidden) {
-        setTabSwitchCount((prev) => {
-          const newCount = prev + 1;
-          if (newCount >= 5) {
-            handleSubmit();
-          } else if (newCount >= 3) {
-            alert(
-              `Анхааруулга: Та ${newCount} удаа цонхноос гарлаа. 5 удаа давбал шалгалт автоматаар дуусна!`
-            );
-          }
-          return newCount;
-        });
+        const newCount = tabSwitchCountRef.current + 1;
+        tabSwitchCountRef.current = newCount;
+        setTabSwitchCount(newCount);
+
+        emitProctorEvent(
+          "tab_hidden",
+          {
+            tab_switch_count: newCount,
+            visibility_state: document.visibilityState,
+          },
+          500
+        );
+
+        if (newCount >= 5) {
+          void handleSubmit();
+        } else if (newCount >= 3) {
+          alert(
+            `Анхааруулга: Та ${newCount} удаа цонхноос гарлаа. 5 удаа давбал шалгалт автоматаар дуусна!`
+          );
+        }
       }
     };
+
+    const handleWindowBlur = () => {
+      if (document.hidden) return;
+
+      emitProctorEvent(
+        "window_blur",
+        {
+          tab_switch_count: tabSwitchCountRef.current,
+        },
+        2000
+      );
+    };
+
     document.addEventListener("visibilitychange", handleVisibility);
-    return () =>
+    window.addEventListener("blur", handleWindowBlur);
+
+    return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [emitProctorEvent, handleSubmit]);
+
+  useEffect(() => {
+    const handleCopy = (event: ClipboardEvent) => {
+      event.preventDefault();
+      emitProctorEvent("copy_attempt", {}, 1000);
+    };
+
+    const handlePaste = (event: ClipboardEvent) => {
+      event.preventDefault();
+      emitProctorEvent("paste_attempt", {}, 1000);
+    };
+
+    const handleContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+      emitProctorEvent("context_menu", {}, 1000);
+    };
+
+    document.addEventListener("copy", handleCopy);
+    document.addEventListener("paste", handlePaste);
+    document.addEventListener("contextmenu", handleContextMenu);
+
+    return () => {
+      document.removeEventListener("copy", handleCopy);
+      document.removeEventListener("paste", handlePaste);
+      document.removeEventListener("contextmenu", handleContextMenu);
+    };
+  }, [emitProctorEvent]);
 
   // Хариулт хадгалах (debounced)
   const handleAnswer = useCallback(
-    async (questionId: string, answer: string) => {
+    (questionId: string, answer: string, questionType: string) => {
       setAnswers((prev) => ({ ...prev, [questionId]: answer }));
-      await saveAnswer(sessionId, questionId, answer);
+      queueSave(questionId, answer, questionType);
     },
-    [sessionId]
+    [queueSave]
   );
-
-  // Шалгалт дуусгах
-  const handleSubmit = async () => {
-    if (isSubmitting) return;
-    setIsSubmitting(true);
-
-    const result = await submitExam(sessionId);
-    if (result.success) {
-      router.push(`/student/exams/${exam.id}/result`);
-    } else {
-      setIsSubmitting(false);
-      alert(result.error || "Алдаа гарлаа");
-    }
-  };
 
   // Хугацааг формат хийх
   const formatTime = (seconds: number) => {
@@ -133,6 +385,9 @@ export default function ExamTaker({
             <h1 className="text-lg font-semibold">{exam.title as string}</h1>
             <p className="text-sm text-muted-foreground">
               {answeredCount}/{displayQuestions.length} хариулсан
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Tab switch, copy/paste, right click үйлдлүүд логлогдоно.
             </p>
           </div>
           <div className="flex items-center gap-4">
@@ -207,10 +462,36 @@ export default function ExamTaker({
               </div>
             </CardHeader>
             <CardContent className="space-y-6">
+              {currentPassage && (
+                <div className="space-y-3 rounded-xl border border-dashed bg-muted/30 p-4">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary">Shared passage</Badge>
+                    {currentPassage.title && (
+                      <span className="font-medium">{currentPassage.title}</span>
+                    )}
+                  </div>
+                  <MathContent
+                    html={currentPassage.content_html}
+                    text={currentPassage.content}
+                    className="prose prose-sm max-w-none text-foreground"
+                  />
+                  {currentPassage.image_url && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={currentPassage.image_url}
+                      alt="Passage зураг"
+                      className="max-h-72 rounded-lg border"
+                    />
+                  )}
+                </div>
+              )}
+
               {/* Question text */}
-              <div className="text-lg leading-relaxed">
-                {currentQuestion.content}
-              </div>
+              <MathContent
+                html={currentQuestion.content_html}
+                text={currentQuestion.content}
+                className="prose prose-sm max-w-none text-foreground"
+              />
 
               {/* Image */}
               {currentQuestion.image_url && (
@@ -226,7 +507,11 @@ export default function ExamTaker({
               {(currentQuestion.type === "multiple_choice" ||
                 currentQuestion.type === "true_false") && (
                 <div className="space-y-2">
-                  {(currentQuestion.options ?? []).map((option, i) => {
+                  {getDisplayOptions(
+                    currentQuestion.options ?? [],
+                    Boolean(exam.shuffle_options),
+                    `${sessionId}:${currentQuestion.id}`
+                  ).map((option, i) => {
                     const optionValue =
                       typeof option === "string" ? option : String(option);
                     const isSelected =
@@ -237,7 +522,8 @@ export default function ExamTaker({
                         onClick={() =>
                           handleAnswer(
                             currentQuestion.id,
-                            optionValue
+                            optionValue,
+                            currentQuestion.type
                           )
                         }
                         className={`flex w-full items-center gap-3 rounded-lg border p-4 text-left transition-colors ${
@@ -271,7 +557,8 @@ export default function ExamTaker({
                   onChange={(e) =>
                     handleAnswer(
                       currentQuestion.id,
-                      e.target.value
+                      e.target.value,
+                      currentQuestion.type
                     )
                   }
                 />
@@ -287,7 +574,8 @@ export default function ExamTaker({
                   onChange={(e) =>
                     handleAnswer(
                       currentQuestion.id,
-                      e.target.value
+                      e.target.value,
+                      currentQuestion.type
                     )
                   }
                 />

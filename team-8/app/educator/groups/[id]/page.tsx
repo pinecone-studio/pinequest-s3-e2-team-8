@@ -18,14 +18,15 @@ interface Props {
 
 export default async function GroupDetailPage({ params }: Props) {
   const { id } = await params;
-  const [group, members, assignments, availableExams] = await Promise.all([
-    getGroupById(id),
-    getGroupMembers(id),
-    getGroupExamAssignments(id),
-    getAvailableExams(),
-  ]);
+  const group = await getGroupById(id);
 
   if (!group) notFound();
+
+  const [members, assignments, availableExams] = await Promise.all([
+    getGroupMembers(id),
+    getGroupExamAssignments(id),
+    getAvailableExams(id),
+  ]);
 
   const groupTypeLabel: Record<string, string> = {
     class: "Анги",

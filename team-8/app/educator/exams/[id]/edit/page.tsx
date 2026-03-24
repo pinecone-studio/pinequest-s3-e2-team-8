@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getExamById, updateExam } from "@/lib/exam/actions";
+import { getSubjects } from "@/lib/subject/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +15,7 @@ interface Props {
 
 export default async function EditExamPage({ params }: Props) {
   const { id } = await params;
-  const exam = await getExamById(id);
+  const [exam, subjects] = await Promise.all([getExamById(id), getSubjects()]);
 
   if (!exam) notFound();
   if (exam.is_published) redirect(`/educator/exams/${id}/questions`);
@@ -63,6 +64,23 @@ export default async function EditExamPage({ params }: Props) {
                 defaultValue={exam.title}
                 required
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="subject_id">Хичээл</Label>
+              <select
+                id="subject_id"
+                name="subject_id"
+                defaultValue={exam.subject_id ?? "__none"}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="__none">Сонгоогүй</option>
+                {subjects.map((subject) => (
+                  <option key={subject.id} value={subject.id}>
+                    {subject.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-2">
@@ -124,20 +142,49 @@ export default async function EditExamPage({ params }: Props) {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="shuffle_questions"
-                name="shuffle_questions"
-                defaultChecked={exam.shuffle_questions}
-                className="h-4 w-4 rounded border"
+            <div className="space-y-2">
+              <Label htmlFor="max_attempts">Оролдлогын тоо</Label>
+              <Input
+                id="max_attempts"
+                name="max_attempts"
+                type="number"
+                min="1"
+                max="10"
+                defaultValue={exam.max_attempts ?? 1}
               />
-              <Label
-                htmlFor="shuffle_questions"
-                className="cursor-pointer font-normal"
-              >
-                Асуултыг санамсаргүй дарааллаар гаргах
-              </Label>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="shuffle_questions"
+                  name="shuffle_questions"
+                  defaultChecked={exam.shuffle_questions}
+                  className="h-4 w-4 rounded border"
+                />
+                <Label
+                  htmlFor="shuffle_questions"
+                  className="cursor-pointer font-normal"
+                >
+                  Асуултыг санамсаргүй дарааллаар гаргах
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="shuffle_options"
+                  name="shuffle_options"
+                  defaultChecked={exam.shuffle_options}
+                  className="h-4 w-4 rounded border"
+                />
+                <Label
+                  htmlFor="shuffle_options"
+                  className="cursor-pointer font-normal"
+                >
+                  Сонголтуудын дарааллыг холих
+                </Label>
+              </div>
             </div>
 
             <div className="flex gap-2">

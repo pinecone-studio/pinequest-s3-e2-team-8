@@ -1,5 +1,10 @@
 import { redirect } from "next/navigation";
-import { getExamForStudent, startExamSession, getSessionAnswers } from "@/lib/student/actions";
+import {
+  getExamForStudent,
+  startExamSession,
+  getSessionAnswers,
+  submitExam,
+} from "@/lib/student/actions";
 import ExamTaker from "./_features/ExamTaker";
 
 export default async function TakeExamPage({
@@ -30,6 +35,21 @@ export default async function TakeExamPage({
 
   const session = result.session!;
 
+  const nowMs = new Date().getTime();
+  const sessionEndsAt =
+    new Date(session.started_at).getTime() +
+    Number(exam.duration_minutes) * 60 * 1000;
+  const examEndsAt = new Date(exam.end_time as string).getTime();
+  const initialTimeLeftSeconds = Math.max(
+    Math.floor((Math.min(sessionEndsAt, examEndsAt) - nowMs) / 1000),
+    0
+  );
+
+  if (initialTimeLeftSeconds <= 0) {
+    await submitExam(session.id);
+    redirect(`/student/exams/${examId}/result`);
+  }
+
   // Өмнөх хариултуудыг авах (resume)
   const savedAnswers = await getSessionAnswers(session.id);
 
@@ -39,6 +59,7 @@ export default async function TakeExamPage({
       questions={questions}
       sessionId={session.id}
       savedAnswers={savedAnswers}
+      initialTimeLeftSeconds={initialTimeLeftSeconds}
     />
   );
 }

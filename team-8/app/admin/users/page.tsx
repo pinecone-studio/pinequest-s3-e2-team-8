@@ -100,11 +100,6 @@ export default async function AdminUsersPage({
                       {u.full_name || "(Нэр байхгүй)"}
                     </p>
                     <p className="text-sm text-muted-foreground">{u.email}</p>
-                    {u.grade && (
-                      <p className="text-xs text-muted-foreground">
-                        {u.grade}-р анги
-                      </p>
-                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     {roleBadge(u.role)}

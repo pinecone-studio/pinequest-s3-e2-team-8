@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { assignExamToGroup, unassignExamFromGroup } from "@/lib/group/actions";
 import { formatDateTimeUB } from "@/lib/utils/date";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +23,8 @@ interface Assignment {
     start_time: string;
     end_time: string;
     duration_minutes: number;
+    subjects?: { name: string } | { name: string }[] | null;
+    questions?: { count: number }[] | null;
   } | null;
 }
 
@@ -33,6 +35,9 @@ interface AvailableExam {
   end_time: string;
   duration_minutes: number;
   is_published: boolean;
+  subjects?: { name: string } | { name: string }[] | null;
+  questions?: { count: number }[] | null;
+  conflict_error?: string | null;
 }
 
 interface AssignExamSectionProps {
@@ -46,10 +51,60 @@ export default function AssignExamSection({
   assignments,
   availableExams,
 }: AssignExamSectionProps) {
+  const [currentTime, setCurrentTime] = useState(0);
   const [selectedExamId, setSelectedExamId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const assignedExamIds = new Set(assignments.map((assignment) => assignment.exam_id));
+  const unassignedExams = availableExams.filter(
+    (exam) => !assignedExamIds.has(exam.id)
+  );
+  const selectableExams = unassignedExams.filter(
+    (exam) => !exam.conflict_error
+  );
+  const conflictedExams = unassignedExams.filter((exam) => exam.conflict_error);
+
+  useEffect(() => {
+    const updateCurrentTime = () => setCurrentTime(Date.now());
+
+    updateCurrentTime();
+    const interval = window.setInterval(updateCurrentTime, 60_000);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
+  function getSubjectName(
+    subject?: { name: string } | { name: string }[] | null
+  ) {
+    if (Array.isArray(subject)) return subject[0]?.name ?? null;
+    return subject?.name ?? null;
+  }
+
+  function getQuestionCount(
+    questions?: { count: number }[] | null
+  ) {
+    return Array.isArray(questions) ? Number(questions[0]?.count ?? 0) : 0;
+  }
+
+  function getScheduleStatus(startTime?: string, endTime?: string) {
+    if (!startTime || !endTime) {
+      return { label: "Хуваарь дутуу", variant: "outline" as const };
+    }
+
+    const start = new Date(startTime).getTime();
+    const end = new Date(endTime).getTime();
+
+    if (currentTime < start) {
+      return { label: "Удахгүй", variant: "outline" as const };
+    }
+
+    if (currentTime <= end) {
+      return { label: "Явагдаж байна", variant: "secondary" as const };
+    }
+
+    return { label: "Дууссан", variant: "secondary" as const };
+  }
 
   async function handleAssign() {
     if (!selectedExamId) {
@@ -90,15 +145,19 @@ export default function AssignExamSection({
               <SelectValue placeholder="Published шалгалт сонгох" />
             </SelectTrigger>
             <SelectContent>
-              {availableExams.length > 0 ? (
-                availableExams.map((exam) => (
+              {selectableExams.length > 0 ? (
+                selectableExams.map((exam) => (
                   <SelectItem key={exam.id} value={exam.id}>
                     {exam.title}
+                    {getSubjectName(exam.subjects)
+                      ? ` · ${getSubjectName(exam.subjects)}`
+                      : ""}
+                    {` · ${getQuestionCount(exam.questions)} асуулт`}
                   </SelectItem>
                 ))
               ) : (
                 <SelectItem value="__empty" disabled>
-                  Published шалгалт алга
+                  Оноох боломжтой published шалгалт алга
                 </SelectItem>
               )}
             </SelectContent>
@@ -106,11 +165,33 @@ export default function AssignExamSection({
           <Button
             type="button"
             onClick={handleAssign}
-            disabled={loading || availableExams.length === 0}
+            disabled={loading || selectableExams.length === 0}
             className="w-full sm:w-auto"
           >
             {loading ? "Оноож байна..." : "Шалгалт оноох"}
           </Button>
+          {conflictedExams.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-medium">
+                {conflictedExams.length} шалгалт хуваарийн зөрчлөөс болж түр түгжигдсэн байна.
+              </p>
+              <div className="mt-2 space-y-2">
+                {conflictedExams.slice(0, 3).map((exam) => (
+                  <div key={exam.id}>
+                    <p className="font-medium">{exam.title}</p>
+                    <p className="text-xs leading-relaxed text-amber-800">
+                      {exam.conflict_error}
+                    </p>
+                  </div>
+                ))}
+                {conflictedExams.length > 3 && (
+                  <p className="text-xs text-amber-800">
+                    Бусад {conflictedExams.length - 3} шалгалт мөн зөрчилтэй.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
           {error && <p className="text-sm text-destructive">{error}</p>}
         </CardContent>
       </Card>
@@ -124,6 +205,10 @@ export default function AssignExamSection({
         ) : (
           assignments.map((assignment) => {
             const exam = assignment.exams;
+            const scheduleStatus = getScheduleStatus(
+              exam?.start_time,
+              exam?.end_time
+            );
 
             return (
               <Card key={assignment.exam_id}>
@@ -133,6 +218,17 @@ export default function AssignExamSection({
                     <div className="flex flex-wrap gap-2">
                       <Badge variant="outline">
                         {exam?.duration_minutes ?? 0} мин
+                      </Badge>
+                      {getSubjectName(exam?.subjects) && (
+                        <Badge variant="secondary">
+                          {getSubjectName(exam?.subjects)}
+                        </Badge>
+                      )}
+                      <Badge variant="outline">
+                        {getQuestionCount(exam?.questions)} асуулт
+                      </Badge>
+                      <Badge variant={scheduleStatus.variant}>
+                        {scheduleStatus.label}
                       </Badge>
                       {exam?.is_published ? (
                         <Badge>Нийтлэгдсэн</Badge>

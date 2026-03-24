@@ -1,11 +1,15 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getExamById } from "@/lib/exam/actions";
-import { getQuestionsByExam } from "@/lib/question/actions";
+import {
+  getQuestionPassagesByExam,
+  getQuestionsByExam,
+} from "@/lib/question/actions";
 import { publishExam } from "@/lib/exam/actions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import AddQuestionForm from "./_features/AddQuestionForm";
+import PassageManager from "./_features/PassageManager";
 import QuestionList from "./_features/QuestionList";
 import { ArrowLeft } from "lucide-react";
 
@@ -15,9 +19,10 @@ interface Props {
 
 export default async function ExamQuestionsPage({ params }: Props) {
   const { id } = await params;
-  const [exam, questions] = await Promise.all([
+  const [exam, questions, passages] = await Promise.all([
     getExamById(id),
     getQuestionsByExam(id),
+    getQuestionPassagesByExam(id),
   ]);
 
   if (!exam) notFound();
@@ -41,8 +46,15 @@ export default async function ExamQuestionsPage({ params }: Props) {
             <Badge variant={exam.is_published ? "default" : "secondary"}>
               {exam.is_published ? "Нийтлэгдсэн" : "Ноорог"}
             </Badge>
+            {exam.subjects?.name && (
+              <Badge variant="outline">{exam.subjects.name}</Badge>
+            )}
+            <Badge variant="outline">{exam.max_attempts} оролдлого</Badge>
+            {exam.shuffle_options && (
+              <Badge variant="outline">Сонголт холих</Badge>
+            )}
             <span className="text-sm text-muted-foreground">
-              {exam.duration_minutes} минут · {questions.length} асуулт
+              {exam.duration_minutes} минут · {questions.length} асуулт · {passages.length} passage block
             </span>
           </div>
         </div>
@@ -59,10 +71,43 @@ export default async function ExamQuestionsPage({ params }: Props) {
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-4">
           <h3 className="font-semibold">Асуултууд</h3>
-          <QuestionList questions={questions} examId={id} />
+          <QuestionList
+            questions={questions}
+            examId={id}
+            passages={passages}
+            isLocked={Boolean(exam.is_published)}
+          />
         </div>
-        <div>
-          <AddQuestionForm examId={id} />
+        <div className="space-y-4">
+          {!exam.is_published && (
+            <div className="rounded-lg border bg-muted/30 p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold">Асуултын сан ашиглах</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Өмнө үүсгэсэн асуултуудаа энэ шалгалт руу шууд импортлоно.
+                  </p>
+                </div>
+                <Button asChild variant="outline">
+                  <Link href={`/educator/question-bank?examId=${id}`}>
+                    Сангаас оруулах
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {exam.is_published ? (
+            <div className="rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
+              Энэ шалгалт нийтлэгдсэн тул асуулт нэмэх, устгах, сангаас импортлох
+              боломжгүй.
+            </div>
+          ) : (
+            <>
+              <PassageManager examId={id} passages={passages} />
+              <AddQuestionForm examId={id} passages={passages} />
+            </>
+          )}
         </div>
       </div>
     </div>

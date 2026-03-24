@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { syncExamRecipients } from "@/lib/exam-recipients";
 
 export async function createExam(formData: FormData) {
   const supabase = await createClient();
@@ -12,14 +13,21 @@ export async function createExam(formData: FormData) {
   const title = formData.get("title") as string;
   const description = formData.get("description") as string;
   const duration_minutes = parseInt(formData.get("duration_minutes") as string);
+  const subject_id = ((formData.get("subject_id") as string) || "").trim() || null;
   // datetime-local input өгөгдлийг UB цагаар хадгалах (+08:00)
   const start_time = (formData.get("start_time") as string) + "+08:00";
   const end_time = (formData.get("end_time") as string) + "+08:00";
   const passing_score = parseFloat(formData.get("passing_score") as string) || 60;
+  const max_attempts = parseInt(formData.get("max_attempts") as string) || 1;
   const shuffle_questions = formData.get("shuffle_questions") === "on";
+  const shuffle_options = formData.get("shuffle_options") === "on";
 
   if (!title || !start_time || !end_time || !duration_minutes) {
     return { error: "Бүх талбарыг бөглөнө үү" };
+  }
+
+  if (new Date(start_time).getTime() >= new Date(end_time).getTime()) {
+    return { error: "Дуусах цаг нь эхлэх цагаасаа хойш байх ёстой" };
   }
 
   const { data, error } = await supabase
@@ -27,12 +35,15 @@ export async function createExam(formData: FormData) {
     .insert({
       title,
       description: description || null,
+      subject_id,
       created_by: user.id,
       start_time,
       end_time,
       duration_minutes,
       passing_score,
+      max_attempts,
       shuffle_questions,
+      shuffle_options,
       is_published: false,
     })
     .select()
@@ -49,16 +60,38 @@ export async function updateExam(examId: string, formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
 
+  const { data: existingExam } = await supabase
+    .from("exams")
+    .select("id, is_published")
+    .eq("id", examId)
+    .eq("created_by", user.id)
+    .maybeSingle();
+
+  if (!existingExam) return { error: "Шалгалт олдсонгүй" };
+  if (existingExam.is_published) {
+    return { error: "Нийтлэгдсэн шалгалтыг өөрчлөх боломжгүй" };
+  }
+
+  const start_time = (formData.get("start_time") as string) + "+08:00";
+  const end_time = (formData.get("end_time") as string) + "+08:00";
+
+  if (new Date(start_time).getTime() >= new Date(end_time).getTime()) {
+    return { error: "Дуусах цаг нь эхлэх цагаасаа хойш байх ёстой" };
+  }
+
   const { error } = await supabase
     .from("exams")
     .update({
       title: formData.get("title") as string,
       description: (formData.get("description") as string) || null,
+      subject_id: ((formData.get("subject_id") as string) || "").trim() || null,
       duration_minutes: parseInt(formData.get("duration_minutes") as string),
-      start_time: (formData.get("start_time") as string) + "+08:00",
-      end_time: (formData.get("end_time") as string) + "+08:00",
+      start_time,
+      end_time,
       passing_score: parseFloat(formData.get("passing_score") as string) || 60,
+      max_attempts: parseInt(formData.get("max_attempts") as string) || 1,
       shuffle_questions: formData.get("shuffle_questions") === "on",
+      shuffle_options: formData.get("shuffle_options") === "on",
     })
     .eq("id", examId)
     .eq("created_by", user.id);
@@ -74,6 +107,29 @@ export async function publishExam(examId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const { data: exam } = await supabase
+    .from("exams")
+    .select("id, is_published")
+    .eq("id", examId)
+    .eq("created_by", user.id)
+    .maybeSingle();
+
+  if (!exam) return { error: "Шалгалт олдсонгүй" };
+
+  const { count: questionCount } = await supabase
+    .from("questions")
+    .select("id", { count: "exact", head: true })
+    .eq("exam_id", examId);
+
+  if (!questionCount || questionCount <= 0) {
+    return { error: "Нийтлэхийн өмнө дор хаяж 1 асуулт нэмнэ үү" };
+  }
+
+  const syncResult = await syncExamRecipients(supabase, examId, user.id);
+  if (!syncResult.success) {
+    return { error: syncResult.error };
+  }
 
   const { error } = await supabase
     .from("exams")
@@ -112,7 +168,7 @@ export async function getExams() {
 
   const { data } = await supabase
     .from("exams")
-    .select("*, questions(count)")
+    .select("*, subjects(name), questions(count)")
     .eq("created_by", user.id)
     .order("created_at", { ascending: false });
 
@@ -121,12 +177,15 @@ export async function getExams() {
 
 export async function getExamById(examId: string) {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
 
   const { data } = await supabase
     .from("exams")
-    .select("*, questions(*)")
+    .select("*, subjects(name), questions(*)")
     .eq("id", examId)
-    .single();
+    .eq("created_by", user.id)
+    .maybeSingle();
 
   return data;
 }

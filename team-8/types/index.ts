@@ -18,6 +18,18 @@ export interface Subject {
   created_at: string;
 }
 
+export interface QuestionPassage {
+  id: string;
+  exam_id: string;
+  title: string | null;
+  content: string;
+  content_html: string | null;
+  image_url: string | null;
+  order_index: number;
+  created_by: string;
+  created_at: string;
+}
+
 export interface Exam {
   id: string;
   title: string;
@@ -42,16 +54,18 @@ export type Difficulty = "easy" | "medium" | "hard";
 export interface Question {
   id: string;
   exam_id: string;
+  passage_id?: string | null;
   type: QuestionType;
   content: string;
   content_html: string | null;
   image_url: string | null;
-  options: Record<string, unknown>[] | null;
+  options: string[] | null;
   correct_answer: string | null;
   points: number;
   order_index: number;
   explanation: string | null;
   created_at: string;
+  question_passages?: QuestionPassage | null;
 }
 
 export interface QuestionBank {
@@ -62,7 +76,7 @@ export interface QuestionBank {
   content: string;
   content_html: string | null;
   image_url: string | null;
-  options: Record<string, unknown>[] | null;
+  options: string[] | null;
   correct_answer: string | null;
   points: number;
   difficulty: Difficulty;
@@ -71,6 +85,7 @@ export interface QuestionBank {
   usage_count: number;
   created_at: string;
   updated_at: string;
+  subjects?: { name: string } | null;
 }
 
 export type ExamSessionStatus = "in_progress" | "submitted" | "graded" | "timed_out";

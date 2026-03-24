@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import MathContent from "@/components/math/MathContent";
 import { gradeAnswer, finalizeGrading } from "@/lib/grading/actions";
 import { formatDateTimeUB } from "@/lib/utils/date";
 
@@ -14,9 +15,91 @@ interface GradingFormProps {
   session: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   answers: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  proctorEvents: any[];
 }
 
-export default function GradingForm({ session, answers }: GradingFormProps) {
+function getProctorEventLabel(eventType: string) {
+  switch (eventType) {
+    case "tab_hidden":
+      return "Tab эсвэл app сольсон";
+    case "window_blur":
+      return "Цонхны focus алдсан";
+    case "copy_attempt":
+      return "Copy оролдлого";
+    case "paste_attempt":
+      return "Paste оролдлого";
+    case "context_menu":
+      return "Right click оролдлого";
+    default:
+      return eventType;
+  }
+}
+
+function getProctorRiskScore(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  proctorEvents: any[]
+) {
+  return proctorEvents.reduce((score, event) => {
+    switch (event.event_type) {
+      case "tab_hidden":
+        return score + 3;
+      case "window_blur":
+        return score + 2;
+      case "copy_attempt":
+      case "paste_attempt":
+      case "context_menu":
+        return score + 1;
+      default:
+        return score;
+    }
+  }, 0);
+}
+
+function getRiskBadge(
+  riskScore: number
+): { label: string; variant: "outline" | "secondary" | "destructive" } {
+  if (riskScore >= 10) {
+    return { label: "Өндөр эрсдэл", variant: "destructive" };
+  }
+
+  if (riskScore >= 4) {
+    return { label: "Дунд эрсдэл", variant: "secondary" };
+  }
+
+  return { label: "Бага эрсдэл", variant: "outline" };
+}
+
+function formatProctorMetadata(
+  metadata: Record<string, unknown> | null | undefined
+) {
+  if (!metadata) return "";
+
+  const details: string[] = [];
+  const questionNumber = metadata.question_number;
+  const tabSwitchCount = metadata.tab_switch_count;
+  const visibilityState = metadata.visibility_state;
+
+  if (typeof questionNumber === "number") {
+    details.push(`Асуулт ${questionNumber}`);
+  }
+
+  if (typeof tabSwitchCount === "number") {
+    details.push(`Tab ${tabSwitchCount}`);
+  }
+
+  if (typeof visibilityState === "string" && visibilityState) {
+    details.push(`State: ${visibilityState}`);
+  }
+
+  return details.join(" | ");
+}
+
+export default function GradingForm({
+  session,
+  answers,
+  proctorEvents,
+}: GradingFormProps) {
   const router = useRouter();
   const [scores, setScores] = useState<Record<string, number>>(() => {
     const init: Record<string, number> = {};
@@ -31,23 +114,58 @@ export default function GradingForm({ session, answers }: GradingFormProps) {
 
   const exam = session.exams;
   const profile = session.profiles;
+  const proctorEventCounts = proctorEvents.reduce(
+    (
+      counts: Record<string, number>,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      event: any
+    ) => {
+      counts[event.event_type] = (counts[event.event_type] ?? 0) + 1;
+      return counts;
+    },
+    {}
+  );
+  const riskScore = getProctorRiskScore(proctorEvents);
+  const riskBadge = getRiskBadge(riskScore);
 
   const handleGrade = async (answerId: string, maxPoints: number) => {
     const score = Math.min(scores[answerId] ?? 0, maxPoints);
     setSaving(answerId);
-    await gradeAnswer(answerId, score, feedbacks[answerId] || null);
+
+    const result = await gradeAnswer(
+      answerId,
+      score,
+      feedbacks[answerId] || null
+    );
+
     setSaving(null);
+
+    if (result.error) {
+      alert(result.error);
+    }
   };
 
   const handleFinalize = async () => {
     setFinalizing(true);
-    // Бүх шалгаагүй хариултуудыг 0 оноогоор хадгалах
+
     for (const a of answers) {
       if (scores[a.id] === undefined) {
-        await gradeAnswer(a.id, 0, null);
+        const result = await gradeAnswer(a.id, 0, null);
+        if (result.error) {
+          alert(result.error);
+          setFinalizing(false);
+          return;
+        }
       }
     }
-    await finalizeGrading(session.id);
+
+    const result = await finalizeGrading(session.id);
+    if (result.error) {
+      alert(result.error);
+      setFinalizing(false);
+      return;
+    }
+
     router.push("/educator/grading");
   };
 
@@ -68,11 +186,80 @@ export default function GradingForm({ session, answers }: GradingFormProps) {
         </Button>
       </div>
 
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-base">Integrity log</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Шалгалтын үеийн suspicious event бүртгэл
+              </p>
+            </div>
+            <Badge variant={riskBadge.variant}>
+              {riskBadge.label}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {proctorEvents.length > 0 ? (
+            <>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(proctorEventCounts).map(([eventType, count]) => (
+                  <Badge key={eventType} variant="outline">
+                    {getProctorEventLabel(eventType)}: {count}
+                  </Badge>
+                ))}
+              </div>
+
+              <div className="space-y-2">
+                {proctorEvents.slice(0, 10).map((event) => {
+                  const metadataSummary = formatProctorMetadata(event.metadata);
+
+                  return (
+                    <div
+                      key={event.id}
+                      className="rounded-lg border bg-muted/30 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-medium">
+                          {getProctorEventLabel(event.event_type)}
+                        </p>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDateTimeUB(event.created_at)}
+                        </span>
+                      </div>
+                      {metadataSummary && (
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {metadataSummary}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {proctorEvents.length > 10 && (
+                <p className="text-xs text-muted-foreground">
+                  Сүүлийн 10 event-ийг харуулж байна.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Integrity event бүртгэгдээгүй байна.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="space-y-4">
         {answers.map((a, i) => {
           const q = a.questions;
+          const passage = q?.question_passages;
           const isAutoGraded =
-            q?.type === "multiple_choice" || q?.type === "true_false";
+            q?.type === "multiple_choice" ||
+            q?.type === "true_false" ||
+            q?.type === "fill_blank";
           const maxPoints = q?.points ?? 1;
 
           return (
@@ -97,16 +284,51 @@ export default function GradingForm({ session, answers }: GradingFormProps) {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                <p className="font-medium">{q?.content}</p>
+                {passage && (
+                  <div className="space-y-3 rounded-xl border border-dashed bg-muted/30 p-4">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary">Shared passage</Badge>
+                      {passage.title && (
+                        <span className="font-medium">{passage.title}</span>
+                      )}
+                    </div>
+                    <MathContent
+                      html={passage.content_html}
+                      text={passage.content}
+                      className="prose prose-sm max-w-none text-foreground"
+                    />
+                    {passage.image_url && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={passage.image_url}
+                        alt="Passage зураг"
+                        className="max-h-64 rounded-lg border"
+                      />
+                    )}
+                  </div>
+                )}
 
-                {/* Зөв хариулт */}
+                <MathContent
+                  html={q?.content_html}
+                  text={q?.content}
+                  className="prose prose-sm max-w-none text-foreground"
+                />
+
+                {q?.image_url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={q.image_url}
+                    alt="Асуултын зураг"
+                    className="max-h-64 rounded-lg border"
+                  />
+                )}
+
                 {q?.correct_answer && (
                   <p className="text-sm text-green-600">
                     Зөв хариулт: {q.correct_answer}
                   </p>
                 )}
 
-                {/* Оюутны хариулт */}
                 <div className="rounded-lg bg-muted p-3">
                   <p className="text-sm font-medium text-muted-foreground">
                     Оюутны хариулт:
@@ -114,7 +336,6 @@ export default function GradingForm({ session, answers }: GradingFormProps) {
                   <p className="mt-1">{a.answer || "(хариулаагүй)"}</p>
                 </div>
 
-                {/* Авто шалгасан */}
                 {isAutoGraded && (
                   <div className="flex items-center gap-2">
                     <Badge
@@ -129,7 +350,6 @@ export default function GradingForm({ session, answers }: GradingFormProps) {
                   </div>
                 )}
 
-                {/* Гараар шалгах (essay, fill_blank) */}
                 {!isAutoGraded && (
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2">
