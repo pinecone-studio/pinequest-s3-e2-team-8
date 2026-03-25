@@ -29,57 +29,36 @@ ON CONFLICT (exam_id, student_id) DO NOTHING;
 
 ALTER TABLE public.exam_recipients ENABLE ROW LEVEL SECURITY;
 
+-- SECURITY DEFINER function breaks the circular RLS dependency:
+-- exams policy → exam_recipients → exams (infinite recursion without this)
+-- This function queries exams WITHOUT triggering RLS, so the cycle is broken.
+CREATE OR REPLACE FUNCTION public.auth_is_exam_owner_or_admin(p_exam_id uuid)
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.exams
+    WHERE id = p_exam_id AND created_by = auth.uid()
+  ) OR EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'admin'
+  );
+$$;
+
 CREATE POLICY "Students can view own exam recipients"
   ON public.exam_recipients FOR SELECT
   USING (
     student_id = auth.uid()
-    OR EXISTS (
-      SELECT 1
-      FROM public.exams
-      WHERE exams.id = exam_recipients.exam_id
-      AND (
-        exams.created_by = auth.uid()
-        OR EXISTS (
-          SELECT 1
-          FROM public.profiles
-          WHERE id = auth.uid() AND role = 'admin'
-        )
-      )
-    )
+    OR public.auth_is_exam_owner_or_admin(exam_id)
   );
 
 CREATE POLICY "Teachers can manage exam recipients"
   ON public.exam_recipients FOR ALL
-  USING (
-    EXISTS (
-      SELECT 1
-      FROM public.exams
-      WHERE exams.id = exam_recipients.exam_id
-      AND (
-        exams.created_by = auth.uid()
-        OR EXISTS (
-          SELECT 1
-          FROM public.profiles
-          WHERE id = auth.uid() AND role = 'admin'
-        )
-      )
-    )
-  )
-  WITH CHECK (
-    EXISTS (
-      SELECT 1
-      FROM public.exams
-      WHERE exams.id = exam_recipients.exam_id
-      AND (
-        exams.created_by = auth.uid()
-        OR EXISTS (
-          SELECT 1
-          FROM public.profiles
-          WHERE id = auth.uid() AND role = 'admin'
-        )
-      )
-    )
-  );
+  USING (public.auth_is_exam_owner_or_admin(exam_id))
+  WITH CHECK (public.auth_is_exam_owner_or_admin(exam_id));
 
 -- Tighten published exam visibility so students only see exams assigned to them
 DROP POLICY IF EXISTS "Anyone can view published exams" ON public.exams;
