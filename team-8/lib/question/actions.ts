@@ -7,6 +7,108 @@ import {
   getQuestionPassagesByExam as loadQuestionPassagesByExam,
 } from "@/lib/question-passages";
 
+function parseStringArray(rawValue: string) {
+  try {
+    const parsed = JSON.parse(rawValue);
+    return Array.isArray(parsed)
+      ? parsed.map((item) => String(item).trim()).filter(Boolean)
+      : [];
+  } catch {
+    return null;
+  }
+}
+
+function parseMatchingPairs(rawValue: string) {
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) return null;
+
+    return parsed
+      .map((item) => {
+        const left = String(item?.left ?? "").trim();
+        const right = String(item?.right ?? "").trim();
+
+        if (!left || !right) return null;
+        return `${left}|||${right}`;
+      })
+      .filter((item): item is string => Boolean(item));
+  } catch {
+    return null;
+  }
+}
+
+function buildQuestionPayload(
+  type: string,
+  rawOptions: string,
+  rawCorrectAnswer: string | null
+) {
+  const normalizedCorrectAnswer = rawCorrectAnswer?.trim() || null;
+  let options: string[] | null = null;
+  let correctAnswer: string | null = normalizedCorrectAnswer;
+
+  if (type === "multiple_choice") {
+    const validOptions = parseStringArray(rawOptions);
+    if (!validOptions) {
+      return { error: "Сонголтуудын өгөгдөл буруу байна." };
+    }
+
+    if (validOptions.length < 2) {
+      return { error: "Дор хаяж 2 сонголт хэрэгтэй." };
+    }
+
+    if (!correctAnswer || !validOptions.includes(correctAnswer)) {
+      return { error: "Зөв хариулт нь сонголтуудын нэг байх ёстой." };
+    }
+
+    options = validOptions;
+  } else if (type === "multiple_response") {
+    const validOptions = parseStringArray(rawOptions);
+    const correctAnswers = parseStringArray(rawCorrectAnswer ?? "[]");
+
+    if (!validOptions || !correctAnswers) {
+      return { error: "Сонголтуудын өгөгдөл буруу байна." };
+    }
+
+    if (validOptions.length < 2) {
+      return { error: "Дор хаяж 2 сонголт хэрэгтэй." };
+    }
+
+    if (correctAnswers.length < 1) {
+      return { error: "Дор хаяж 1 зөв хариулт сонгоно уу." };
+    }
+
+    if (correctAnswers.some((answer) => !validOptions.includes(answer))) {
+      return { error: "Зөв хариултууд нь сонголтуудын дотор байх ёстой." };
+    }
+
+    options = validOptions;
+    correctAnswer = JSON.stringify(correctAnswers);
+  } else if (type === "fill_blank") {
+    if (!correctAnswer) {
+      return { error: "Нөхөх асуултын зөв хариултыг оруулна уу." };
+    }
+  } else if (type === "matching") {
+    const pairs = parseMatchingPairs(rawOptions);
+    if (!pairs || pairs.length < 2) {
+      return { error: "Холбох асуултад дор хаяж 2 мөр хэрэгтэй." };
+    }
+
+    options = pairs;
+    correctAnswer = JSON.stringify(
+      pairs.map((pair) => {
+        const [left, right] = pair.split("|||");
+        return { left, right };
+      })
+    );
+  } else if (type === "essay") {
+    correctAnswer = null;
+  } else {
+    return { error: "Дэмжигдээгүй асуултын төрөл байна." };
+  }
+
+  return { options, correctAnswer };
+}
+
 async function getOwnedExam(
   examId: string,
   userId: string
@@ -90,21 +192,13 @@ export async function addQuestion(examId: string, formData: FormData) {
     return { error: passageResolution.error };
   }
 
-  let options = null;
-  if (type === "multiple_choice") {
-    const optionsRaw = formData.get("options") as string;
-    try {
-      options = JSON.parse(optionsRaw);
-    } catch {
-      options = null;
-    }
-  } else if (type === "true_false") {
-    options = ["Үнэн", "Худал"];
-    if (correct_answer !== "Үнэн" && correct_answer !== "Худал") {
-      return { error: "Үнэн/Худал асуултын зөв хариултыг сонгоно уу." };
-    }
-  } else if (type === "fill_blank" && !correct_answer) {
-    return { error: "Нөхөх асуултын зөв хариултыг оруулна уу." };
+  const questionPayload = buildQuestionPayload(
+    type,
+    String(formData.get("options") || "[]"),
+    correct_answer
+  );
+  if ("error" in questionPayload) {
+    return { error: questionPayload.error };
   }
 
   const { data: existing } = await supabase
@@ -123,8 +217,8 @@ export async function addQuestion(examId: string, formData: FormData) {
     content,
     content_html,
     image_url,
-    options,
-    correct_answer,
+    options: questionPayload.options,
+    correct_answer: questionPayload.correctAnswer,
     points,
     order_index,
     explanation,
@@ -148,7 +242,7 @@ export async function addQuestion(examId: string, formData: FormData) {
 
   const matchingBankEntry = (existingBankEntries ?? []).find(
     (entry) =>
-      (entry.correct_answer ?? null) === correct_answer &&
+      (entry.correct_answer ?? null) === questionPayload.correctAnswer &&
       (entry.image_url ?? null) === image_url
   );
 
@@ -160,8 +254,8 @@ export async function addQuestion(examId: string, formData: FormData) {
         points,
         explanation,
         content_html,
-        options,
-        correct_answer,
+        options: questionPayload.options,
+        correct_answer: questionPayload.correctAnswer,
         image_url,
         difficulty,
         tags,
@@ -175,8 +269,8 @@ export async function addQuestion(examId: string, formData: FormData) {
       content,
       content_html,
       image_url,
-      options,
-      correct_answer,
+      options: questionPayload.options,
+      correct_answer: questionPayload.correctAnswer,
       points,
       difficulty,
       tags,
@@ -423,34 +517,13 @@ export async function updateQuestion(
     return { error: passageResolution.error };
   }
 
-  let options = null;
-  if (type === "multiple_choice") {
-    const optionsRaw = String(formData.get("options") || "[]");
-    try {
-      const parsed = JSON.parse(optionsRaw);
-      const validOptions = Array.isArray(parsed)
-        ? parsed.map((option) => String(option).trim()).filter(Boolean)
-        : [];
-
-      if (validOptions.length < 2) {
-        return { error: "Дор хаяж 2 сонголт хэрэгтэй." };
-      }
-
-      if (!correct_answer || !validOptions.includes(correct_answer)) {
-        return { error: "Зөв хариулт нь сонголтуудын нэг байх ёстой." };
-      }
-
-      options = validOptions;
-    } catch {
-      return { error: "Сонголтуудын өгөгдөл буруу байна." };
-    }
-  } else if (type === "true_false") {
-    options = ["Үнэн", "Худал"];
-    if (correct_answer !== "Үнэн" && correct_answer !== "Худал") {
-      return { error: "Үнэн/Худал асуултын зөв хариултыг сонгоно уу." };
-    }
-  } else if (type === "fill_blank" && !correct_answer) {
-    return { error: "Нөхөх асуултын зөв хариултыг оруулна уу." };
+  const questionPayload = buildQuestionPayload(
+    type,
+    String(formData.get("options") || "[]"),
+    correct_answer
+  );
+  if ("error" in questionPayload) {
+    return { error: questionPayload.error };
   }
 
   const { error } = await supabase
@@ -461,9 +534,8 @@ export async function updateQuestion(
       content,
       content_html,
       image_url,
-      options,
-      correct_answer:
-        type === "essay" ? null : correct_answer,
+      options: questionPayload.options,
+      correct_answer: questionPayload.correctAnswer,
       points,
       explanation,
     })
@@ -627,39 +699,13 @@ export async function updateQuestionBankItem(
     return { error: "Асуултын агуулга хоосон байж болохгүй." };
   }
 
-  let options: string[] | null = null;
-  let correct_answer: string | null = null;
-
-  if (type === "multiple_choice") {
-    const optionsRaw = String(formData.get("options") || "[]");
-    try {
-      const parsed = JSON.parse(optionsRaw);
-      const validOptions = Array.isArray(parsed)
-        ? parsed.map((option) => String(option).trim()).filter(Boolean)
-        : [];
-
-      if (validOptions.length < 2) {
-        return { error: "Сонголтот асуултад дор хаяж 2 сонголт хэрэгтэй." };
-      }
-
-      options = validOptions;
-      correct_answer = String(formData.get("correct_answer") || "").trim() || null;
-
-      if (!correct_answer || !validOptions.includes(correct_answer)) {
-        return { error: "Зөв хариулт нь сонголтуудын нэг байх ёстой." };
-      }
-    } catch {
-      return { error: "Сонголтуудын өгөгдөл буруу байна." };
-    }
-  } else if (type === "true_false") {
-    options = ["Үнэн", "Худал"];
-    const value = String(formData.get("correct_answer") || "Үнэн").trim();
-    correct_answer = value === "Худал" ? "Худал" : "Үнэн";
-  } else if (type === "fill_blank") {
-    correct_answer = String(formData.get("correct_answer") || "").trim() || null;
-    if (!correct_answer) {
-      return { error: "Нөхөх асуултын зөв хариултыг оруулна уу." };
-    }
+  const questionPayload = buildQuestionPayload(
+    type,
+    String(formData.get("options") || "[]"),
+    String(formData.get("correct_answer") || "").trim() || null
+  );
+  if ("error" in questionPayload) {
+    return { error: questionPayload.error };
   }
 
   const { error } = await supabase
@@ -670,8 +716,8 @@ export async function updateQuestionBankItem(
       content,
       content_html,
       image_url,
-      options,
-      correct_answer,
+      options: questionPayload.options,
+      correct_answer: questionPayload.correctAnswer,
       points,
       difficulty,
       tags,

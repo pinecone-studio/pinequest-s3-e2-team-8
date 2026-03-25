@@ -258,8 +258,9 @@ export default function GradingForm({
           const passage = q?.question_passages;
           const isAutoGraded =
             q?.type === "multiple_choice" ||
-            q?.type === "true_false" ||
-            q?.type === "fill_blank";
+            q?.type === "multiple_response" ||
+            q?.type === "fill_blank" ||
+            q?.type === "matching";
           const maxPoints = q?.points ?? 1;
 
           return (

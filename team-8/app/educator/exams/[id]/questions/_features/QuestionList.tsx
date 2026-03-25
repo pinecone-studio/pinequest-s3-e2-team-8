@@ -11,10 +11,11 @@ import MathContent from "@/components/math/MathContent";
 import EditQuestionDialog from "./EditQuestionDialog";
 
 const typeLabels: Record<string, string> = {
-  multiple_choice: "Сонголтот",
-  true_false: "Үнэн/Худал",
-  essay: "Нээлттэй",
-  fill_blank: "Цоорхой",
+  multiple_choice: "Сонгох",
+  multiple_response: "Олон сонголттой",
+  essay: "Задгай / Эссэ",
+  fill_blank: "Нөхөх",
+  matching: "Холбох",
 };
 
 interface Props {
@@ -22,6 +23,33 @@ interface Props {
   examId: string;
   passages: QuestionPassage[];
   isLocked?: boolean;
+}
+
+function formatCorrectAnswer(question: Question) {
+  if (!question.correct_answer) return null;
+
+  if (question.type === "multiple_response") {
+    try {
+      const answers = JSON.parse(question.correct_answer) as string[];
+      return answers.join(", ");
+    } catch {
+      return question.correct_answer;
+    }
+  }
+
+  if (question.type === "matching") {
+    try {
+      const pairs = JSON.parse(question.correct_answer) as Array<{
+        left: string;
+        right: string;
+      }>;
+      return `${pairs.length} холбоос`;
+    } catch {
+      return "Холбох хариулт";
+    }
+  }
+
+  return question.correct_answer;
 }
 
 export default function QuestionList({
@@ -52,6 +80,7 @@ export default function QuestionList({
         <span>{questions.length} асуулт</span>
         <span>Нийт оноо: {totalPoints}</span>
       </div>
+
       {questions.map((q, idx) => {
         const passage = q.question_passages;
         const shouldRenderPassage =
@@ -60,6 +89,8 @@ export default function QuestionList({
         if (passage?.id) {
           renderedPassages.add(passage.id);
         }
+
+        const formattedCorrectAnswer = formatCorrectAnswer(q);
 
         return (
           <Fragment key={q.id}>
@@ -113,9 +144,9 @@ export default function QuestionList({
                         Зурагтай
                       </Badge>
                     )}
-                    {q.correct_answer && (
+                    {formattedCorrectAnswer && (
                       <Badge variant="secondary" className="text-xs">
-                        ✓ {q.correct_answer}
+                        ✓ {formattedCorrectAnswer}
                       </Badge>
                     )}
                   </div>

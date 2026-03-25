@@ -77,6 +77,31 @@ function getDisplayOptions(
   );
 }
 
+function parseStoredArray(value: string | undefined) {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value) as string[];
+    return Array.isArray(parsed)
+      ? parsed.map((item) => String(item))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseMatchingOptions(options: string[] | null | undefined) {
+  return (options ?? [])
+    .map((option) => {
+      const [left, right] = String(option).split("|||");
+      if (!left || !right) return null;
+      return { left, right };
+    })
+    .filter(
+      (item): item is { left: string; right: string } => Boolean(item)
+    );
+}
+
 export default function ExamTaker({
   exam,
   questions,
@@ -125,6 +150,18 @@ export default function ExamTaker({
 
   const currentQuestion = displayQuestions[currentIndex];
   const currentPassage = currentQuestion.question_passages;
+  const currentMultipleAnswers = parseStoredArray(answers[currentQuestion.id]);
+  const currentMatchingOptions = parseMatchingOptions(currentQuestion.options);
+  const currentMatchingAnswer = (() => {
+    try {
+      return JSON.parse(answers[currentQuestion.id] ?? "{}") as Record<
+        string,
+        string
+      >;
+    } catch {
+      return {};
+    }
+  })();
 
   useEffect(() => {
     currentQuestionRef.current = currentQuestion;
@@ -504,8 +541,7 @@ export default function ExamTaker({
               )}
 
               {/* Answer options */}
-              {(currentQuestion.type === "multiple_choice" ||
-                currentQuestion.type === "true_false") && (
+              {currentQuestion.type === "multiple_choice" && (
                 <div className="space-y-2">
                   {getDisplayOptions(
                     currentQuestion.options ?? [],
@@ -548,6 +584,54 @@ export default function ExamTaker({
                 </div>
               )}
 
+              {currentQuestion.type === "multiple_response" && (
+                <div className="space-y-2">
+                  {getDisplayOptions(
+                    currentQuestion.options ?? [],
+                    Boolean(exam.shuffle_options),
+                    `${sessionId}:${currentQuestion.id}`
+                  ).map((option, i) => {
+                    const optionValue = String(option);
+                    const isSelected = currentMultipleAnswers.includes(optionValue);
+
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => {
+                          const nextAnswers = isSelected
+                            ? currentMultipleAnswers.filter(
+                                (item) => item !== optionValue
+                              )
+                            : [...currentMultipleAnswers, optionValue];
+
+                          handleAnswer(
+                            currentQuestion.id,
+                            JSON.stringify(nextAnswers),
+                            currentQuestion.type
+                          );
+                        }}
+                        className={`flex w-full items-center gap-3 rounded-lg border p-4 text-left transition-colors ${
+                          isSelected
+                            ? "border-primary bg-primary/5"
+                            : "hover:bg-muted/50"
+                        }`}
+                      >
+                        <span
+                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded border text-sm ${
+                            isSelected
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : ""
+                          }`}
+                        >
+                          {isSelected ? "✓" : ""}
+                        </span>
+                        <span>{optionValue}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* Essay answer */}
               {currentQuestion.type === "essay" && (
                 <textarea
@@ -579,6 +663,50 @@ export default function ExamTaker({
                     )
                   }
                 />
+              )}
+
+              {currentQuestion.type === "matching" && (
+                <div className="space-y-3">
+                  {currentMatchingOptions.map((pair, index) => {
+                    const rightOptions = currentMatchingOptions.map(
+                      (item) => item.right
+                    );
+
+                    return (
+                      <div
+                        key={`${pair.left}-${index}`}
+                        className="grid gap-3 rounded-lg border p-4 md:grid-cols-2"
+                      >
+                        <div className="rounded-lg bg-muted/40 px-3 py-2 font-medium">
+                          {pair.left}
+                        </div>
+                        <select
+                          className="rounded-lg border bg-background px-3 py-2"
+                          value={currentMatchingAnswer[pair.left] ?? ""}
+                          onChange={(event) => {
+                            const nextAnswer = {
+                              ...currentMatchingAnswer,
+                              [pair.left]: event.target.value,
+                            };
+
+                            handleAnswer(
+                              currentQuestion.id,
+                              JSON.stringify(nextAnswer),
+                              currentQuestion.type
+                            );
+                          }}
+                        >
+                          <option value="">Сонгоно уу</option>
+                          {rightOptions.map((option) => (
+                            <option key={`${pair.left}-${option}`} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
 
               {/* Navigation */}

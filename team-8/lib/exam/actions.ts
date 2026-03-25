@@ -14,6 +14,7 @@ export async function createExam(formData: FormData) {
   const description = formData.get("description") as string;
   const duration_minutes = parseInt(formData.get("duration_minutes") as string);
   const subject_id = ((formData.get("subject_id") as string) || "").trim() || null;
+  const group_id = ((formData.get("group_id") as string) || "").trim() || null;
   // datetime-local input өгөгдлийг UB цагаар хадгалах (+08:00)
   const start_time = (formData.get("start_time") as string) + "+08:00";
   const end_time = (formData.get("end_time") as string) + "+08:00";
@@ -28,6 +29,17 @@ export async function createExam(formData: FormData) {
 
   if (new Date(start_time).getTime() >= new Date(end_time).getTime()) {
     return { error: "Дуусах цаг нь эхлэх цагаасаа хойш байх ёстой" };
+  }
+
+  if (group_id) {
+    const { data: group } = await supabase
+      .from("student_groups")
+      .select("id")
+      .eq("id", group_id)
+      .eq("created_by", user.id)
+      .maybeSingle();
+
+    if (!group) return { error: "Сонгосон бүлэг олдсонгүй" };
   }
 
   const { data, error } = await supabase
@@ -50,6 +62,25 @@ export async function createExam(formData: FormData) {
     .single();
 
   if (error) return { error: error.message };
+
+  if (group_id) {
+    const { error: assignmentError } = await supabase
+      .from("exam_assignments")
+      .insert({
+        exam_id: data.id,
+        group_id,
+        assigned_by: user.id,
+      });
+
+    if (assignmentError) {
+      await supabase
+        .from("exams")
+        .delete()
+        .eq("id", data.id)
+        .eq("created_by", user.id);
+      return { error: assignmentError.message };
+    }
+  }
 
   revalidatePath("/educator");
   redirect(`/educator/exams/${data.id}/questions`);

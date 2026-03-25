@@ -151,6 +151,46 @@ function getPercentage(totalScore: number, maxScore: number) {
   return maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
 }
 
+function normalizeTextAnswer(value: string | null | undefined) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function parseAnswerArray(value: string | null | undefined) {
+  try {
+    const parsed = JSON.parse(String(value ?? "[]")) as string[];
+    return Array.isArray(parsed)
+      ? parsed.map((item) => normalizeTextAnswer(item)).filter(Boolean).sort()
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function areArraysEqual(left: string[], right: string[]) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+function parseMatchingPairs(options: unknown) {
+  if (!Array.isArray(options)) return [];
+
+  return options
+    .map((option) => {
+      const [left, right] = String(option).split("|||");
+      if (!left || !right) return null;
+
+      return {
+        left,
+        right: normalizeTextAnswer(right),
+      };
+    })
+    .filter(
+      (item): item is { left: string; right: string } => Boolean(item)
+    );
+}
+
 /**
  * Оюутанд оноогдсон шалгалтуудыг авах
  * exam_recipients → exams
@@ -472,7 +512,7 @@ export async function submitExam(sessionId: string) {
     const [{ data: answers }, { data: questions }] = await Promise.all([
       supabase
         .from("answers")
-        .select("id, answer, score, questions(type, correct_answer, points)")
+        .select("id, answer, score, questions(type, correct_answer, points, options)")
         .eq("session_id", sessionId),
       supabase
         .from("questions")
@@ -494,12 +534,55 @@ export async function submitExam(sessionId: string) {
 
       if (
         question.type === "multiple_choice" ||
-        question.type === "true_false" ||
         question.type === "fill_blank"
       ) {
         const isCorrect =
-          ans.answer?.trim().toLowerCase() ===
-          question.correct_answer?.trim().toLowerCase();
+          normalizeTextAnswer(ans.answer) ===
+          normalizeTextAnswer(question.correct_answer);
+        const score = isCorrect ? Number(question.points ?? 0) : 0;
+        totalScore += score;
+
+        await supabase
+          .from("answers")
+          .update({
+            is_correct: isCorrect,
+            score,
+          })
+          .eq("id", ans.id);
+      } else if (question.type === "multiple_response") {
+        const isCorrect = areArraysEqual(
+          parseAnswerArray(ans.answer),
+          parseAnswerArray(question.correct_answer)
+        );
+        const score = isCorrect ? Number(question.points ?? 0) : 0;
+        totalScore += score;
+
+        await supabase
+          .from("answers")
+          .update({
+            is_correct: isCorrect,
+            score,
+          })
+          .eq("id", ans.id);
+      } else if (question.type === "matching") {
+        let submittedAnswer: Record<string, string> = {};
+
+        try {
+          submittedAnswer = JSON.parse(String(ans.answer ?? "{}")) as Record<
+            string,
+            string
+          >;
+        } catch {
+          submittedAnswer = {};
+        }
+
+        const expectedPairs = parseMatchingPairs(question.options);
+        const isCorrect =
+          expectedPairs.length > 0 &&
+          expectedPairs.every(
+            (pair) =>
+              normalizeTextAnswer(submittedAnswer[pair.left]) === pair.right
+          );
         const score = isCorrect ? Number(question.points ?? 0) : 0;
         totalScore += score;
 

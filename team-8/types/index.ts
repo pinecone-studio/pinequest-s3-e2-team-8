@@ -48,7 +48,12 @@ export interface Exam {
   updated_at: string;
 }
 
-export type QuestionType = "multiple_choice" | "true_false" | "essay" | "fill_blank";
+export type QuestionType =
+  | "multiple_choice"
+  | "multiple_response"
+  | "essay"
+  | "fill_blank"
+  | "matching";
 export type Difficulty = "easy" | "medium" | "hard";
 
 export interface Question {
