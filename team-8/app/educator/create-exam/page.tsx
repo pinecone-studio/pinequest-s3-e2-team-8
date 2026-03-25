@@ -1,10 +1,12 @@
+import { getTeacherSubjects } from "@/lib/subject/actions";
 import { getGroups } from "@/lib/group/actions";
-import { getSubjects } from "@/lib/subject/actions";
 import ExamForm from "./_features/ExamForm";
 
 export default async function CreateExamPage() {
-  const subjects = await getSubjects();
-  const groups = await getGroups();
+  const [subjects, groups] = await Promise.all([
+    getTeacherSubjects(),
+    getGroups(),
+  ]);
 
   return (
     <div className="space-y-6">

@@ -12,6 +12,7 @@ import {
   getGroupAssignmentConflictError,
   getGroupMemberConflictError,
 } from "@/lib/exam-conflicts";
+import { getAllowedGroupIds, getAllTeachingGroupIds, isAdminUser } from "@/lib/teacher/permissions";
 
 // ==========================================
 // БҮЛЭГ CRUD
@@ -21,6 +22,10 @@ export async function createGroup(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
+
+  if (!(await isAdminUser(supabase, user.id))) {
+    return { error: "Зөвхөн admin бүлэг үүсгэж чадна" };
+  }
 
   const name = formData.get("name") as string;
   const grade = parseInt(formData.get("grade") as string) || null;
@@ -45,12 +50,31 @@ export async function getGroups() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const { data } = await supabase
+  // Admin sees all groups; teacher sees groups from teaching_assignments + own created groups
+  const teachingGroupIds = await getAllTeachingGroupIds(supabase, user.id);
+
+  if (teachingGroupIds === null) {
+    // Admin — all groups
+    const { data } = await supabase
+      .from("student_groups")
+      .select("*, student_group_members(count)")
+      .order("created_at", { ascending: false });
+    return data ?? [];
+  }
+
+  // Teacher: groups they teach in OR created themselves
+  let query = supabase
     .from("student_groups")
     .select("*, student_group_members(count)")
-    .eq("created_by", user.id)
     .order("created_at", { ascending: false });
 
+  if (teachingGroupIds.length > 0) {
+    query = query.or(`id.in.(${teachingGroupIds.join(",")}),created_by.eq.${user.id}`);
+  } else {
+    query = query.eq("created_by", user.id);
+  }
+
+  const { data } = await query;
   return data ?? [];
 }
 
@@ -59,13 +83,33 @@ export async function getGroupById(groupId: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data } = await supabase
+  const teachingGroupIds = await getAllTeachingGroupIds(supabase, user.id);
+
+  // Admin can see any group
+  if (teachingGroupIds === null) {
+    const { data } = await supabase
+      .from("student_groups")
+      .select("*")
+      .eq("id", groupId)
+      .maybeSingle();
+    return data;
+  }
+
+  // Teacher: must be in their teaching assignments or created by them
+  const canAccess = teachingGroupIds.includes(groupId);
+
+  let query = supabase
     .from("student_groups")
     .select("*")
-    .eq("id", groupId)
-    .eq("created_by", user.id)
-    .maybeSingle();
+    .eq("id", groupId);
 
+  if (canAccess) {
+    // Teaching assignment grants access regardless of creator
+  } else {
+    query = query.eq("created_by", user.id);
+  }
+
+  const { data } = await query.maybeSingle();
   return data;
 }
 
@@ -79,11 +123,14 @@ export async function deleteGroup(groupId: string) {
 
   if (impactedExamsError) return { error: impactedExamsError };
 
+  if (!(await isAdminUser(supabase, user.id))) {
+    return { error: "Зөвхөн admin бүлэг устгаж чадна" };
+  }
+
   const { error } = await supabase
     .from("student_groups")
     .delete()
-    .eq("id", groupId)
-    .eq("created_by", user.id);
+    .eq("id", groupId);
 
   if (error) return { error: error.message };
 
@@ -118,6 +165,10 @@ export async function addMemberToGroup(groupId: string, studentEmail: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
+
+  if (!(await isAdminUser(supabase, user.id))) {
+    return { error: "Зөвхөн admin бүлгийн гишүүн нэмж чадна" };
+  }
 
   // Сурагчийг email-ээр хайх
   const { data: student } = await supabase
@@ -168,6 +219,10 @@ export async function removeMemberFromGroup(groupId: string, studentId: string) 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
 
+  if (!(await isAdminUser(supabase, user.id))) {
+    return { error: "Зөвхөн admin бүлгийн гишүүн хасаж чадна" };
+  }
+
   const { error } = await supabase
     .from("student_group_members")
     .delete()
@@ -212,12 +267,28 @@ export async function assignExamToGroup(groupId: string, examId: string) {
 
   const { data: exam } = await supabase
     .from("exams")
-    .select("id, is_published")
+    .select("id, is_published, subject_id")
     .eq("id", examId)
     .eq("created_by", user.id)
     .maybeSingle();
 
   if (!exam) return { error: "Таны шалгалт олдсонгүй" };
+
+  // Strict teaching-assignment guard
+  const allowedGroupIds = await getAllowedGroupIds(
+    supabase,
+    user.id,
+    exam.subject_id ?? ""
+  );
+  if (allowedGroupIds !== null) {
+    // Non-admin teacher
+    if (!exam.subject_id) {
+      return { error: "Хичээл тодорхойлогдоогүй шалгалтыг бүлэгт оноох боломжгүй" };
+    }
+    if (!allowedGroupIds.includes(groupId)) {
+      return { error: "Энэ бүлэгт энэ хичээлийн шалгалт оноох эрх байхгүй байна" };
+    }
+  }
 
   const conflictError = await getGroupAssignmentConflictError(
     supabase,
@@ -310,6 +381,18 @@ export async function getAvailableExams(groupId?: string) {
   );
 
   return examsWithConflicts;
+}
+
+/** All groups visible to admin (no created_by filter). */
+export async function getAllGroupsAdmin() {
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("student_groups")
+    .select("id, name, grade, group_type, created_by, created_at, student_group_members(count)")
+    .order("created_at", { ascending: false });
+
+  return data ?? [];
 }
 
 // Бүх сурагчдыг авах (хайлт хийхэд)

@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { addQuestion } from "@/lib/question/actions";
+import type { QuestionPassage, QuestionType } from "@/types";
+import MathContent from "@/components/math/MathContent";
+import LatexShortcutPanel from "@/components/math/LatexShortcutPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,11 +18,13 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PlusCircle, Trash2 } from "lucide-react";
-import type { QuestionPassage, QuestionType } from "@/types";
+
+const SCIENCE_SUBJECTS = ["Математик", "Физик", "Хими", "Мэдээлэл зүй"];
 
 interface Props {
   examId: string;
   passages: QuestionPassage[];
+  subjectName: string | null;
 }
 
 interface MatchingPair {
@@ -55,21 +60,42 @@ const questionTypes: { value: QuestionType; label: string; hint: string }[] = [
   },
 ];
 
+const difficultyOptions = [
+  { value: "easy", label: "Хялбар" },
+  { value: "medium", label: "Дунд" },
+  { value: "hard", label: "Хэцүү" },
+];
+
 function createEmptyMatchingPair(): MatchingPair {
   return { left: "", right: "" };
 }
 
-export default function AddQuestionForm({ examId }: Props) {
+export default function AddQuestionForm({
+  examId,
+  passages,
+  subjectName,
+}: Props) {
+  const showLatexPanel =
+    subjectName == null || SCIENCE_SUBJECTS.includes(subjectName);
   const [type, setType] = useState<QuestionType>("multiple_choice");
+  const [difficulty, setDifficulty] = useState("medium");
+  const [selectedPassageId, setSelectedPassageId] = useState("__none");
   const [options, setOptions] = useState(["", ""]);
   const [correctAnswer, setCorrectAnswer] = useState("");
-  const [multipleCorrectAnswers, setMultipleCorrectAnswers] = useState<string[]>([]);
+  const [multipleCorrectAnswers, setMultipleCorrectAnswers] = useState<
+    string[]
+  >([]);
   const [matchingPairs, setMatchingPairs] = useState<MatchingPair[]>([
     createEmptyMatchingPair(),
     createEmptyMatchingPair(),
   ]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const selectedPassage =
+    selectedPassageId === "__none"
+      ? null
+      : passages.find((passage) => passage.id === selectedPassageId) ?? null;
 
   function resetTypeState(nextType: QuestionType) {
     setType(nextType);
@@ -154,13 +180,11 @@ export default function AddQuestionForm({ examId }: Props) {
     setError(null);
 
     formData.set("type", type);
-    formData.set("points", "1");
-    formData.set("difficulty", "medium");
-    formData.set("tags", "");
-    formData.set("content_html", "");
-    formData.set("image_url", "");
-    formData.set("explanation", "");
-    formData.set("passage_id", "");
+    formData.set("difficulty", difficulty);
+    formData.set(
+      "passage_id",
+      selectedPassageId === "__none" ? "" : selectedPassageId
+    );
 
     if (type === "multiple_choice") {
       const validOptions = options.map((option) => option.trim()).filter(Boolean);
@@ -235,7 +259,9 @@ export default function AddQuestionForm({ examId }: Props) {
       return;
     }
 
-    resetTypeState(type);
+    resetTypeState("multiple_choice");
+    setDifficulty("medium");
+    setSelectedPassageId("__none");
     const form = document.getElementById("question-form") as HTMLFormElement | null;
     form?.reset();
     setLoading(false);
@@ -254,23 +280,101 @@ export default function AddQuestionForm({ examId }: Props) {
             </div>
           )}
 
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Асуултын төрөл</Label>
+              <Select
+                value={type}
+                onValueChange={(value) => resetTypeState(value as QuestionType)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {questionTypes.map((questionType) => (
+                    <SelectItem key={questionType.value} value={questionType.value}>
+                      {questionType.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-sm text-muted-foreground">
+                {questionTypes.find((item) => item.value === type)?.hint}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="points">Оноо</Label>
+              <Input
+                id="points"
+                name="points"
+                type="number"
+                min="0.5"
+                step="0.5"
+                defaultValue="1"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Хүндрэлийн түвшин</Label>
+              <Select value={difficulty} onValueChange={setDifficulty}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {difficultyOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tags">Tag-ууд</Label>
+              <Input
+                id="tags"
+                name="tags"
+                placeholder="algebra, grade-10, chapter-2"
+              />
+            </div>
+          </div>
+
           <div className="space-y-2">
-            <Label>Асуултын төрөл</Label>
-            <Select value={type} onValueChange={(value) => resetTypeState(value as QuestionType)}>
+            <Label>Shared passage block</Label>
+            <Select value={selectedPassageId} onValueChange={setSelectedPassageId}>
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder="Passage сонгохгүй" />
               </SelectTrigger>
               <SelectContent>
-                {questionTypes.map((questionType) => (
-                  <SelectItem key={questionType.value} value={questionType.value}>
-                    {questionType.label}
+                <SelectItem value="__none">Холбохгүй</SelectItem>
+                {passages.map((passage, index) => (
+                  <SelectItem key={passage.id} value={passage.id}>
+                    {passage.title || `Block ${index + 1}`}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-sm text-muted-foreground">
-              {questionTypes.find((item) => item.value === type)?.hint}
+            <p className="text-xs text-muted-foreground">
+              Унших эх, зураг, formula context-ийг олон асуулттай холбоход
+              ашиглана.
             </p>
+            {selectedPassage && (
+              <div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Сонгосон passage
+                </p>
+                {selectedPassage.title && (
+                  <p className="font-medium">{selectedPassage.title}</p>
+                )}
+                <MathContent
+                  html={selectedPassage.content_html}
+                  text={selectedPassage.content}
+                  className="prose prose-sm max-w-none text-foreground"
+                />
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -284,6 +388,29 @@ export default function AddQuestionForm({ examId }: Props) {
             />
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="content_html">
+              Форматтай контент (HTML, заавал биш)
+            </Label>
+            <Textarea
+              id="content_html"
+              name="content_html"
+              placeholder="<p>LaTeX, тайлбар, унших эхийн форматтай хувилбар...</p>"
+              rows={4}
+            />
+            {showLatexPanel && <LatexShortcutPanel targetId="content_html" />}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="image_url">Зургийн URL (заавал биш)</Label>
+            <Input
+              id="image_url"
+              name="image_url"
+              type="url"
+              placeholder="https://example.com/question-image.png"
+            />
+          </div>
+
           {(type === "multiple_choice" || type === "multiple_response") && (
             <div className="space-y-3">
               <Label>Хариултууд</Label>
@@ -291,13 +418,18 @@ export default function AddQuestionForm({ examId }: Props) {
                 const isChecked =
                   type === "multiple_choice"
                     ? correctAnswer === option && option.trim() !== ""
-                    : multipleCorrectAnswers.includes(option) && option.trim() !== "";
+                    : multipleCorrectAnswers.includes(option) &&
+                      option.trim() !== "";
 
                 return (
                   <div key={index} className="flex items-center gap-2">
                     <input
                       type={type === "multiple_choice" ? "radio" : "checkbox"}
-                      name={type === "multiple_choice" ? "correct_option" : `correct_option_${index}`}
+                      name={
+                        type === "multiple_choice"
+                          ? "correct_option"
+                          : `correct_option_${index}`
+                      }
                       checked={isChecked}
                       onChange={() =>
                         type === "multiple_choice"
@@ -354,7 +486,10 @@ export default function AddQuestionForm({ examId }: Props) {
             <div className="space-y-3">
               <Label>Холбох мөрүүд</Label>
               {matchingPairs.map((pair, index) => (
-                <div key={index} className="grid gap-2 md:grid-cols-[1fr_auto_1fr_auto] md:items-center">
+                <div
+                  key={index}
+                  className="grid gap-2 md:grid-cols-[1fr_auto_1fr_auto] md:items-center"
+                >
                   <Input
                     value={pair.left}
                     onChange={(event) =>
@@ -362,7 +497,9 @@ export default function AddQuestionForm({ examId }: Props) {
                     }
                     placeholder={`Зүүн тал ${index + 1}`}
                   />
-                  <span className="text-center text-sm text-muted-foreground">→</span>
+                  <span className="text-center text-sm text-muted-foreground">
+                    →
+                  </span>
                   <Input
                     value={pair.right}
                     onChange={(event) =>
@@ -382,12 +519,26 @@ export default function AddQuestionForm({ examId }: Props) {
                   )}
                 </div>
               ))}
-              <Button type="button" variant="outline" size="sm" onClick={addMatchingPair}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addMatchingPair}
+              >
                 <PlusCircle className="mr-2 h-4 w-4" />
                 Мөр нэмэх
               </Button>
             </div>
           )}
+
+          <div className="space-y-2">
+            <Label htmlFor="explanation">Тайлбар (заавал биш)</Label>
+            <Input
+              id="explanation"
+              name="explanation"
+              placeholder="Зөв хариултын тайлбар..."
+            />
+          </div>
 
           <Button type="submit" disabled={loading} className="w-full">
             {loading ? "Нэмж байна..." : "Асуулт нэмэх"}

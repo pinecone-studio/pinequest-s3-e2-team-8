@@ -14,7 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreVertical, PlusCircle } from "lucide-react";
+import { BarChart2, MoreVertical, PlusCircle } from "lucide-react";
 
 interface Exam {
   id: string;
@@ -96,6 +96,14 @@ export default function ExamList({ exams }: Props) {
                   <DropdownMenuItem asChild>
                     <Link href={`/educator/exams/${exam.id}/questions`}>Асуулт засах</Link>
                   </DropdownMenuItem>
+                  {exam.is_published && (
+                    <DropdownMenuItem asChild>
+                      <Link href={`/educator/exams/${exam.id}/results`}>
+                        <BarChart2 className="mr-2 h-4 w-4" />
+                        Дүн харах
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
                   {!exam.is_published && (
                     <DropdownMenuItem asChild>
                       <Link href={`/educator/exams/${exam.id}/edit`}>Шалгалт засах</Link>

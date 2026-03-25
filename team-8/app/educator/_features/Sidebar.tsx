@@ -9,6 +9,7 @@ import {
   FileText,
   CheckSquare,
   Users,
+  CalendarDays,
   LucideIcon,
 } from "lucide-react";
 
@@ -25,6 +26,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { href: "/educator/question-bank", label: "Асуултын сан", icon: Database },
   { href: "/educator/groups", label: "Бүлгүүд", icon: Users },
   { href: "/educator/grading", label: "Дүн шалгах", icon: CheckSquare },
+  { href: "/educator/schedule", label: "Хуваарь", icon: CalendarDays },
 ];
 
 export default function Sidebar() {

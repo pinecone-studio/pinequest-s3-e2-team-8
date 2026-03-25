@@ -11,41 +11,69 @@ export async function getEducatorStats() {
 
   const now = new Date().toISOString();
 
-  const [examsRes, questionsRes, activeRes, pendingRes] = await Promise.all([
-    supabase
-      .from("exams")
-      .select("id", { count: "exact", head: true })
-      .eq("created_by", user.id),
-    supabase
-      .from("questions")
-      .select("id", { count: "exact", head: true })
-      .in(
-        "exam_id",
-        (
-          await supabase.from("exams").select("id").eq("created_by", user.id)
-        ).data?.map((e) => e.id) ?? []
-      ),
-    supabase
-      .from("exams")
-      .select("id", { count: "exact", head: true })
-      .eq("created_by", user.id)
-      .eq("is_published", true)
-      .lte("start_time", now)
-      .gte("end_time", now),
-    supabase
-      .from("exam_sessions")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "submitted")
-      .in(
-        "exam_id",
-        (
-          await supabase.from("exams").select("id").eq("created_by", user.id)
-        ).data?.map((e) => e.id) ?? []
-      ),
+  // Own exam IDs (for totalExams, totalQuestions, activeExams)
+  const { data: ownExams } = await supabase
+    .from("exams")
+    .select("id")
+    .eq("created_by", user.id);
+  const ownExamIds = (ownExams ?? []).map((e) => e.id);
+
+  // Teaching-scope exam IDs (for pendingGrading — includes admin-created exams assigned to teacher's groups)
+  const teachingScopeExamIds = new Set<string>(ownExamIds);
+
+  const { data: teachingRows } = await supabase
+    .from("teaching_assignments")
+    .select("group_id, subject_id")
+    .eq("teacher_id", user.id)
+    .eq("is_active", true);
+
+  if (teachingRows && teachingRows.length > 0) {
+    const groupIds = [...new Set(teachingRows.map((r) => r.group_id))];
+    const { data: assignedExams } = await supabase
+      .from("exam_assignments")
+      .select("exam_id, group_id, exams(subject_id)")
+      .in("group_id", groupIds);
+
+    for (const ae of assignedExams ?? []) {
+      const subjectId = Array.isArray(ae.exams)
+        ? ae.exams[0]?.subject_id
+        : (ae.exams as { subject_id: string } | null)?.subject_id;
+      // Must match both subject AND group (not just subject)
+      if (teachingRows.find((ta) => ta.subject_id === subjectId && ta.group_id === ae.group_id)) {
+        teachingScopeExamIds.add(ae.exam_id);
+      }
+    }
+  }
+
+  const scopeExamIds = [...teachingScopeExamIds];
+
+  const [questionsRes, activeRes, pendingRes] = await Promise.all([
+    ownExamIds.length > 0
+      ? supabase
+          .from("questions")
+          .select("id", { count: "exact", head: true })
+          .in("exam_id", ownExamIds)
+      : Promise.resolve({ count: 0 }),
+    ownExamIds.length > 0
+      ? supabase
+          .from("exams")
+          .select("id", { count: "exact", head: true })
+          .in("id", ownExamIds)
+          .eq("is_published", true)
+          .lte("start_time", now)
+          .gte("end_time", now)
+      : Promise.resolve({ count: 0 }),
+    scopeExamIds.length > 0
+      ? supabase
+          .from("exam_sessions")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "submitted")
+          .in("exam_id", scopeExamIds)
+      : Promise.resolve({ count: 0 }),
   ]);
 
   return {
-    totalExams: examsRes.count ?? 0,
+    totalExams: ownExamIds.length,
     totalQuestions: questionsRes.count ?? 0,
     activeExams: activeRes.count ?? 0,
     pendingGrading: pendingRes.count ?? 0,

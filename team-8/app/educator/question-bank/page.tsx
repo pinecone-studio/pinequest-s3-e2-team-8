@@ -1,6 +1,6 @@
 import { getExamById } from "@/lib/exam/actions";
 import { getQuestionBank } from "@/lib/question/actions";
-import { getSubjects } from "@/lib/subject/actions";
+import { getTeacherSubjects } from "@/lib/subject/actions";
 import QuestionBankBrowser from "./_features/QuestionBankBrowser";
 
 interface QuestionBankPageProps {
@@ -15,7 +15,7 @@ export default async function QuestionBankPage({
   const { examId } = await searchParams;
   const [questions, subjects, targetExam] = await Promise.all([
     getQuestionBank(),
-    getSubjects(),
+    getTeacherSubjects(),
     examId ? getExamById(examId) : Promise.resolve(null),
   ]);
 

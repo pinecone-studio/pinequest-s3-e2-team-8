@@ -8,7 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Users, GraduationCap, BookOpen, ClipboardList } from "lucide-react";
+import { Users, GraduationCap, BookOpen, ClipboardList, School } from "lucide-react";
 
 export default async function AdminDashboard() {
   const stats = await getAdminStats();
@@ -20,12 +20,20 @@ export default async function AdminDashboard() {
           <h2 className="text-2xl font-bold tracking-tight">Сургалтын менежер</h2>
           <p className="text-muted-foreground">Системийн ерөнхий удирдлага</p>
         </div>
-        <Link href="/admin/users">
-          <Button variant="outline">
-            <Users className="mr-2 h-4 w-4" />
-            Хэрэглэгч удирдах
-          </Button>
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/admin/teachers">
+            <Button variant="outline">
+              <School className="mr-2 h-4 w-4" />
+              Хичээл оноолт
+            </Button>
+          </Link>
+          <Link href="/admin/users">
+            <Button variant="outline">
+              <Users className="mr-2 h-4 w-4" />
+              Хэрэглэгч удирдах
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

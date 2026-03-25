@@ -93,6 +93,23 @@ export interface QuestionBank {
   subjects?: { name: string } | null;
 }
 
+export interface TeacherSubject {
+  teacher_id: string;
+  subject_id: string;
+  assigned_by: string | null;
+  created_at: string;
+}
+
+export interface TeachingAssignment {
+  id: string;
+  teacher_id: string;
+  group_id: string;
+  subject_id: string;
+  is_active: boolean;
+  assigned_by: string | null;
+  created_at: string;
+}
+
 export type ExamSessionStatus = "in_progress" | "submitted" | "graded" | "timed_out";
 
 export interface ExamSession {

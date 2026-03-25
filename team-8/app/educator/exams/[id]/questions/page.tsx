@@ -9,6 +9,7 @@ import { publishExam } from "@/lib/exam/actions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import AddQuestionForm from "./_features/AddQuestionForm";
+import PassageManager from "./_features/PassageManager";
 import QuestionList from "./_features/QuestionList";
 import { ArrowLeft } from "lucide-react";
 
@@ -103,7 +104,12 @@ export default async function ExamQuestionsPage({ params }: Props) {
             </div>
           ) : (
             <>
-              <AddQuestionForm examId={id} passages={passages} />
+              <PassageManager examId={id} passages={passages} />
+              <AddQuestionForm
+                examId={id}
+                passages={passages}
+                subjectName={exam.subjects?.name ?? null}
+              />
             </>
           )}
         </div>
