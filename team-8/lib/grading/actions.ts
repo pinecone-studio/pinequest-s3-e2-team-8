@@ -35,7 +35,7 @@ async function canManageExam(
   // Admin can manage any exam
   if (await isAdminUser(supabase, userId)) return true;
 
-  // Owner can manage
+  // Owner can always manage their own exam
   const { data: exam } = await supabase
     .from("exams")
     .select("id, subject_id")
@@ -45,7 +45,8 @@ async function canManageExam(
 
   if (exam) return true;
 
-  // Teacher with teaching assignment for the exam's subject can also manage
+  // Teacher can manage if they have a teaching_assignment for the exam's subject
+  // in one of the groups the exam is actually assigned to (group-specific, not subject-wide)
   const { data: examData } = await supabase
     .from("exams")
     .select("subject_id")
@@ -54,16 +55,28 @@ async function canManageExam(
 
   if (!examData?.subject_id) return false;
 
-  const { data: assignment } = await supabase
+  // Get groups this exam is assigned to
+  const { data: examAssignments } = await supabase
+    .from("exam_assignments")
+    .select("group_id")
+    .eq("exam_id", examId);
+
+  if (!examAssignments || examAssignments.length === 0) return false;
+
+  const groupIds = examAssignments.map((a) => a.group_id);
+
+  // Check if teacher has an active teaching_assignment for this subject in any of those groups
+  const { data: ta } = await supabase
     .from("teaching_assignments")
     .select("id")
     .eq("teacher_id", userId)
     .eq("subject_id", examData.subject_id)
+    .in("group_id", groupIds)
     .eq("is_active", true)
     .limit(1)
     .maybeSingle();
 
-  return !!assignment;
+  return !!ta;
 }
 
 export async function getPendingSubmissions() {
@@ -96,20 +109,33 @@ export async function getPendingSubmissions() {
 
   for (const e of ownExams ?? []) examIdSet.add(e.id);
 
-  // Exams for subjects the teacher is assigned to
-  const { data: tsRows } = await supabase
-    .from("teacher_subjects")
-    .select("subject_id")
-    .eq("teacher_id", user.id);
+  // Exams assigned to groups where teacher has an active teaching_assignment
+  // (subject must match — group-specific, not subject-wide)
+  const { data: teachingRows } = await supabase
+    .from("teaching_assignments")
+    .select("group_id, subject_id")
+    .eq("teacher_id", user.id)
+    .eq("is_active", true);
 
-  if (tsRows && tsRows.length > 0) {
-    const subjectIds = tsRows.map((r) => r.subject_id);
-    const { data: subjectExams } = await supabase
-      .from("exams")
-      .select("id")
-      .in("subject_id", subjectIds);
+  if (teachingRows && teachingRows.length > 0) {
+    const groupIds = [...new Set(teachingRows.map((r) => r.group_id))];
 
-    for (const e of subjectExams ?? []) examIdSet.add(e.id);
+    const { data: assignedExams } = await supabase
+      .from("exam_assignments")
+      .select("exam_id, exams(subject_id)")
+      .in("group_id", groupIds);
+
+    for (const ae of assignedExams ?? []) {
+      const examSubjectId = Array.isArray(ae.exams)
+        ? ae.exams[0]?.subject_id
+        : (ae.exams as { subject_id: string } | null)?.subject_id;
+
+      // Only include if the exam's subject matches the teacher's teaching assignment for that group
+      const validTA = teachingRows.find(
+        (ta) => ta.subject_id === examSubjectId
+      );
+      if (validTA) examIdSet.add(ae.exam_id);
+    }
   }
 
   const examIds = [...examIdSet];

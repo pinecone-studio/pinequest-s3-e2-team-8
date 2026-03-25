@@ -40,8 +40,8 @@ export async function getTeacherSubjects() {
     .select("subjects(id, name, description, created_by, created_at)")
     .eq("teacher_id", user.id);
 
-  // No assignments yet → fall back to all subjects (permissive)
-  if (!rows || rows.length === 0) return getSubjects();
+  // No assignments yet → strict: teacher has access to nothing until admin assigns
+  if (!rows || rows.length === 0) return [];
 
   // Supabase may return the FK join as object or array — normalise to object[]
   return rows.flatMap((r) => {
