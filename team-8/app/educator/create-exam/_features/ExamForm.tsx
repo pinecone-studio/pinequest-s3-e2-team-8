@@ -7,10 +7,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
-export default function ExamForm() {
+interface SubjectOption {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
+export default function ExamForm({ subjects }: { subjects: SubjectOption[] }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [subjectId, setSubjectId] = useState("__none");
 
   async function handleSubmit(formData: FormData) {
     setLoading(true);
@@ -41,6 +55,28 @@ export default function ExamForm() {
           </div>
 
           <div className="space-y-2">
+            <Label>Хичээл</Label>
+            <Select value={subjectId} onValueChange={setSubjectId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Хичээл сонгох" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none">Сонгоогүй</SelectItem>
+                {subjects.map((subject) => (
+                  <SelectItem key={subject.id} value={subject.id}>
+                    {subject.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <input
+              type="hidden"
+              name="subject_id"
+              value={subjectId === "__none" ? "" : subjectId}
+            />
+          </div>
+
+          <div className="space-y-2">
             <Label htmlFor="description">Тайлбар</Label>
             <Textarea id="description" name="description" placeholder="Шалгалтын тухай товч мэдээлэл..." rows={3} />
           </div>
@@ -67,11 +103,32 @@ export default function ExamForm() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <input type="checkbox" id="shuffle_questions" name="shuffle_questions" className="h-4 w-4 rounded border" />
-            <Label htmlFor="shuffle_questions" className="cursor-pointer font-normal">
-              Асуултыг санамсаргүй дарааллаар гаргах
-            </Label>
+          <div className="space-y-2">
+            <Label htmlFor="max_attempts">Оролдлогын тоо</Label>
+            <Input
+              id="max_attempts"
+              name="max_attempts"
+              type="number"
+              min="1"
+              max="10"
+              placeholder="1"
+              defaultValue="1"
+            />
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="shuffle_questions" name="shuffle_questions" className="h-4 w-4 rounded border" />
+              <Label htmlFor="shuffle_questions" className="cursor-pointer font-normal">
+                Асуултыг санамсаргүй дарааллаар гаргах
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="shuffle_options" name="shuffle_options" className="h-4 w-4 rounded border" />
+              <Label htmlFor="shuffle_options" className="cursor-pointer font-normal">
+                Сонголтуудын дарааллыг холих
+              </Label>
+            </div>
           </div>
 
           <Button type="submit" disabled={loading} className="w-full">

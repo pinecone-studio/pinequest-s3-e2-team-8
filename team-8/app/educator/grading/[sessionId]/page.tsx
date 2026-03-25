@@ -12,5 +12,11 @@ export default async function GradingDetailPage({
 
   if (!data) redirect("/educator/grading");
 
-  return <GradingForm session={data.session} answers={data.answers} />;
+  return (
+    <GradingForm
+      session={data.session}
+      answers={data.answers}
+      proctorEvents={data.proctorEvents}
+    />
+  );
 }

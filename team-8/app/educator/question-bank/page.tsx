@@ -1,58 +1,48 @@
+import { getExamById } from "@/lib/exam/actions";
 import { getQuestionBank } from "@/lib/question/actions";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { getSubjects } from "@/lib/subject/actions";
+import QuestionBankBrowser from "./_features/QuestionBankBrowser";
 
-const typeLabels: Record<string, string> = {
-  multiple_choice: "Сонголтот",
-  true_false: "Үнэн/Худал",
-  essay: "Нээлттэй",
-  fill_blank: "Цоорхой",
-};
+interface QuestionBankPageProps {
+  searchParams: Promise<{
+    examId?: string;
+  }>;
+}
 
-export default async function QuestionBankPage() {
-  const questions = await getQuestionBank();
+export default async function QuestionBankPage({
+  searchParams,
+}: QuestionBankPageProps) {
+  const { examId } = await searchParams;
+  const [questions, subjects, targetExam] = await Promise.all([
+    getQuestionBank(),
+    getSubjects(),
+    examId ? getExamById(examId) : Promise.resolve(null),
+  ]);
+
+  const importUnavailableMessage = examId
+    ? !targetExam
+      ? "Сонгосон шалгалт олдсонгүй эсвэл танд эрх алга."
+      : targetExam.is_published
+        ? "Нийтлэгдсэн шалгалтад сангаас асуулт оруулах боломжгүй."
+        : null
+    : null;
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Асуултын сан</h2>
         <p className="text-muted-foreground">
-          Таны үүсгэсэн бүх асуултууд · Нийт {questions.length}
+          Дахин ашиглах боломжтой асуултууд · Нийт {questions.length}
         </p>
       </div>
 
-      {questions.length === 0 ? (
-        <div className="rounded-lg border border-dashed py-16 text-center text-muted-foreground">
-          Асуулт байхгүй байна. Шалгалт үүсгэж асуулт нэмнэ үү.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {questions.map((q, idx) => (
-            <Card key={q.id}>
-              <CardContent className="flex items-start gap-4 pt-4">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
-                  {idx + 1}
-                </span>
-                <div className="flex-1 space-y-2">
-                  <p className="text-sm font-medium leading-snug">{q.content}</p>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">{typeLabels[q.type] ?? q.type}</Badge>
-                    <Badge variant="outline">{q.points} оноо</Badge>
-                    {q.difficulty && (
-                      <Badge variant="secondary">{q.difficulty}</Badge>
-                    )}
-                    {(q as { exams?: { title: string } }).exams?.title && (
-                      <Badge variant="outline" className="text-xs text-muted-foreground">
-                        {(q as { exams?: { title: string } }).exams!.title}
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <QuestionBankBrowser
+        questions={questions}
+        subjects={subjects}
+        examId={!importUnavailableMessage ? targetExam?.id : undefined}
+        examTitle={!importUnavailableMessage ? targetExam?.title : undefined}
+        importUnavailableMessage={importUnavailableMessage}
+      />
     </div>
   );
 }

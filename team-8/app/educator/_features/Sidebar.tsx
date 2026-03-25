@@ -6,11 +6,9 @@ import {
   LayoutDashboard,
   Database,
   FilePlus,
-  Calendar,
   FileText,
   CheckSquare,
-  BarChart3,
-  Settings,
+  Users,
   LucideIcon,
 } from "lucide-react";
 
@@ -25,10 +23,8 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { href: "/educator/exams", label: "Шалгалтууд", icon: FileText },
   { href: "/educator/create-exam", label: "Шалгалт үүсгэх", icon: FilePlus },
   { href: "/educator/question-bank", label: "Асуултын сан", icon: Database },
+  { href: "/educator/groups", label: "Бүлгүүд", icon: Users },
   { href: "/educator/grading", label: "Дүн шалгах", icon: CheckSquare },
-  { href: "/educator/exam-schedule", label: "Хуваарь", icon: Calendar },
-  { href: "/educator/analytics", label: "Тайлан", icon: BarChart3 },
-  { href: "/educator/settings", label: "Тохиргоо", icon: Settings },
 ];
 
 export default function Sidebar() {

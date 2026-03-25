@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -6,18 +7,25 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { getExamResult } from "@/lib/student/actions";
 
 export default async function ExamResultPage({
-  searchParams,
+  params,
 }: {
-  searchParams: Promise<{ score?: string; max?: string; pct?: string }>;
+  params: Promise<{ id: string }>;
 }) {
-  const { score, max, pct } = await searchParams;
-  const totalScore = parseFloat(score ?? "0");
-  const maxScore = parseFloat(max ?? "0");
-  const percentage = parseInt(pct ?? "0");
+  const { id: examId } = await params;
+  const session = await getExamResult(examId);
 
-  const passed = percentage >= 60;
+  if (!session) redirect("/student/exams");
+
+  const totalScore = session.total_score ?? 0;
+  const maxScore = session.max_score ?? 0;
+  const percentage =
+    maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
+  const passingScore = session.exams?.passing_score ?? 60;
+  const passed = percentage >= passingScore;
+  const isGraded = session.status === "graded";
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center p-4">
@@ -49,10 +57,17 @@ export default async function ExamResultPage({
             </p>
           </div>
 
-          <p className="text-sm text-muted-foreground">
-            Нээлттэй хариулт (essay) асуултуудыг багш шалгасны дараа эцсийн
-            оноо өөрчлөгдөж болно.
-          </p>
+          {!isGraded && (
+            <p className="text-sm text-muted-foreground">
+              Нээлттэй хариулт (essay) асуултуудыг багш шалгасны дараа эцсийн
+              оноо өөрчлөгдөж болно.
+            </p>
+          )}
+          {isGraded && (
+            <p className="text-sm font-medium text-green-600">
+              ✓ Багш шалгаж дүн баталгаажсан
+            </p>
+          )}
 
           <div className="flex gap-2">
             <Link href="/student/exams" className="flex-1">

@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { addQuestion } from "@/lib/question/actions";
+import type { QuestionPassage } from "@/types";
+import MathContent from "@/components/math/MathContent";
+import LatexShortcutPanel from "@/components/math/LatexShortcutPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,20 +21,34 @@ import { PlusCircle, Trash2 } from "lucide-react";
 
 interface Props {
   examId: string;
+  passages: QuestionPassage[];
 }
 
 const questionTypes = [
   { value: "multiple_choice", label: "Сонголтот (MC)" },
   { value: "true_false", label: "Үнэн/Худал" },
   { value: "essay", label: "Нээлттэй хариулт" },
+  { value: "fill_blank", label: "Нөхөх" },
 ];
 
-export default function AddQuestionForm({ examId }: Props) {
+const difficultyOptions = [
+  { value: "easy", label: "Хялбар" },
+  { value: "medium", label: "Дунд" },
+  { value: "hard", label: "Хэцүү" },
+];
+
+export default function AddQuestionForm({ examId, passages }: Props) {
   const [type, setType] = useState("multiple_choice");
+  const [difficulty, setDifficulty] = useState("medium");
+  const [selectedPassageId, setSelectedPassageId] = useState("__none");
   const [options, setOptions] = useState(["", "", "", ""]);
   const [correctAnswer, setCorrectAnswer] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const selectedPassage =
+    selectedPassageId === "__none"
+      ? null
+      : passages.find((passage) => passage.id === selectedPassageId) ?? null;
 
   function addOption() {
     setOptions([...options, ""]);
@@ -62,6 +79,13 @@ export default function AddQuestionForm({ examId }: Props) {
       formData.set("correct_answer", correctAnswer);
     } else if (type === "true_false") {
       formData.set("correct_answer", correctAnswer || "Үнэн");
+    } else if (type === "fill_blank") {
+      if (!correctAnswer.trim()) {
+        setError("Нөхөх асуултын зөв хариултыг оруулна уу");
+        setLoading(false);
+        return;
+      }
+      formData.set("correct_answer", correctAnswer.trim());
     }
 
     const result = await addQuestion(examId, formData);
@@ -71,6 +95,8 @@ export default function AddQuestionForm({ examId }: Props) {
       // Reset form
       setOptions(["", "", "", ""]);
       setCorrectAnswer("");
+      setDifficulty("medium");
+      setSelectedPassageId("__none");
       const form = document.getElementById("question-form") as HTMLFormElement;
       form?.reset();
     }
@@ -119,9 +145,97 @@ export default function AddQuestionForm({ examId }: Props) {
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Хүндрэлийн түвшин</Label>
+              <Select value={difficulty} onValueChange={setDifficulty}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {difficultyOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <input type="hidden" name="difficulty" value={difficulty} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tags">Tag-ууд</Label>
+              <Input
+                id="tags"
+                name="tags"
+                placeholder="algebra, grade-10, chapter-2"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Shared passage block</Label>
+            <Select value={selectedPassageId} onValueChange={setSelectedPassageId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Passage сонгохгүй" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none">Холбохгүй</SelectItem>
+                {passages.map((passage, index) => (
+                  <SelectItem key={passage.id} value={passage.id}>
+                    {passage.title || `Block ${index + 1}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <input
+              type="hidden"
+              name="passage_id"
+              value={selectedPassageId === "__none" ? "" : selectedPassageId}
+            />
+            <p className="text-xs text-muted-foreground">
+              Унших эх, зураг, formula context-ийг олон асуулттай холбоход ашиглана.
+            </p>
+            {selectedPassage && (
+              <div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Сонгосон passage
+                </p>
+                {selectedPassage.title && (
+                  <p className="font-medium">{selectedPassage.title}</p>
+                )}
+                <MathContent
+                  html={selectedPassage.content_html}
+                  text={selectedPassage.content}
+                  className="prose prose-sm max-w-none text-foreground"
+                />
+              </div>
+            )}
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="content">Асуулт *</Label>
             <Textarea id="content" name="content" placeholder="Асуултаа энд бичнэ үү..." rows={3} required />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="content_html">Форматтай контент (HTML, заавал биш)</Label>
+            <Textarea
+              id="content_html"
+              name="content_html"
+              placeholder="<p>LaTeX, тайлбар, унших эхийн форматтай хувилбар...</p>"
+              rows={4}
+            />
+            <LatexShortcutPanel targetId="content_html" />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="image_url">Зургийн URL (заавал биш)</Label>
+            <Input
+              id="image_url"
+              name="image_url"
+              type="url"
+              placeholder="https://example.com/question-image.png"
+            />
           </div>
 
           {/* Multiple choice options */}
@@ -184,6 +298,18 @@ export default function AddQuestionForm({ examId }: Props) {
             <p className="text-sm text-muted-foreground">
               Нээлттэй хариултыг багш гараар үнэлнэ.
             </p>
+          )}
+
+          {type === "fill_blank" && (
+            <div className="space-y-2">
+              <Label htmlFor="fill_blank_answer">Зөв хариулт *</Label>
+              <Input
+                id="fill_blank_answer"
+                value={correctAnswer}
+                onChange={(e) => setCorrectAnswer(e.target.value)}
+                placeholder="Жишээ: 3x + 2"
+              />
+            </div>
           )}
 
           <div className="space-y-2">

@@ -19,15 +19,13 @@ const navItems: Record<UserRole, NavItem[]> = {
   teacher: [
     { label: "Хянах самбар", href: "/educator" },
     { label: "Шалгалт удирдах", href: "/educator/exams" },
-    { label: "Асуултын сан", href: "/educator/questions" },
+    { label: "Асуултын сан", href: "/educator/question-bank" },
+    { label: "Бүлгүүд", href: "/educator/groups" },
     { label: "Дүн", href: "/educator/grading" },
   ],
   admin: [
     { label: "Хянах самбар", href: "/admin" },
     { label: "Хэрэглэгчид", href: "/admin/users" },
-    { label: "Хичээлүүд", href: "/admin/subjects" },
-    { label: "Шалгалтууд", href: "/admin/exams" },
-    { label: "Тайлан", href: "/admin/reports" },
   ],
 };
 
