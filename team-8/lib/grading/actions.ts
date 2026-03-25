@@ -32,15 +32,38 @@ async function canManageExam(
   examId: string,
   userId: string
 ) {
+  // Admin can manage any exam
+  if (await isAdminUser(supabase, userId)) return true;
+
+  // Owner can manage
   const { data: exam } = await supabase
     .from("exams")
-    .select("id")
+    .select("id, subject_id")
     .eq("id", examId)
     .eq("created_by", userId)
     .maybeSingle();
 
   if (exam) return true;
-  return isAdminUser(supabase, userId);
+
+  // Teacher with teaching assignment for the exam's subject can also manage
+  const { data: examData } = await supabase
+    .from("exams")
+    .select("subject_id")
+    .eq("id", examId)
+    .maybeSingle();
+
+  if (!examData?.subject_id) return false;
+
+  const { data: assignment } = await supabase
+    .from("teaching_assignments")
+    .select("id")
+    .eq("teacher_id", userId)
+    .eq("subject_id", examData.subject_id)
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle();
+
+  return !!assignment;
 }
 
 export async function getPendingSubmissions() {
@@ -50,20 +73,52 @@ export async function getPendingSubmissions() {
   } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const { data: myExamIds } = await supabase
+  const admin = await isAdminUser(supabase, user.id);
+
+  // Collect exam IDs: owned + exams in teacher's subject scope
+  let examIdSet = new Set<string>();
+
+  if (admin) {
+    // Admin sees all pending submissions
+    const { data } = await supabase
+      .from("exam_sessions")
+      .select("*, exams(title), profiles(full_name, email)")
+      .eq("status", "submitted")
+      .order("submitted_at", { ascending: true });
+    return data ?? [];
+  }
+
+  // Teacher's own exams
+  const { data: ownExams } = await supabase
     .from("exams")
     .select("id")
     .eq("created_by", user.id);
 
-  if (!myExamIds || myExamIds.length === 0) return [];
+  for (const e of ownExams ?? []) examIdSet.add(e.id);
+
+  // Exams for subjects the teacher is assigned to
+  const { data: tsRows } = await supabase
+    .from("teacher_subjects")
+    .select("subject_id")
+    .eq("teacher_id", user.id);
+
+  if (tsRows && tsRows.length > 0) {
+    const subjectIds = tsRows.map((r) => r.subject_id);
+    const { data: subjectExams } = await supabase
+      .from("exams")
+      .select("id")
+      .in("subject_id", subjectIds);
+
+    for (const e of subjectExams ?? []) examIdSet.add(e.id);
+  }
+
+  const examIds = [...examIdSet];
+  if (examIds.length === 0) return [];
 
   const { data } = await supabase
     .from("exam_sessions")
     .select("*, exams(title), profiles(full_name, email)")
-    .in(
-      "exam_id",
-      myExamIds.map((e) => e.id)
-    )
+    .in("exam_id", examIds)
     .eq("status", "submitted")
     .order("submitted_at", { ascending: true });
 
@@ -86,10 +141,9 @@ export async function getSessionForGrading(sessionId: string) {
   if (!session) return null;
 
   const exam = getRelationObject(session.exams);
-  const canManage =
-    exam?.created_by === user.id ||
-    (await isAdminUser(supabase, user.id));
+  if (!exam) return null;
 
+  const canManage = await canManageExam(supabase, exam.id, user.id);
   if (!canManage) return null;
 
   const [{ data: answers }, proctorEventsResult] = await Promise.all([

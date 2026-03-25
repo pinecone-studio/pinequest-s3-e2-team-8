@@ -19,7 +19,7 @@ CREATE INDEX idx_teacher_subjects_subject ON public.teacher_subjects(subject_id)
 
 -- teaching_assignments: teacher teaches subject X in group Y
 CREATE TABLE public.teaching_assignments (
-  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
   teacher_id  UUID NOT NULL REFERENCES public.profiles(id)        ON DELETE CASCADE,
   group_id    UUID NOT NULL REFERENCES public.student_groups(id)  ON DELETE CASCADE,
   subject_id  UUID NOT NULL REFERENCES public.subjects(id)        ON DELETE CASCADE,

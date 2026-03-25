@@ -112,9 +112,16 @@ export async function addTeacherSubject(teacherId: string, subjectId: string) {
   return { success: true };
 }
 
-/** Remove a subject from a teacher. */
+/** Remove a subject from a teacher. Also deactivates related teaching assignments. */
 export async function removeTeacherSubject(teacherId: string, subjectId: string) {
   const supabase = await createClient();
+
+  // Deactivate teaching assignments for this teacher+subject
+  await supabase
+    .from("teaching_assignments")
+    .delete()
+    .eq("teacher_id", teacherId)
+    .eq("subject_id", subjectId);
 
   const { error } = await supabase
     .from("teacher_subjects")
@@ -137,6 +144,18 @@ export async function addTeachingAssignment(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
+
+  // Verify teacher has this subject assigned first
+  const { data: ts } = await supabase
+    .from("teacher_subjects")
+    .select("teacher_id")
+    .eq("teacher_id", teacherId)
+    .eq("subject_id", subjectId)
+    .maybeSingle();
+
+  if (!ts) {
+    return { error: "Энэ багшид эхлээд тухайн хичээлийг оноох шаардлагатай" };
+  }
 
   const { error } = await supabase
     .from("teaching_assignments")

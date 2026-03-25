@@ -55,13 +55,12 @@ export default function ExamForm({ subjects }: { subjects: SubjectOption[] }) {
           </div>
 
           <div className="space-y-2">
-            <Label>Хичээл</Label>
+            <Label>Хичээл *</Label>
             <Select value={subjectId} onValueChange={setSubjectId}>
               <SelectTrigger>
                 <SelectValue placeholder="Хичээл сонгох" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__none">Сонгоогүй</SelectItem>
                 {subjects.map((subject) => (
                   <SelectItem key={subject.id} value={subject.id}>
                     {subject.name}

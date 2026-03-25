@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { syncExamRecipients } from "@/lib/exam-recipients";
-import { getAllowedSubjectIds } from "@/lib/teacher/permissions";
+import { getAllowedSubjectIds, isAdminUser } from "@/lib/teacher/permissions";
 
 export async function createExam(formData: FormData) {
   const supabase = await createClient();
@@ -31,11 +31,14 @@ export async function createExam(formData: FormData) {
     return { error: "Дуусах цаг нь эхлэх цагаасаа хойш байх ёстой" };
   }
 
-  // Subject permission check: only validate if teacher has subjects assigned
-  if (subject_id) {
-    const allowedIds = await getAllowedSubjectIds(supabase, user.id);
-    // allowedIds=null → admin (pass), [] → no restrictions yet (pass), [...] → must be in list
-    if (allowedIds !== null && allowedIds.length > 0 && !allowedIds.includes(subject_id)) {
+  // Subject permission check (strict)
+  const allowedIds = await getAllowedSubjectIds(supabase, user.id);
+  if (allowedIds !== null) {
+    // Non-admin teacher
+    if (!subject_id) {
+      return { error: "Хичээл заавал сонгоно уу" };
+    }
+    if (!allowedIds.includes(subject_id)) {
       return { error: "Энэ хичээлийн шалгалт үүсгэх эрх байхгүй байна" };
     }
   }
@@ -90,10 +93,13 @@ export async function updateExam(examId: string, formData: FormData) {
     return { error: "Дуусах цаг нь эхлэх цагаасаа хойш байх ёстой" };
   }
 
-  // Subject permission check
-  if (subject_id) {
-    const allowedIds = await getAllowedSubjectIds(supabase, user.id);
-    if (allowedIds !== null && allowedIds.length > 0 && !allowedIds.includes(subject_id)) {
+  // Subject permission check (strict)
+  const allowedIds = await getAllowedSubjectIds(supabase, user.id);
+  if (allowedIds !== null) {
+    if (!subject_id) {
+      return { error: "Хичээл заавал сонгоно уу" };
+    }
+    if (!allowedIds.includes(subject_id)) {
       return { error: "Энэ хичээлийн шалгалт үүсгэх эрх байхгүй байна" };
     }
   }

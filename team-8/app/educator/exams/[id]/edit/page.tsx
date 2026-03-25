@@ -67,14 +67,14 @@ export default async function EditExamPage({ params }: Props) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="subject_id">Хичээл</Label>
+              <Label htmlFor="subject_id">Хичээл *</Label>
               <select
                 id="subject_id"
                 name="subject_id"
                 defaultValue={exam.subject_id ?? "__none"}
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                required
               >
-                <option value="__none">Сонгоогүй</option>
                 {subjects.map((subject) => (
                   <option key={subject.id} value={subject.id}>
                     {subject.name}

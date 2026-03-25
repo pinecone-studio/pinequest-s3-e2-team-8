@@ -193,8 +193,8 @@ export default function TeacherAssignmentPanel({ teacher, allSubjects, allGroups
               className="h-8 rounded-md border border-input bg-background px-2 text-sm"
             >
               <option value="">Хичээл</option>
-              {allSubjects.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
+              {teacher.subjects.filter(Boolean).map((s) => (
+                <option key={s!.id} value={s!.id}>{s!.name}</option>
               ))}
             </select>
             <select

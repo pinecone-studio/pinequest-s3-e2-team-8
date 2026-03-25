@@ -3,10 +3,9 @@
  * All functions accept a Supabase client + userId so callers can reuse their
  * already-authenticated client without a second auth round-trip.
  *
- * Return semantics:
- *   null   → caller is admin → no restriction (allow all)
- *   []     → no assignments defined yet → use ownership fallback
- *   [...ids] → explicit allow-list
+ * Return semantics (STRICT mode):
+ *   null       → caller is admin → no restriction (allow all)
+ *   string[]   → explicit allow-list (empty [] = no access)
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -26,7 +25,7 @@ export async function isAdminUser(
 /**
  * Subject IDs the teacher may create exams for.
  * null  → admin, no restriction
- * []    → no teacher_subjects rows yet → permissive (backward-compatible)
+ * []    → no teacher_subjects rows → teacher has no subject access
  * [...] → explicit allow-list
  */
 export async function getAllowedSubjectIds(
@@ -46,7 +45,7 @@ export async function getAllowedSubjectIds(
 /**
  * Group IDs the teacher may assign a given subject's exam to.
  * null  → admin, no restriction
- * []    → no teaching_assignments rows yet → permissive
+ * []    → no teaching_assignments rows → teacher has no group access for this subject
  * [...] → explicit allow-list
  */
 export async function getAllowedGroupIds(
@@ -64,4 +63,27 @@ export async function getAllowedGroupIds(
     .eq("is_active", true);
 
   return data?.map((r) => r.group_id) ?? [];
+}
+
+/**
+ * All group IDs where the teacher has any active teaching assignment (any subject).
+ * Used for group visibility.
+ * null  → admin
+ * []    → no teaching assignments at all
+ * [...] → groups the teacher teaches in
+ */
+export async function getAllTeachingGroupIds(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<string[] | null> {
+  if (await isAdminUser(supabase, userId)) return null;
+
+  const { data } = await supabase
+    .from("teaching_assignments")
+    .select("group_id")
+    .eq("teacher_id", userId)
+    .eq("is_active", true);
+
+  const ids = data?.map((r) => r.group_id) ?? [];
+  return [...new Set(ids)];
 }

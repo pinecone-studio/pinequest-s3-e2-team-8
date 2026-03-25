@@ -523,12 +523,7 @@ export async function getQuestionBank() {
     .eq("created_by", user.id)
     .order("updated_at", { ascending: false });
 
-  // Subject scope: if teacher has assigned subjects, filter question_bank too
-  const { data: tsRows } = await supabase
-    .from("teacher_subjects")
-    .select("subject_id")
-    .eq("teacher_id", user.id);
-
+  // Subject scope: strict filter by teacher's assigned subjects
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
@@ -536,13 +531,22 @@ export async function getQuestionBank() {
     .single();
 
   const isAdmin = profile?.role === "admin";
-  const allowedSubjectIds = tsRows?.map((r) => r.subject_id) ?? [];
 
-  if (!isAdmin && allowedSubjectIds.length > 0) {
-    // Show questions from their subjects OR questions with no subject
-    query = query.or(
-      `subject_id.in.(${allowedSubjectIds.join(",")}),subject_id.is.null`
-    );
+  if (!isAdmin) {
+    const { data: tsRows } = await supabase
+      .from("teacher_subjects")
+      .select("subject_id")
+      .eq("teacher_id", user.id);
+
+    const allowedSubjectIds = tsRows?.map((r) => r.subject_id) ?? [];
+
+    if (allowedSubjectIds.length > 0) {
+      // Show questions from their subjects OR questions with no subject
+      query = query.or(
+        `subject_id.in.(${allowedSubjectIds.join(",")}),subject_id.is.null`
+      );
+    }
+    // If no subjects assigned, they only see their own questions (base query already filters by created_by)
   }
 
   const { data } = await query;
@@ -633,6 +637,29 @@ export async function updateQuestionBankItem(
     .maybeSingle();
 
   if (!existing) return { error: "Асуултын сангийн бичлэг олдсонгүй" };
+
+  // Subject guard: ensure teacher can only set subject to one they're assigned to
+  const newSubjectId = String(formData.get("subject_id") || "").trim() || null;
+  if (newSubjectId) {
+    const { data: profileData } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    if (profileData?.role !== "admin") {
+      const { data: tsRow } = await supabase
+        .from("teacher_subjects")
+        .select("subject_id")
+        .eq("teacher_id", user.id)
+        .eq("subject_id", newSubjectId)
+        .maybeSingle();
+
+      if (!tsRow) {
+        return { error: "Энэ хичээлд асуулт оноох эрх байхгүй байна" };
+      }
+    }
+  }
 
   const type = String(formData.get("type") || "multiple_choice");
   const subject_id = String(formData.get("subject_id") || "").trim() || null;

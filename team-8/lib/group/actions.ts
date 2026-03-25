@@ -12,7 +12,7 @@ import {
   getGroupAssignmentConflictError,
   getGroupMemberConflictError,
 } from "@/lib/exam-conflicts";
-import { getAllowedGroupIds } from "@/lib/teacher/permissions";
+import { getAllowedGroupIds, getAllTeachingGroupIds, isAdminUser } from "@/lib/teacher/permissions";
 
 // ==========================================
 // БҮЛЭГ CRUD
@@ -46,12 +46,31 @@ export async function getGroups() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const { data } = await supabase
+  // Admin sees all groups; teacher sees groups from teaching_assignments + own created groups
+  const teachingGroupIds = await getAllTeachingGroupIds(supabase, user.id);
+
+  if (teachingGroupIds === null) {
+    // Admin — all groups
+    const { data } = await supabase
+      .from("student_groups")
+      .select("*, student_group_members(count)")
+      .order("created_at", { ascending: false });
+    return data ?? [];
+  }
+
+  // Teacher: groups they teach in OR created themselves
+  let query = supabase
     .from("student_groups")
     .select("*, student_group_members(count)")
-    .eq("created_by", user.id)
     .order("created_at", { ascending: false });
 
+  if (teachingGroupIds.length > 0) {
+    query = query.or(`id.in.(${teachingGroupIds.join(",")}),created_by.eq.${user.id}`);
+  } else {
+    query = query.eq("created_by", user.id);
+  }
+
+  const { data } = await query;
   return data ?? [];
 }
 
@@ -60,13 +79,33 @@ export async function getGroupById(groupId: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data } = await supabase
+  const teachingGroupIds = await getAllTeachingGroupIds(supabase, user.id);
+
+  // Admin can see any group
+  if (teachingGroupIds === null) {
+    const { data } = await supabase
+      .from("student_groups")
+      .select("*")
+      .eq("id", groupId)
+      .maybeSingle();
+    return data;
+  }
+
+  // Teacher: must be in their teaching assignments or created by them
+  const canAccess = teachingGroupIds.includes(groupId);
+
+  let query = supabase
     .from("student_groups")
     .select("*")
-    .eq("id", groupId)
-    .eq("created_by", user.id)
-    .maybeSingle();
+    .eq("id", groupId);
 
+  if (canAccess) {
+    // Teaching assignment grants access regardless of creator
+  } else {
+    query = query.eq("created_by", user.id);
+  }
+
+  const { data } = await query.maybeSingle();
   return data;
 }
 
@@ -80,11 +119,17 @@ export async function deleteGroup(groupId: string) {
 
   if (impactedExamsError) return { error: impactedExamsError };
 
-  const { error } = await supabase
+  // Only the creator or admin can delete a group
+  let deleteQuery = supabase
     .from("student_groups")
     .delete()
-    .eq("id", groupId)
-    .eq("created_by", user.id);
+    .eq("id", groupId);
+
+  if (!(await isAdminUser(supabase, user.id))) {
+    deleteQuery = deleteQuery.eq("created_by", user.id);
+  }
+
+  const { error } = await deleteQuery;
 
   if (error) return { error: error.message };
 
@@ -220,12 +265,18 @@ export async function assignExamToGroup(groupId: string, examId: string) {
 
   if (!exam) return { error: "Таны шалгалт олдсонгүй" };
 
-  // Teaching-assignment guard: only validate when exam has a subject and
-  // teacher has at least one teaching_assignment defined (progressive enforcement)
-  if (exam.subject_id) {
-    const allowedGroupIds = await getAllowedGroupIds(supabase, user.id, exam.subject_id);
-    // null → admin (pass), [] → no assignments yet (pass), [...] → must be in list
-    if (allowedGroupIds !== null && allowedGroupIds.length > 0 && !allowedGroupIds.includes(groupId)) {
+  // Strict teaching-assignment guard
+  const allowedGroupIds = await getAllowedGroupIds(
+    supabase,
+    user.id,
+    exam.subject_id ?? ""
+  );
+  if (allowedGroupIds !== null) {
+    // Non-admin teacher
+    if (!exam.subject_id) {
+      return { error: "Хичээл тодорхойлогдоогүй шалгалтыг бүлэгт оноох боломжгүй" };
+    }
+    if (!allowedGroupIds.includes(groupId)) {
       return { error: "Энэ бүлэгт энэ хичээлийн шалгалт оноох эрх байхгүй байна" };
     }
   }
