@@ -23,6 +23,10 @@ export async function createGroup(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
 
+  if (!(await isAdminUser(supabase, user.id))) {
+    return { error: "Зөвхөн admin бүлэг үүсгэж чадна" };
+  }
+
   const name = formData.get("name") as string;
   const grade = parseInt(formData.get("grade") as string) || null;
   const group_type = (formData.get("group_type") as string) || "class";
@@ -119,17 +123,14 @@ export async function deleteGroup(groupId: string) {
 
   if (impactedExamsError) return { error: impactedExamsError };
 
-  // Only the creator or admin can delete a group
-  let deleteQuery = supabase
+  if (!(await isAdminUser(supabase, user.id))) {
+    return { error: "Зөвхөн admin бүлэг устгаж чадна" };
+  }
+
+  const { error } = await supabase
     .from("student_groups")
     .delete()
     .eq("id", groupId);
-
-  if (!(await isAdminUser(supabase, user.id))) {
-    deleteQuery = deleteQuery.eq("created_by", user.id);
-  }
-
-  const { error } = await deleteQuery;
 
   if (error) return { error: error.message };
 
@@ -164,6 +165,10 @@ export async function addMemberToGroup(groupId: string, studentEmail: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
+
+  if (!(await isAdminUser(supabase, user.id))) {
+    return { error: "Зөвхөн admin бүлгийн гишүүн нэмж чадна" };
+  }
 
   // Сурагчийг email-ээр хайх
   const { data: student } = await supabase
@@ -213,6 +218,10 @@ export async function removeMemberFromGroup(groupId: string, studentId: string) 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
+
+  if (!(await isAdminUser(supabase, user.id))) {
+    return { error: "Зөвхөн admin бүлгийн гишүүн хасаж чадна" };
+  }
 
   const { error } = await supabase
     .from("student_group_members")

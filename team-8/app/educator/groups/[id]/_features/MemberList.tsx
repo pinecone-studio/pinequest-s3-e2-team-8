@@ -18,9 +18,10 @@ interface Member {
 interface MemberListProps {
   groupId: string;
   members: Member[];
+  canManage: boolean;
 }
 
-export default function MemberList({ groupId, members }: MemberListProps) {
+export default function MemberList({ groupId, members, canManage }: MemberListProps) {
   const [removingId, setRemovingId] = useState<string | null>(null);
 
   async function handleRemove(studentId: string) {
@@ -50,16 +51,18 @@ export default function MemberList({ groupId, members }: MemberListProps) {
                 {member.profiles?.email || "Имэйлгүй"}
               </p>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="shrink-0"
-              disabled={removingId === member.student_id}
-              onClick={() => handleRemove(member.student_id)}
-            >
-              {removingId === member.student_id ? "..." : "Хасах"}
-            </Button>
+            {canManage && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                disabled={removingId === member.student_id}
+                onClick={() => handleRemove(member.student_id)}
+              >
+                {removingId === member.student_id ? "..." : "Хасах"}
+              </Button>
+            )}
           </CardContent>
         </Card>
       ))}
