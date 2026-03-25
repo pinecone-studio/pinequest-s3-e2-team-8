@@ -14,12 +14,16 @@ export default async function ExamsPage() {
           <h2 className="text-2xl font-bold tracking-tight">Шалгалтууд</h2>
           <p className="text-muted-foreground">Таны үүсгэсэн бүх шалгалтууд</p>
         </div>
-        <Link href="/educator/create-exam">
-          <Button>
+        <Button
+          asChild
+          variant="secondary"
+          className="bg-indigo-100/70 text-indigo-700 hover:bg-indigo-100"
+        >
+          <Link href="/educator/create-exam">
             <PlusCircle className="mr-2 h-4 w-4" />
             Шалгалт үүсгэх
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       </div>
       <ExamList exams={exams as Parameters<typeof ExamList>[0]["exams"]} />
     </div>

@@ -7,6 +7,16 @@ import {
   getQuestionPassagesByExam as loadQuestionPassagesByExam,
 } from "@/lib/question-passages";
 
+function getQuestionTypeMigrationHint(error: { code?: string; message?: string } | null) {
+  if (!error) return null;
+  if (error.code !== "23514") return null;
+
+  return (
+    "Асуултын төрөл хадгалахад DB constraint алдаа гарлаа. " +
+    "Та хамгийн сүүлийн migration-уудаа (ялангуяа `013_expand_question_types.sql`) apply хийсэн эсэхээ шалгаарай."
+  );
+}
+
 function parseStringArray(rawValue: string) {
   try {
     const parsed = JSON.parse(rawValue);
@@ -231,7 +241,9 @@ export async function addQuestion(examId: string, formData: FormData) {
 
   const { error } = await supabase.from("questions").insert(insertPayload);
 
-  if (error) return { error: error.message };
+  if (error) {
+    return { error: getQuestionTypeMigrationHint(error) ?? error.message };
+  }
 
   const { data: existingBankEntries } = await supabase
     .from("question_bank")
@@ -543,7 +555,9 @@ export async function updateQuestion(
     .eq("exam_id", examId)
     .eq("created_by", user.id);
 
-  if (error) return { error: error.message };
+  if (error) {
+    return { error: getQuestionTypeMigrationHint(error) ?? error.message };
+  }
 
   revalidatePath(`/educator/exams/${examId}/questions`);
   return { success: true };

@@ -66,12 +66,16 @@ export default function ExamList({ exams }: Props) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
         <p className="text-muted-foreground">Шалгалт байхгүй байна.</p>
-        <Link href="/educator/create-exam" className="mt-4">
-          <Button>
+        <Button
+          asChild
+          variant="secondary"
+          className="mt-4 bg-indigo-100/70 text-indigo-700 hover:bg-indigo-100"
+        >
+          <Link href="/educator/create-exam">
             <PlusCircle className="mr-2 h-4 w-4" />
             Шалгалт үүсгэх
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       </div>
     );
   }

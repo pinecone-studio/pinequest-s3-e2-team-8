@@ -444,10 +444,11 @@ export default function ExamTaker({
             </div>
             <Button
               onClick={handleSubmit}
-              disabled={isSubmitting}
+              loading={isSubmitting}
+              loadingText="Илгээж байна..."
               variant="destructive"
             >
-              {isSubmitting ? "Илгээж байна..." : "Дуусгах"}
+              Дуусгах
             </Button>
           </div>
         </div>
