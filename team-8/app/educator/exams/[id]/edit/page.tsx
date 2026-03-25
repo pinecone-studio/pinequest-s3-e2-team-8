@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getExamById, updateExam } from "@/lib/exam/actions";
-import { getSubjects } from "@/lib/subject/actions";
+import { getTeacherSubjects } from "@/lib/subject/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +15,7 @@ interface Props {
 
 export default async function EditExamPage({ params }: Props) {
   const { id } = await params;
-  const [exam, subjects] = await Promise.all([getExamById(id), getSubjects()]);
+  const [exam, subjects] = await Promise.all([getExamById(id), getTeacherSubjects()]);
 
   if (!exam) notFound();
   if (exam.is_published) redirect(`/educator/exams/${id}/questions`);

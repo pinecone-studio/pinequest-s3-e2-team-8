@@ -12,6 +12,7 @@ import {
   getGroupAssignmentConflictError,
   getGroupMemberConflictError,
 } from "@/lib/exam-conflicts";
+import { getAllowedGroupIds } from "@/lib/teacher/permissions";
 
 // ==========================================
 // БҮЛЭГ CRUD
@@ -212,12 +213,22 @@ export async function assignExamToGroup(groupId: string, examId: string) {
 
   const { data: exam } = await supabase
     .from("exams")
-    .select("id, is_published")
+    .select("id, is_published, subject_id")
     .eq("id", examId)
     .eq("created_by", user.id)
     .maybeSingle();
 
   if (!exam) return { error: "Таны шалгалт олдсонгүй" };
+
+  // Teaching-assignment guard: only validate when exam has a subject and
+  // teacher has at least one teaching_assignment defined (progressive enforcement)
+  if (exam.subject_id) {
+    const allowedGroupIds = await getAllowedGroupIds(supabase, user.id, exam.subject_id);
+    // null → admin (pass), [] → no assignments yet (pass), [...] → must be in list
+    if (allowedGroupIds !== null && allowedGroupIds.length > 0 && !allowedGroupIds.includes(groupId)) {
+      return { error: "Энэ бүлэгт энэ хичээлийн шалгалт оноох эрх байхгүй байна" };
+    }
+  }
 
   const conflictError = await getGroupAssignmentConflictError(
     supabase,
@@ -310,6 +321,18 @@ export async function getAvailableExams(groupId?: string) {
   );
 
   return examsWithConflicts;
+}
+
+/** All groups visible to admin (no created_by filter). */
+export async function getAllGroupsAdmin() {
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("student_groups")
+    .select("id, name, grade, group_type, created_by, created_at, student_group_members(count)")
+    .order("created_at", { ascending: false });
+
+  return data ?? [];
 }
 
 // Бүх сурагчдыг авах (хайлт хийхэд)

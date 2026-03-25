@@ -105,7 +105,7 @@ export default async function ExamQuestionsPage({ params }: Props) {
           ) : (
             <>
               <PassageManager examId={id} passages={passages} />
-              <AddQuestionForm examId={id} passages={passages} />
+              <AddQuestionForm examId={id} passages={passages} subjectName={exam.subjects?.name ?? null} />
             </>
           )}
         </div>

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { syncExamRecipients } from "@/lib/exam-recipients";
+import { getAllowedSubjectIds } from "@/lib/teacher/permissions";
 
 export async function createExam(formData: FormData) {
   const supabase = await createClient();
@@ -28,6 +29,15 @@ export async function createExam(formData: FormData) {
 
   if (new Date(start_time).getTime() >= new Date(end_time).getTime()) {
     return { error: "Дуусах цаг нь эхлэх цагаасаа хойш байх ёстой" };
+  }
+
+  // Subject permission check: only validate if teacher has subjects assigned
+  if (subject_id) {
+    const allowedIds = await getAllowedSubjectIds(supabase, user.id);
+    // allowedIds=null → admin (pass), [] → no restrictions yet (pass), [...] → must be in list
+    if (allowedIds !== null && allowedIds.length > 0 && !allowedIds.includes(subject_id)) {
+      return { error: "Энэ хичээлийн шалгалт үүсгэх эрх байхгүй байна" };
+    }
   }
 
   const { data, error } = await supabase
@@ -74,9 +84,18 @@ export async function updateExam(examId: string, formData: FormData) {
 
   const start_time = (formData.get("start_time") as string) + "+08:00";
   const end_time = (formData.get("end_time") as string) + "+08:00";
+  const subject_id = ((formData.get("subject_id") as string) || "").trim() || null;
 
   if (new Date(start_time).getTime() >= new Date(end_time).getTime()) {
     return { error: "Дуусах цаг нь эхлэх цагаасаа хойш байх ёстой" };
+  }
+
+  // Subject permission check
+  if (subject_id) {
+    const allowedIds = await getAllowedSubjectIds(supabase, user.id);
+    if (allowedIds !== null && allowedIds.length > 0 && !allowedIds.includes(subject_id)) {
+      return { error: "Энэ хичээлийн шалгалт үүсгэх эрх байхгүй байна" };
+    }
   }
 
   const { error } = await supabase
@@ -84,7 +103,7 @@ export async function updateExam(examId: string, formData: FormData) {
     .update({
       title: formData.get("title") as string,
       description: (formData.get("description") as string) || null,
-      subject_id: ((formData.get("subject_id") as string) || "").trim() || null,
+      subject_id,
       duration_minutes: parseInt(formData.get("duration_minutes") as string),
       start_time,
       end_time,

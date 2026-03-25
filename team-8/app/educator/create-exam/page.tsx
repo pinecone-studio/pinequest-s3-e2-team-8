@@ -1,8 +1,8 @@
-import { getSubjects } from "@/lib/subject/actions";
+import { getTeacherSubjects } from "@/lib/subject/actions";
 import ExamForm from "./_features/ExamForm";
 
 export default async function CreateExamPage() {
-  const subjects = await getSubjects();
+  const subjects = await getTeacherSubjects();
 
   return (
     <div className="space-y-6">

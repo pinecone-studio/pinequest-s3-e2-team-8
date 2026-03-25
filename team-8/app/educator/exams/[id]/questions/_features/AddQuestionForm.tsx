@@ -19,9 +19,13 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PlusCircle, Trash2 } from "lucide-react";
 
+// Subjects where formula/LaTeX tools are useful
+const SCIENCE_SUBJECTS = ["Математик", "Физик", "Хими", "Мэдээлэл зүй"];
+
 interface Props {
   examId: string;
   passages: QuestionPassage[];
+  subjectName: string | null;
 }
 
 const questionTypes = [
@@ -37,7 +41,8 @@ const difficultyOptions = [
   { value: "hard", label: "Хэцүү" },
 ];
 
-export default function AddQuestionForm({ examId, passages }: Props) {
+export default function AddQuestionForm({ examId, passages, subjectName }: Props) {
+  const showLatexPanel = subjectName == null || SCIENCE_SUBJECTS.includes(subjectName);
   const [type, setType] = useState("multiple_choice");
   const [difficulty, setDifficulty] = useState("medium");
   const [selectedPassageId, setSelectedPassageId] = useState("__none");
@@ -225,7 +230,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
               placeholder="<p>LaTeX, тайлбар, унших эхийн форматтай хувилбар...</p>"
               rows={4}
             />
-            <LatexShortcutPanel targetId="content_html" />
+            {showLatexPanel && <LatexShortcutPanel targetId="content_html" />}
           </div>
 
           <div className="space-y-2">

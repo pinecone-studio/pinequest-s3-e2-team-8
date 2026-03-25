@@ -516,12 +516,36 @@ export async function getQuestionBank() {
   } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const { data } = await supabase
+  // Base query: teacher's own questions
+  let query = supabase
     .from("question_bank")
     .select("*, subjects(name)")
     .eq("created_by", user.id)
     .order("updated_at", { ascending: false });
 
+  // Subject scope: if teacher has assigned subjects, filter question_bank too
+  const { data: tsRows } = await supabase
+    .from("teacher_subjects")
+    .select("subject_id")
+    .eq("teacher_id", user.id);
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  const isAdmin = profile?.role === "admin";
+  const allowedSubjectIds = tsRows?.map((r) => r.subject_id) ?? [];
+
+  if (!isAdmin && allowedSubjectIds.length > 0) {
+    // Show questions from their subjects OR questions with no subject
+    query = query.or(
+      `subject_id.in.(${allowedSubjectIds.join(",")}),subject_id.is.null`
+    );
+  }
+
+  const { data } = await query;
   return data ?? [];
 }
 
