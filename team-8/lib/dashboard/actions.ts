@@ -31,14 +31,15 @@ export async function getEducatorStats() {
     const groupIds = [...new Set(teachingRows.map((r) => r.group_id))];
     const { data: assignedExams } = await supabase
       .from("exam_assignments")
-      .select("exam_id, exams(subject_id)")
+      .select("exam_id, group_id, exams(subject_id)")
       .in("group_id", groupIds);
 
     for (const ae of assignedExams ?? []) {
       const subjectId = Array.isArray(ae.exams)
         ? ae.exams[0]?.subject_id
         : (ae.exams as { subject_id: string } | null)?.subject_id;
-      if (teachingRows.find((ta) => ta.subject_id === subjectId)) {
+      // Must match both subject AND group (not just subject)
+      if (teachingRows.find((ta) => ta.subject_id === subjectId && ta.group_id === ae.group_id)) {
         teachingScopeExamIds.add(ae.exam_id);
       }
     }

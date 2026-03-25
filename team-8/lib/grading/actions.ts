@@ -122,7 +122,7 @@ export async function getPendingSubmissions() {
 
     const { data: assignedExams } = await supabase
       .from("exam_assignments")
-      .select("exam_id, exams(subject_id)")
+      .select("exam_id, group_id, exams(subject_id)")
       .in("group_id", groupIds);
 
     for (const ae of assignedExams ?? []) {
@@ -130,9 +130,9 @@ export async function getPendingSubmissions() {
         ? ae.exams[0]?.subject_id
         : (ae.exams as { subject_id: string } | null)?.subject_id;
 
-      // Only include if the exam's subject matches the teacher's teaching assignment for that group
+      // Must match both subject AND the specific group (not just subject-wide)
       const validTA = teachingRows.find(
-        (ta) => ta.subject_id === examSubjectId
+        (ta) => ta.subject_id === examSubjectId && ta.group_id === ae.group_id
       );
       if (validTA) examIdSet.add(ae.exam_id);
     }

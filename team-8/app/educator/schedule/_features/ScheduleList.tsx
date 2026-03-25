@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import Link from "next/link";
+import { useEffect, useState, useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,6 +15,11 @@ import {
   BookOpen,
 } from "lucide-react";
 
+type ConflictInfo = {
+  examTitle: string;
+  reason: "shared_students" | "same_room";
+};
+
 type ScheduleRow = {
   id: string;
   title: string;
@@ -26,17 +30,8 @@ type ScheduleRow = {
   subject_name: string | null;
   room: string | null;
   groups: { id: string; name: string }[];
-  conflicts: string[];
+  conflicts: ConflictInfo[];
 };
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("mn-MN", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    weekday: "short",
-  });
-}
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString("mn-MN", {
@@ -48,7 +43,12 @@ function formatTime(iso: string) {
 function groupByDate(rows: ScheduleRow[]) {
   const map = new Map<string, ScheduleRow[]>();
   for (const row of rows) {
-    const dateKey = new Date(row.start_time).toLocaleDateString("mn-MN");
+    const dateKey = new Date(row.start_time).toLocaleDateString("mn-MN", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      weekday: "short",
+    });
     const existing = map.get(dateKey) ?? [];
     existing.push(row);
     map.set(dateKey, existing);
@@ -111,8 +111,22 @@ function RoomEditor({
   );
 }
 
+function conflictLabel(c: ConflictInfo): string {
+  if (c.reason === "same_room") return `"${c.examTitle}" (ижил танхим)`;
+  return `"${c.examTitle}" (нийтлэг сурагч)`;
+}
+
 export default function ScheduleList({ rows }: { rows: ScheduleRow[] }) {
-  const now = Date.now();
+  const [now, setNow] = useState<number | null>(null);
+
+  useEffect(() => {
+    const updateNow = () => setNow(Date.now());
+
+    updateNow();
+    const intervalId = window.setInterval(updateNow, 60_000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   if (rows.length === 0) {
     return (
@@ -137,8 +151,8 @@ export default function ScheduleList({ rows }: { rows: ScheduleRow[] }) {
             {exams.map((exam) => {
               const start = new Date(exam.start_time).getTime();
               const end = new Date(exam.end_time).getTime();
-              const isActive = now >= start && now <= end;
-              const isPast = now > end;
+              const isActive = now !== null && now >= start && now <= end;
+              const isPast = now !== null && now > end;
               const hasConflict = exam.conflicts.length > 0;
 
               return (
@@ -157,12 +171,9 @@ export default function ScheduleList({ rows }: { rows: ScheduleRow[] }) {
                       {/* Зүүн: мэдээлэл */}
                       <div className="space-y-1.5 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <Link
-                            href={`/educator/exams/${exam.id}/questions`}
-                            className="font-medium hover:underline truncate"
-                          >
+                          <span className="font-medium truncate">
                             {exam.title}
-                          </Link>
+                          </span>
                           {!exam.is_published && (
                             <Badge variant="outline" className="text-xs shrink-0">
                               Нийтлээгүй
@@ -208,10 +219,8 @@ export default function ScheduleList({ rows }: { rows: ScheduleRow[] }) {
                           <div className="flex items-start gap-1.5 rounded-md bg-orange-100 px-2 py-1 text-xs text-orange-700">
                             <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                             <span>
-                              <strong>Бүлгийн давхцал:</strong>{" "}
-                              {exam.conflicts
-                                .map((c) => `"${c}"`)
-                                .join(", ")}{" "}
+                              <strong>Зөрчил:</strong>{" "}
+                              {exam.conflicts.map(conflictLabel).join("; ")}{" "}
                               шалгалттай ижил цагт
                             </span>
                           </div>

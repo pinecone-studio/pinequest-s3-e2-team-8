@@ -4,6 +4,25 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+type ConflictReason = "shared_students" | "same_room";
+
+type ConflictInfo = {
+  examTitle: string;
+  reason: ConflictReason;
+};
+
+type ExamRow = {
+  id: string;
+  title: string;
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  is_published: boolean;
+  subject_name: string | null;
+  room: string | null;
+  groups: { id: string; name: string }[];
+  conflicts: ConflictInfo[];
+};
 
 async function isAdminUser(
   supabase: SupabaseServerClient,
@@ -17,19 +36,140 @@ async function isAdminUser(
   return data?.role === "admin";
 }
 
+/** exam owner, admin, OR teaching-assignment teacher can manage */
 async function canManageExam(
   supabase: SupabaseServerClient,
   examId: string,
   userId: string
 ): Promise<boolean> {
   if (await isAdminUser(supabase, userId)) return true;
-  const { data } = await supabase
+
+  // Owner check
+  const { data: own } = await supabase
     .from("exams")
     .select("id")
     .eq("id", examId)
     .eq("created_by", userId)
     .maybeSingle();
-  return !!data;
+  if (own) return true;
+
+  // Teaching-assignment: teacher must have assignment for exam's subject in one of exam's groups
+  const { data: examData } = await supabase
+    .from("exams")
+    .select("subject_id")
+    .eq("id", examId)
+    .maybeSingle();
+  if (!examData?.subject_id) return false;
+
+  const { data: examAssignments } = await supabase
+    .from("exam_assignments")
+    .select("group_id")
+    .eq("exam_id", examId);
+  if (!examAssignments || examAssignments.length === 0) return false;
+
+  const groupIds = examAssignments.map((a) => a.group_id);
+
+  const { data: ta } = await supabase
+    .from("teaching_assignments")
+    .select("id")
+    .eq("teacher_id", userId)
+    .eq("subject_id", examData.subject_id)
+    .in("group_id", groupIds)
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle();
+
+  return !!ta;
+}
+
+async function applyLocalConflictFallback(
+  supabase: SupabaseServerClient,
+  rows: ExamRow[]
+) {
+  const allGroupIds = new Set<string>();
+  for (const exam of rows) {
+    for (const g of exam.groups) allGroupIds.add(g.id);
+  }
+
+  const groupStudentMap = new Map<string, Set<string>>();
+
+  if (allGroupIds.size > 0) {
+    const { data: memberRows } = await supabase
+      .from("student_group_members")
+      .select("student_id, group_id")
+      .in("group_id", [...allGroupIds]);
+
+    for (const member of memberRows ?? []) {
+      if (!groupStudentMap.has(member.group_id)) {
+        groupStudentMap.set(member.group_id, new Set());
+      }
+      groupStudentMap.get(member.group_id)?.add(member.student_id);
+    }
+  }
+
+  function getExamStudents(exam: ExamRow): Set<string> {
+    const students = new Set<string>();
+    for (const group of exam.groups) {
+      for (const studentId of groupStudentMap.get(group.id) ?? []) {
+        students.add(studentId);
+      }
+    }
+    return students;
+  }
+
+  for (const exam of rows) {
+    const eStart = new Date(exam.start_time).getTime();
+    const eEnd = new Date(exam.end_time).getTime();
+    const examStudents = getExamStudents(exam);
+
+    for (const other of rows) {
+      if (other.id === exam.id) continue;
+
+      const oStart = new Date(other.start_time).getTime();
+      const oEnd = new Date(other.end_time).getTime();
+      const overlaps = eStart < oEnd && eEnd > oStart;
+
+      if (!overlaps) continue;
+
+      const otherStudents = getExamStudents(other);
+      const hasStudentOverlap =
+        examStudents.size > 0 &&
+        [...examStudents].some((studentId) => otherStudents.has(studentId));
+
+      if (
+        hasStudentOverlap &&
+        !exam.conflicts.find(
+          (conflict) =>
+            conflict.examTitle === other.title &&
+            conflict.reason === "shared_students"
+        )
+      ) {
+        exam.conflicts.push({
+          examTitle: other.title,
+          reason: "shared_students",
+        });
+      }
+
+      const sameRoom =
+        exam.room &&
+        other.room &&
+        exam.room.trim().toLowerCase() === other.room.trim().toLowerCase();
+
+      if (
+        sameRoom &&
+        !exam.conflicts.find(
+          (conflict) =>
+            conflict.examTitle === other.title &&
+            conflict.reason === "same_room"
+        )
+      ) {
+        exam.conflicts.push({
+          examTitle: other.title,
+          reason: "same_room",
+        });
+      }
+    }
+  }
 }
 
 /** Багшийн scope дахь бүх шалгалтыг room болон conflict мэдээлэлтэй авах */
@@ -56,7 +196,7 @@ export async function getExamSchedules() {
       .eq("created_by", user.id);
     for (const e of own ?? []) scopeIds.add(e.id);
 
-    // Teaching assignment-аар оноогдсон
+    // Teaching assignment: group+subject хосоор тулгах
     const { data: taRows } = await supabase
       .from("teaching_assignments")
       .select("group_id, subject_id")
@@ -67,14 +207,15 @@ export async function getExamSchedules() {
       const groupIds = [...new Set(taRows.map((r) => r.group_id))];
       const { data: assigned } = await supabase
         .from("exam_assignments")
-        .select("exam_id, exams(subject_id)")
+        .select("exam_id, group_id, exams(subject_id)")
         .in("group_id", groupIds);
 
       for (const ae of assigned ?? []) {
         const subjectId = Array.isArray(ae.exams)
           ? ae.exams[0]?.subject_id
           : (ae.exams as { subject_id: string } | null)?.subject_id;
-        if (taRows.find((ta) => ta.subject_id === subjectId)) {
+        // group+subject хос таарч байвал л оруулна
+        if (taRows.find((ta) => ta.subject_id === subjectId && ta.group_id === ae.group_id)) {
           scopeIds.add(ae.exam_id);
         }
       }
@@ -102,20 +243,6 @@ export async function getExamSchedules() {
     .order("start_time", { ascending: true });
 
   if (!exams) return [];
-
-  // ── Нормалчлах ────────────────────────────────────────────────────
-  type ExamRow = {
-    id: string;
-    title: string;
-    start_time: string;
-    end_time: string;
-    duration_minutes: number;
-    is_published: boolean;
-    subject_name: string | null;
-    room: string | null;
-    groups: { id: string; name: string }[];
-    conflicts: string[];
-  };
 
   const rows: ExamRow[] = exams.map((exam) => {
     const schedule = Array.isArray(exam.exam_schedules)
@@ -153,26 +280,31 @@ export async function getExamSchedules() {
     };
   });
 
-  // ── Бүлгийн давхцал (нэг бүлгийн хоёр шалгалт ижил цагт) ─────────
-  for (const exam of rows) {
-    const eStart = new Date(exam.start_time).getTime();
-    const eEnd = new Date(exam.end_time).getTime();
+  const { data: conflictRows, error: conflictError } = await supabase.rpc(
+    "get_schedule_conflicts_for_scope",
+    {
+      p_exam_ids: examIds,
+    }
+  );
 
-    for (const other of rows) {
-      if (other.id === exam.id) continue;
+  if (conflictError) {
+    await applyLocalConflictFallback(supabase, rows);
+    return rows;
+  }
 
-      const oStart = new Date(other.start_time).getTime();
-      const oEnd = new Date(other.end_time).getTime();
+  const rowMap = new Map(rows.map((row) => [row.id, row]));
+  for (const conflict of conflictRows ?? []) {
+    const row = rowMap.get(conflict.exam_id as string);
+    if (!row) continue;
 
-      const overlaps = eStart < oEnd && eEnd > oStart;
-      if (!overlaps) continue;
+    const reason = conflict.reason as ConflictReason;
+    const examTitle = String(conflict.conflicting_exam_title ?? "Бусад шалгалт");
+    const exists = row.conflicts.find(
+      (item) => item.examTitle === examTitle && item.reason === reason
+    );
 
-      const examGroupIds = new Set(exam.groups.map((g) => g.id));
-      const shared = other.groups.some((g) => examGroupIds.has(g.id));
-
-      if (shared && !exam.conflicts.includes(other.title)) {
-        exam.conflicts.push(other.title);
-      }
+    if (!exists) {
+      row.conflicts.push({ examTitle, reason });
     }
   }
 
