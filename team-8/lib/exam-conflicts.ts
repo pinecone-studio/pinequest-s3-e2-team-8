@@ -176,37 +176,51 @@ export async function getGroupMemberConflictError(
   groupId: string,
   studentId: string
 ) {
-  const { data: assignedExams } = await supabase
+  // Get all exams assigned to the target group
+  const { data: groupExamRows } = await supabase
     .from("exam_assignments")
     .select("exam_id, exams!inner(id, title, start_time, end_time)")
     .eq("group_id", groupId);
 
-  for (const assignment of assignedExams ?? []) {
-    const exam = Array.isArray(assignment.exams)
-      ? assignment.exams[0]
-      : assignment.exams;
+  if (!groupExamRows || groupExamRows.length === 0) return null;
 
+  // Get all other groups the student already belongs to
+  const { data: memberRows } = await supabase
+    .from("student_group_members")
+    .select("group_id")
+    .eq("student_id", studentId)
+    .neq("group_id", groupId);
+
+  if (!memberRows || memberRows.length === 0) return null;
+
+  const otherGroupIds = memberRows.map((r) => r.group_id);
+
+  // Get all exams assigned to the student's other groups
+  const { data: otherExamRows } = await supabase
+    .from("exam_assignments")
+    .select("exam_id, exams!inner(id, title, start_time, end_time)")
+    .in("group_id", otherGroupIds);
+
+  if (!otherExamRows || otherExamRows.length === 0) return null;
+
+  // Check for time overlaps in memory (no N+1 queries)
+  for (const ge of groupExamRows) {
+    const exam = Array.isArray(ge.exams) ? ge.exams[0] : ge.exams;
     if (!exam) continue;
+    const examStart = new Date(exam.start_time).getTime();
+    const examEnd = new Date(exam.end_time).getTime();
 
-    const conflictResult = await getConflictingAssignmentsForStudentsViaRpc(
-      supabase,
-      exam,
-      [groupId]
-    );
-    if ("error" in conflictResult) return conflictResult.error;
+    for (const oe of otherExamRows) {
+      const other = Array.isArray(oe.exams) ? oe.exams[0] : oe.exams;
+      if (!other || other.id === exam.id) continue;
+      const otherStart = new Date(other.start_time).getTime();
+      const otherEnd = new Date(other.end_time).getTime();
 
-    const conflicts = conflictResult.rows.filter(
-      (conflict) => conflict.student_id === studentId
-    );
-
-    if (conflicts.length > 0) {
-      return buildConflictError(
-        exam.title,
-        conflicts.map((conflict) => ({
-          studentName: conflict.student_name || "Сурагч",
-          conflictingExamTitle: conflict.conflicting_exam_title || "Өөр шалгалт",
-        }))
-      );
+      if (examStart < otherEnd && examEnd > otherStart) {
+        return buildConflictError(exam.title, [
+          { studentName: "Сурагч", conflictingExamTitle: other.title },
+        ]);
+      }
     }
   }
 

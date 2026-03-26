@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation"; // Added to handle the black background active state
+import { usePathname, useRouter } from "next/navigation";
+import { logout } from "@/lib/auth/actions";
 import {
   CheckSquare,
   CalendarDays,
@@ -26,26 +27,21 @@ interface NavItem {
 
 const ALL_NAV_ITEMS: NavItem[] = [
   { href: "/educator", label: "Нүүр хуудас", icon: HomeIcon },
-  { href: "/educator/exams", label: "Асуултын сан", icon: Book },
-  { href: "/educator/create-exam", label: "Шинэ асуулт", icon: Plus },
-  {
-    href: "/educator/question-bank",
-    label: "Шинэ шалгалт",
-    icon: FilePlusCorner,
-  },
-  { href: "/educator/groups", label: "Шалгалтууд", icon: FileSpreadsheet },
+  { href: "/educator/exams", label: "Шалгалтууд", icon: FileSpreadsheet },
+  { href: "/educator/create-exam", label: "Шалгалт үүсгэх", icon: Plus },
+  { href: "/educator/question-bank", label: "Асуултын сан", icon: Book },
+  { href: "/educator/groups", label: "Бүлгүүд", icon: FilePlusCorner },
   { href: "/educator/grading", label: "Дүн шалгах", icon: CheckSquare },
   { href: "/educator/schedule", label: "Хуваарь", icon: CalendarDays },
   { href: "/educator/profile", label: "Профайл", icon: UserCircle2 },
 ];
 
-const MENU_NAV_ITEMS: NavItem[] = ALL_NAV_ITEMS;
-
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
 
   return (
-    <aside className="flex flex-col h-auto w-65  pt-6 px-3 flex-col border-r border-gray-100 bg-white justify-between shadow-2xl">
+    <aside className="flex h-full w-65 flex-col justify-between border-r border-gray-100 bg-white px-3 pt-6 shadow-2xl">
       {/* Navigation Items */}
       <div className="flex flex-col gap-6 ">
         <div className="flex justify-between">
@@ -53,9 +49,7 @@ export default function Sidebar() {
           <ChevronLeft />
         </div>
         <nav className="flex flex-col gap-3">
-          {" "}
-          {/* Tighter spacing between items */}
-          {MENU_NAV_ITEMS.map((item) => {
+          {ALL_NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             // Checks if current path matches the link
             const isActive =
@@ -84,11 +78,17 @@ export default function Sidebar() {
         </nav>
       </div>
 
-      <div className="mt-auto flex items-center justify-between ">
-        <div className="flex items-center gap-4 pl-4">
-          <LogOut className="w-7 h-7" />
-          <p className="font-medium text-[#7F7F7F]">Гарах</p>
-        </div>
+      <div className="mt-auto flex items-center justify-between pb-4">
+        <button
+          className="flex items-center gap-4 pl-4 text-[#7F7F7F] hover:text-destructive transition-colors"
+          onClick={async () => {
+            await logout();
+            router.push("/login");
+          }}
+        >
+          <LogOut className="h-7 w-7" />
+          <p className="font-medium">Гарах</p>
+        </button>
 
         <SideBarImage />
       </div>

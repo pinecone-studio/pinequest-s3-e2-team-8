@@ -13,10 +13,12 @@ import { ArrowLeft } from "lucide-react";
 
 interface Props {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
 }
 
-export default async function EditExamPage({ params }: Props) {
+export default async function EditExamPage({ params, searchParams }: Props) {
   const { id } = await params;
+  const { error: pageError } = await searchParams;
   const [exam, subjects] = await Promise.all([
     getExamById(id),
     getTeacherSubjects(),
@@ -53,7 +55,10 @@ export default async function EditExamPage({ params }: Props) {
   async function handleUpdate(formData: FormData) {
     "use server";
     const result = await updateExam(id, formData);
-    if (!result?.error) redirect(`/educator/exams/${id}/questions`);
+    if (result?.error) {
+      redirect(`/educator/exams/${id}/edit?error=${encodeURIComponent(result.error)}`);
+    }
+    redirect(`/educator/exams/${id}/questions`);
   }
 
   return (
@@ -77,6 +82,11 @@ export default async function EditExamPage({ params }: Props) {
             <CardTitle>Шалгалтын мэдээлэл</CardTitle>
           </CardHeader>
           <CardContent>
+            {pageError && (
+              <div className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                {pageError}
+              </div>
+            )}
             <form action={handleUpdate} className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="title">Шалгалтын нэр *</Label>

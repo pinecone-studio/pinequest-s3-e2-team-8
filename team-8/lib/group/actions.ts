@@ -12,6 +12,7 @@ import {
   getGroupAssignmentConflictError,
   getGroupMemberConflictError,
 } from "@/lib/exam-conflicts";
+import { assignExamToGroupRecord } from "@/lib/exam-assignments";
 import { getAllowedGroupIds, getAllTeachingGroupIds, isAdminUser } from "@/lib/teacher/permissions";
 
 // ==========================================
@@ -76,6 +77,77 @@ export async function getGroups() {
 
   const { data } = await query;
   return data ?? [];
+}
+
+export async function getExamCreationGroups() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  if (await isAdminUser(supabase, user.id)) {
+    const { data } = await supabase
+      .from("student_groups")
+      .select("id, name, grade, group_type")
+      .order("grade", { ascending: true })
+      .order("name", { ascending: true });
+
+    return (data ?? []).map((group) => ({
+      ...group,
+      allowed_subject_ids: [] as string[],
+    }));
+  }
+
+  const { data } = await supabase
+    .from("teaching_assignments")
+    .select("group_id, subject_id, student_groups(id, name, grade, group_type)")
+    .eq("teacher_id", user.id)
+    .eq("is_active", true);
+
+  const grouped = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      grade: number | null;
+      group_type: string;
+      allowed_subject_ids: Set<string>;
+    }
+  >();
+
+  for (const row of data ?? []) {
+    const group = Array.isArray(row.student_groups)
+      ? row.student_groups[0]
+      : row.student_groups;
+    if (!group) continue;
+
+    const existing = grouped.get(row.group_id) ?? {
+      id: String(group.id),
+      name: String(group.name),
+      grade: group.grade ? Number(group.grade) : null,
+      group_type: String(group.group_type),
+      allowed_subject_ids: new Set<string>(),
+    };
+
+    existing.allowed_subject_ids.add(String(row.subject_id));
+    grouped.set(row.group_id, existing);
+  }
+
+  return Array.from(grouped.values())
+    .map((group) => ({
+      id: group.id,
+      name: group.name,
+      grade: group.grade,
+      group_type: group.group_type,
+      allowed_subject_ids: Array.from(group.allowed_subject_ids),
+    }))
+    .sort((a, b) => {
+      const gradeA = a.grade ?? 99;
+      const gradeB = b.grade ?? 99;
+      if (gradeA !== gradeB) return gradeA - gradeB;
+      return a.name.localeCompare(b.name, "mn");
+    });
 }
 
 export async function getGroupById(groupId: string) {
@@ -297,15 +369,14 @@ export async function assignExamToGroup(groupId: string, examId: string) {
   );
   if (conflictError) return { error: conflictError };
 
-  const { error } = await supabase.rpc("assign_exam_to_group", {
-    p_exam_id: examId,
-    p_group_id: groupId,
-    p_assigned_by: user.id,
+  const assignmentResult = await assignExamToGroupRecord(supabase, {
+    examId,
+    groupId,
+    assignedBy: user.id,
   });
 
-  if (error) {
-    if (error.code === "23505") return { error: "Энэ шалгалт аль хэдийн оноогдсон" };
-    return { error: error.message };
+  if ("error" in assignmentResult) {
+    return { error: assignmentResult.error };
   }
 
   if (exam.is_published) {

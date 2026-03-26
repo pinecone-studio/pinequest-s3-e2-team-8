@@ -20,6 +20,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -39,6 +40,7 @@ interface GroupOption {
   name: string;
   grade: number | null;
   group_type: string;
+  allowed_subject_ids: string[];
 }
 
 const weekDays = ["Ня", "Да", "Мя", "Лх", "Пү", "Ба", "Бя"];
@@ -141,6 +143,13 @@ function splitTimeParts(value: string) {
   return { hour, minute };
 }
 
+function formatGroupTypeLabel(groupType: string) {
+  if (groupType === "class") return "Анги";
+  if (groupType === "elective") return "Сонгон";
+  if (groupType === "mixed") return "Холимог";
+  return groupType;
+}
+
 function buildTimeValue(hour: string, minute: string) {
   return `${hour}:${minute}`;
 }
@@ -161,7 +170,7 @@ export default function ExamForm({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [subjectId, setSubjectId] = useState("__none");
-  const [groupId, setGroupId] = useState("__none");
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [startDate, setStartDate] = useState("");
   const [startClock, setStartClock] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -182,9 +191,20 @@ export default function ExamForm({
   const endTime = joinDateTime(endDate, endClock);
   const startTimeParts = splitTimeParts(startClock);
   const endTimeParts = splitTimeParts(endClock);
-  const selectedGroup = groups.find((group) => group.id === groupId);
   const startCalendarDays = buildCalendarDays(startMonth);
   const endCalendarDays = buildCalendarDays(endMonth);
+  function getGroupsForSubject(nextSubjectId: string) {
+    if (nextSubjectId === "__none") return [];
+    return groups.filter(
+      (group) =>
+        group.allowed_subject_ids.length === 0 ||
+        group.allowed_subject_ids.includes(nextSubjectId)
+    );
+  }
+  const availableGroups = getGroupsForSubject(subjectId);
+  const selectedGroups = groups.filter((group) =>
+    selectedGroupIds.includes(group.id)
+  );
 
   const durationSummary = useMemo(() => {
     if (!startTime || !endTime) {
@@ -228,6 +248,22 @@ export default function ExamForm({
       invalid: false,
     };
   }, [endTime, startTime]);
+
+  function handleSubjectChange(nextSubjectId: string) {
+    const nextGroups = getGroupsForSubject(nextSubjectId);
+    setSubjectId(nextSubjectId);
+    setSelectedGroupIds((prev) =>
+      prev.filter((groupId) => nextGroups.some((group) => group.id === groupId))
+    );
+  }
+
+  function toggleGroup(groupId: string) {
+    setSelectedGroupIds((prev) =>
+      prev.includes(groupId)
+        ? prev.filter((id) => id !== groupId)
+        : [...prev, groupId]
+    );
+  }
 
   function adjustStartTime(part: "hour" | "minute", step: 1 | -1) {
     const hour =
@@ -273,7 +309,7 @@ export default function ExamForm({
       <CardHeader className="space-y-2">
         <CardTitle>Шалгалтын мэдээлэл</CardTitle>
         <CardDescription>
-          Шалгалтын огноо, цагийг илүү ойлгомжтой picker-ээр оруулна.
+          Хичээл, бүлэг, хугацаагаа сонгоод дараагийн шатанд асуултаа нэмнэ.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -304,8 +340,8 @@ export default function ExamForm({
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label>Хичээл</Label>
-              <Select value={subjectId} onValueChange={setSubjectId}>
+              <Label>Хичээл *</Label>
+              <Select value={subjectId} onValueChange={handleSubjectChange}>
                 <SelectTrigger>
                   <SelectValue placeholder="Хичээл сонгох" />
                 </SelectTrigger>
@@ -324,47 +360,89 @@ export default function ExamForm({
                 value={subjectId === "__none" ? "" : subjectId}
               />
             </div>
-
-            <div className="space-y-2">
-              <Label>Анги / Бүлэг</Label>
-              <Select value={groupId} onValueChange={setGroupId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Анги эсвэл бүлэг сонгох" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">Сонгоогүй</SelectItem>
-                  {groups.map((group) => (
-                    <SelectItem key={group.id} value={group.id}>
-                      {group.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <input
-                type="hidden"
-                name="group_id"
-                value={groupId === "__none" ? "" : groupId}
-              />
-            </div>
           </div>
 
-          {selectedGroup && (
-            <div className="flex items-start gap-3 rounded-xl border bg-muted/30 p-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
-                <School2 className="h-5 w-5 text-muted-foreground" />
-              </div>
+          <div className="space-y-4 rounded-2xl border bg-muted/15 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
-                <p className="font-medium">{selectedGroup.name}</p>
+                <Label>Оноох анги / бүлгүүд</Label>
                 <p className="text-sm text-muted-foreground">
-                  {selectedGroup.grade
-                    ? `${selectedGroup.grade}-р анги`
-                    : "Анги заагаагүй"}
-                  {" • "}
-                  {selectedGroup.group_type}
+                  Нэг шалгалтыг хэд хэдэн анги, сонгон бүлэгт зэрэг оноож болно.
                 </p>
               </div>
+              <Badge variant="outline" className="h-auto py-1">
+                {selectedGroupIds.length} бүлэг сонгосон
+              </Badge>
             </div>
-          )}
+
+            {selectedGroupIds.map((groupId) => (
+              <input key={groupId} type="hidden" name="group_ids" value={groupId} />
+            ))}
+
+            {subjectId === "__none" ? (
+              <div className="rounded-xl border border-dashed bg-background p-4 text-sm text-muted-foreground">
+                Эхлээд хичээлээ сонгоод, дараа нь энэ хичээлд хамрагдах анги,
+                сонгон бүлгүүдээ тэмдэглэнэ үү.
+              </div>
+            ) : availableGroups.length === 0 ? (
+              <div className="rounded-xl border border-dashed bg-background p-4 text-sm text-muted-foreground">
+                Сонгосон хичээл дээр танд оноогдсон бүлэг одоогоор алга байна.
+              </div>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {availableGroups.map((group) => {
+                  const selected = selectedGroupIds.includes(group.id);
+
+                  return (
+                    <button
+                      key={group.id}
+                      type="button"
+                      onClick={() => toggleGroup(group.id)}
+                      className={`rounded-xl border px-4 py-3 text-left transition-colors ${
+                        selected
+                          ? "border-primary bg-primary/5"
+                          : "border-border bg-background hover:border-primary/40 hover:bg-muted/20"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <p className="font-medium">{group.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {group.grade
+                              ? `${group.grade}-р анги`
+                              : "Анги заагаагүй"}
+                            {` · ${formatGroupTypeLabel(group.group_type)}`}
+                          </p>
+                        </div>
+                        <div
+                          className={`flex h-9 w-9 items-center justify-center rounded-lg ${
+                            selected ? "bg-primary/10 text-primary" : "bg-muted/40 text-muted-foreground"
+                          }`}
+                        >
+                          <School2 className="h-4 w-4" />
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {selectedGroups.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {selectedGroups.map((group) => (
+                  <button
+                    key={`selected-${group.id}`}
+                    type="button"
+                    onClick={() => toggleGroup(group.id)}
+                    className="rounded-full border bg-background px-3 py-1.5 text-sm text-foreground transition-colors hover:border-destructive/40 hover:text-destructive"
+                  >
+                    {group.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <div className="space-y-2">
             <Label htmlFor="description">Тайлбар</Label>

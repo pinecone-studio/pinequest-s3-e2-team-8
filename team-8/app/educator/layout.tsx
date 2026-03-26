@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/actions";
-import Header from "./_features/Header";
 import Sidebar from "./_features/Sidebar";
 
 export default async function EducatorLayout({
@@ -17,10 +16,9 @@ export default async function EducatorLayout({
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
-      <Header profile={profile} />
-      <div className="flex">
+      <div className="flex min-h-screen">
         <Sidebar />
-        <main className="flex-1 px-8 py-6">{children}</main>
+        <main className="flex-1 overflow-y-auto px-8 py-6">{children}</main>
       </div>
     </div>
   );

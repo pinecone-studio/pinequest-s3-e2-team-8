@@ -14,6 +14,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { BarChart2, MoreVertical, PlusCircle } from "lucide-react";
 import type { ExamLifecycleSummary } from "@/lib/exam-lifecycle";
 
@@ -39,6 +49,8 @@ interface Props {
 
 export default function ExamList({ exams }: Props) {
   const [currentTime, setCurrentTime] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     const updateCurrentTime = () => setCurrentTime(Date.now());
@@ -48,6 +60,19 @@ export default function ExamList({ exams }: Props) {
 
     return () => window.clearInterval(interval);
   }, []);
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    const result = await deleteExam(deleteTarget.id);
+    setDeleteTarget(null);
+    if (result?.error) setActionError(result.error);
+  }
+
+  async function handlePublish(examId: string) {
+    setActionError(null);
+    const result = await publishExam(examId);
+    if (result?.error) setActionError(result.error);
+  }
 
   function getFallbackLifecycle(startTime: string, endTime: string, isPublished: boolean) {
     const start = new Date(startTime).getTime();
@@ -103,6 +128,39 @@ export default function ExamList({ exams }: Props) {
   }
 
   return (
+    <>
+      {actionError && (
+        <div className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {actionError}
+          <button
+            className="ml-2 underline"
+            onClick={() => setActionError(null)}
+          >
+            Хаах
+          </button>
+        </div>
+      )}
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Шалгалт устгах уу?</AlertDialogTitle>
+            <AlertDialogDescription>
+              &ldquo;{deleteTarget?.title}&rdquo; шалгалтыг устгах гэж байна. Энэ үйлдлийг буцааж болохгүй.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Цуцлах</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDelete}
+            >
+              Устгах
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       {exams.map((exam) => {
         const qCount = exam.questions?.[0]?.count ?? 0;
@@ -142,14 +200,14 @@ export default function ExamList({ exams }: Props) {
                     </DropdownMenuItem>
                   )}
                   {!exam.is_published && qCount > 0 && (
-                    <DropdownMenuItem onClick={() => publishExam(exam.id)}>
+                    <DropdownMenuItem onClick={() => handlePublish(exam.id)}>
                       Нийтлэх
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="text-destructive"
-                    onClick={() => deleteExam(exam.id)}
+                    onClick={() => setDeleteTarget({ id: exam.id, title: exam.title })}
                   >
                     Устгах
                   </DropdownMenuItem>
@@ -186,5 +244,6 @@ export default function ExamList({ exams }: Props) {
         );
       })}
     </div>
+    </>
   );
 }

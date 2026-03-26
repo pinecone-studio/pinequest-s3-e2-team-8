@@ -24,22 +24,15 @@ export async function canManageExam(
 ) {
   if (await isAdminUser(supabase, userId)) return true;
 
-  const { data: ownedExam } = await supabase
-    .from("exams")
-    .select("id, subject_id")
-    .eq("id", examId)
-    .eq("created_by", userId)
-    .maybeSingle();
-
-  if (ownedExam) return true;
-
   const { data: exam } = await supabase
     .from("exams")
-    .select("subject_id")
+    .select("subject_id, created_by")
     .eq("id", examId)
     .maybeSingle();
 
-  if (!exam?.subject_id) return false;
+  if (!exam) return false;
+  if (exam.created_by === userId) return true;
+  if (!exam.subject_id) return false;
 
   const { data: examAssignments } = await supabase
     .from("exam_assignments")

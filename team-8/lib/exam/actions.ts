@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getExamAssignmentConflictError, getGroupAssignmentConflictError } from "@/lib/exam-conflicts";
 import { syncExamRecipients } from "@/lib/exam-recipients";
 import { getExamPublishGuardError } from "@/lib/exam-readiness";
+import { assignExamToGroupRecord } from "@/lib/exam-assignments";
 import {
   deriveStudentExamLifecycle,
   getEffectiveExamAccess,
@@ -39,7 +40,21 @@ export async function createExam(formData: FormData) {
   const description = formData.get("description") as string;
   const duration_minutes = parseInt(formData.get("duration_minutes") as string);
   const subject_id = ((formData.get("subject_id") as string) || "").trim() || null;
-  const group_id = ((formData.get("group_id") as string) || "").trim() || null;
+  const selectedGroupIds = Array.from(
+    new Set(
+      formData
+        .getAll("group_ids")
+        .map((value) => String(value).trim())
+        .filter(Boolean)
+    )
+  );
+  const legacyGroupId = ((formData.get("group_id") as string) || "").trim() || null;
+  const groupIds =
+    selectedGroupIds.length > 0
+      ? selectedGroupIds
+      : legacyGroupId
+        ? [legacyGroupId]
+        : [];
   // datetime-local input өгөгдлийг UB цагаар хадгалах (+08:00)
   const start_time = (formData.get("start_time") as string) + "+08:00";
   const end_time = (formData.get("end_time") as string) + "+08:00";
@@ -73,7 +88,7 @@ export async function createExam(formData: FormData) {
     }
   }
 
-  if (group_id) {
+  if (groupIds.length > 0) {
     if (allowedIds !== null) {
       if (!subject_id) {
         return { error: "Хичээл заавал сонгоно уу" };
@@ -85,18 +100,22 @@ export async function createExam(formData: FormData) {
         subject_id
       ) ?? [];
 
-      if (!allowedGroupIds.includes(group_id)) {
+      const invalidGroupId = groupIds.find(
+        (groupId) => !allowedGroupIds.includes(groupId)
+      );
+      if (invalidGroupId) {
         return { error: "Энэ бүлэгт энэ хичээлийн шалгалт оноох эрх байхгүй байна" };
       }
     }
 
-    const { data: group } = await supabase
+    const { data: groups } = await supabase
       .from("student_groups")
       .select("id")
-      .eq("id", group_id)
-      .maybeSingle();
+      .in("id", groupIds);
 
-    if (!group) return { error: "Сонгосон бүлэг олдсонгүй" };
+    if ((groups ?? []).length !== groupIds.length) {
+      return { error: "Сонгосон бүлгийн зарим нь олдсонгүй" };
+    }
   }
 
   const { data, error } = await supabase
@@ -120,37 +139,38 @@ export async function createExam(formData: FormData) {
 
   if (error) return { error: error.message };
 
-  if (group_id) {
-    const conflictError = await getGroupAssignmentConflictError(
-      supabase,
-      group_id,
-      data.id
-    );
-    if (conflictError) {
-      await supabase
-        .from("exams")
-        .delete()
-        .eq("id", data.id)
-        .eq("created_by", user.id);
-      return { error: conflictError };
+  if (groupIds.length > 0) {
+    for (const groupId of groupIds) {
+      const conflictError = await getGroupAssignmentConflictError(
+        supabase,
+        groupId,
+        data.id
+      );
+      if (conflictError) {
+        await supabase
+          .from("exams")
+          .delete()
+          .eq("id", data.id)
+          .eq("created_by", user.id);
+        return { error: conflictError };
+      }
     }
 
-    const { error: assignmentError } = await supabase.rpc(
-      "assign_exam_to_group",
-      {
-        p_exam_id: data.id,
-        p_group_id: group_id,
-        p_assigned_by: user.id,
-      }
-    );
+    for (const groupId of groupIds) {
+      const assignmentResult = await assignExamToGroupRecord(supabase, {
+        examId: data.id,
+        groupId,
+        assignedBy: user.id,
+      });
 
-    if (assignmentError) {
-      await supabase
-        .from("exams")
-        .delete()
-        .eq("id", data.id)
-        .eq("created_by", user.id);
-      return { error: assignmentError.message };
+      if ("error" in assignmentResult) {
+        await supabase
+          .from("exams")
+          .delete()
+          .eq("id", data.id)
+          .eq("created_by", user.id);
+        return { error: assignmentResult.error };
+      }
     }
   }
 
