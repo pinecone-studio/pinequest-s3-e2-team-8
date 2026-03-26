@@ -67,13 +67,13 @@ const questionTypes: QuestionType[] = [
 
 export default function NewQuestionPage() {
   return (
-    <div className="w-full mx-auto space-y-8 min-h-screen p-6">
+    <div className="w-full mx-auto space-y-8 min-h-screen p-4">
       <div className="space-y-1">
         <h1 className="text-xl font-bold text-slate-900">Шинэ асуулт үүсгэх</h1>
         <p className="text-sm text-slate-500">Асуултын мэдээлэл бөглөнө үү.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         {questionTypes.map((type, index) => (
           <Link
             key={index}
