@@ -1,5 +1,6 @@
+import PineconeLogo from "@/app/_icons/PineconeLogo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Bell, Search, X } from "lucide-react";
+import { Bell } from "lucide-react";
 
 export default function Header() {
   return (
