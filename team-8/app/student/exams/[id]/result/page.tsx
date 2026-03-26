@@ -12,6 +12,167 @@ import { getExamResult } from "@/lib/student/actions";
 import MathContent from "@/components/math/MathContent";
 import { CheckCircle2, XCircle, MinusCircle } from "lucide-react";
 
+function parseStringArray(value: unknown) {
+  try {
+    const parsed = JSON.parse(String(value ?? "[]")) as string[];
+    return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseMatchingPairs(options: unknown) {
+  if (!Array.isArray(options)) return [];
+
+  return options
+    .map((option) => {
+      const [left, right] = String(option).split("|||");
+      if (!left || !right) return null;
+      return { left, right };
+    })
+    .filter(
+      (item): item is { left: string; right: string } => Boolean(item)
+    );
+}
+
+function renderAnswerValue(
+  question: Record<string, unknown>,
+  rawAnswer: unknown,
+  fallback = "Хариулаагүй"
+) {
+  const type = String(question.type ?? "");
+
+  if (!rawAnswer || String(rawAnswer).trim() === "") {
+    return (
+      <span className="font-medium text-muted-foreground">{fallback}</span>
+    );
+  }
+
+  if (type === "multiple_response") {
+    const values = parseStringArray(rawAnswer);
+    if (values.length === 0) {
+      return (
+        <span className="font-medium text-muted-foreground">{fallback}</span>
+      );
+    }
+
+    return (
+      <div className="space-y-1">
+        {values.map((value) => (
+          <MathContent
+            key={value}
+            text={value}
+            className="prose prose-sm max-w-none font-medium text-foreground"
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (type === "matching") {
+    try {
+      const parsed = JSON.parse(String(rawAnswer)) as Record<string, string>;
+      const entries = Object.entries(parsed).filter(
+        ([, value]) => String(value ?? "").trim() !== ""
+      );
+
+      if (entries.length === 0) {
+        return (
+          <span className="font-medium text-muted-foreground">{fallback}</span>
+        );
+      }
+
+      return (
+        <div className="space-y-1.5">
+          {entries.map(([left, right]) => (
+            <div key={left} className="grid gap-1 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+              <MathContent
+                text={left}
+                className="prose prose-sm max-w-none font-medium text-foreground"
+              />
+              <span className="text-xs text-muted-foreground">→</span>
+              <MathContent
+                text={right}
+                className="prose prose-sm max-w-none font-medium text-foreground"
+              />
+            </div>
+          ))}
+        </div>
+      );
+    } catch {
+      return (
+        <MathContent
+          text={String(rawAnswer)}
+          className="prose prose-sm max-w-none font-medium text-foreground"
+        />
+      );
+    }
+  }
+
+  return (
+    <MathContent
+      text={String(rawAnswer)}
+      className="prose prose-sm max-w-none font-medium text-foreground"
+    />
+  );
+}
+
+function renderCorrectAnswer(question: Record<string, unknown>) {
+  const type = String(question.type ?? "");
+
+  if (type === "matching") {
+    const pairs = parseMatchingPairs(question.options);
+    if (pairs.length === 0) return null;
+
+    return (
+      <div className="space-y-1.5">
+        {pairs.map((pair) => (
+          <div
+            key={`${pair.left}-${pair.right}`}
+            className="grid gap-1 sm:grid-cols-[1fr_auto_1fr] sm:items-center"
+          >
+            <MathContent
+              text={pair.left}
+              className="prose prose-sm max-w-none font-medium text-green-700"
+            />
+            <span className="text-xs text-green-700">→</span>
+            <MathContent
+              text={pair.right}
+              className="prose prose-sm max-w-none font-medium text-green-700"
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (type === "multiple_response") {
+    const values = parseStringArray(question.correct_answer);
+    if (values.length === 0) return null;
+
+    return (
+      <div className="space-y-1">
+        {values.map((value) => (
+          <MathContent
+            key={value}
+            text={value}
+            className="prose prose-sm max-w-none font-medium text-green-700"
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (!question.correct_answer) return null;
+
+  return (
+    <MathContent
+      text={String(question.correct_answer)}
+      className="prose prose-sm max-w-none font-medium text-green-700"
+    />
+  );
+}
+
 export default async function ExamResultPage({
   params,
 }: {
@@ -22,11 +183,12 @@ export default async function ExamResultPage({
 
   if (!data) redirect("/student/exams");
 
+  const examMeta = Array.isArray(data.exams) ? data.exams[0] : data.exams;
   const totalScore = data.total_score ?? 0;
   const maxScore = data.max_score ?? 0;
   const percentage =
     maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
-  const passingScore = data.exams?.passing_score ?? 60;
+  const passingScore = examMeta?.passing_score ?? 60;
   const passed = percentage >= passingScore;
   const isGraded = data.status === "graded";
 
@@ -38,8 +200,8 @@ export default async function ExamResultPage({
       <Card className="text-center">
         <CardHeader>
           <CardTitle className="text-2xl">Шалгалтын үр дүн</CardTitle>
-          {data.exams?.title && (
-            <p className="text-muted-foreground">{data.exams.title}</p>
+          {examMeta?.title && (
+            <p className="text-muted-foreground">{examMeta.title}</p>
           )}
         </CardHeader>
         <CardContent className="space-y-4">
@@ -124,36 +286,37 @@ export default async function ExamResultPage({
                   </div>
 
                   <div className="text-sm">
-                    <MathContent text={String(q.content ?? "")} />
+                    <MathContent
+                      html={(q.content_html as string | null) ?? null}
+                      text={String(q.content ?? "")}
+                    />
                   </div>
 
                   {/* Сурагчийн хариулт */}
                   <div className="rounded bg-muted/50 px-3 py-2 text-sm">
                     <span className="text-muted-foreground">Таны хариулт: </span>
-                    <span className={`font-medium ${
-                      isEssay ? "" : isCorrect ? "text-green-700" : "text-red-700"
-                    }`}>
-                      {String(ans.answer || "Хариулаагүй")}
-                    </span>
+                    <div
+                      className={`mt-1 ${
+                        isEssay ? "" : isCorrect ? "text-green-700" : "text-red-700"
+                      }`}
+                    >
+                      {renderAnswerValue(q as Record<string, unknown>, ans.answer)}
+                    </div>
                   </div>
 
                   {/* Зөв хариулт (буруу үед) */}
-                  {!isEssay && !isCorrect && q?.correct_answer && (
+                  {!isEssay && !isCorrect && (
                     <div className="rounded bg-green-50 px-3 py-2 text-sm">
                       <span className="text-muted-foreground">Зөв хариулт: </span>
-                      <span className="font-medium text-green-700">
-                        {typeof q.correct_answer === "string"
-                          ? String(q.correct_answer).replace(/^"|"$/g, "")
-                          : JSON.stringify(q.correct_answer)}
-                      </span>
+                      <div className="mt-1">{renderCorrectAnswer(q as Record<string, unknown>)}</div>
                     </div>
                   )}
 
                   {/* Тайлбар */}
                   {q?.explanation && (
-                    <p className="text-xs text-muted-foreground italic">
-                      {String(q.explanation)}
-                    </p>
+                    <div className="text-xs italic text-muted-foreground">
+                      <MathContent text={String(q.explanation)} />
+                    </div>
                   )}
 
                   {/* Багшийн feedback (essay) */}

@@ -1,8 +1,5 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/actions";
-import { DashboardHeader } from "@/components/dashboard/header";
-import { DashboardSidebar } from "@/components/dashboard/sidebar";
-
 import Sidebar from "./_features/Sidebar";
 import Header from "./_features/Header";
 

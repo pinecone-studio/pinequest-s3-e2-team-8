@@ -6,11 +6,13 @@ import { useState } from "react";
 import type { UserRole } from "@/types";
 import {
   BarChart3,
+  CalendarDays,
   CheckSquare,
   FileText,
   LayoutDashboard,
   Loader2,
   LucideIcon,
+  UserCircle2,
   Users,
 } from "lucide-react";
 
@@ -24,17 +26,22 @@ const navItems: Record<UserRole, NavItem[]> = {
   student: [
     { label: "Хянах самбар", href: "/student", icon: LayoutDashboard },
     { label: "Шалгалтууд", href: "/student/exams", icon: FileText },
+    { label: "Миний хуваарь", href: "/student/schedule", icon: CalendarDays },
     { label: "Үр дүн", href: "/student/results", icon: BarChart3 },
+    { label: "Профайл", href: "/student/profile", icon: UserCircle2 },
   ],
   teacher: [
     { label: "Хянах самбар", href: "/educator", icon: LayoutDashboard },
     { label: "Шалгалт удирдах", href: "/educator/exams", icon: FileText },
+    { label: "Хуваарь", href: "/educator/schedule", icon: CalendarDays },
     { label: "Асуултын сан", href: "/educator/question-bank", icon: FileText },
     { label: "Бүлгүүд", href: "/educator/groups", icon: Users },
     { label: "Дүн", href: "/educator/grading", icon: CheckSquare },
+    { label: "Профайл", href: "/educator/profile", icon: UserCircle2 },
   ],
   admin: [
     { label: "Хянах самбар", href: "/admin", icon: LayoutDashboard },
+    { label: "Хичээл оноолт", href: "/admin/teachers", icon: Users },
     { label: "Хэрэглэгчид", href: "/admin/users", icon: Users },
   ],
 };

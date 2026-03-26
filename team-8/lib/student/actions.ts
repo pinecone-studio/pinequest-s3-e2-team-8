@@ -8,6 +8,15 @@ import {
   startExamRateLimit,
   submitExamRateLimit,
 } from "@/lib/redis";
+import {
+  getSnapshotQuestionMap,
+  getStoredPublishedExamSnapshot,
+} from "@/lib/exam-snapshot";
+import {
+  deriveStudentExamLifecycle,
+  getEffectiveExamAccess,
+  type RecipientAccessOverride,
+} from "@/lib/exam-session-lifecycle";
 import { attachPassagesToQuestions } from "@/lib/question-passages";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -26,18 +35,67 @@ const STUDENT_EXAM_SELECT = `
   id,
   title,
   description,
+  subject_id,
   start_time,
   end_time,
   duration_minutes,
   is_published,
   shuffle_questions,
+  shuffle_options,
   max_attempts,
   passing_score,
   created_at
 `;
 
+type StudentExamBase = {
+  id: string;
+  title: string;
+  description: string | null;
+  subject_id: string | null;
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  is_published: boolean;
+  shuffle_questions: boolean;
+  shuffle_options: boolean;
+  max_attempts: number;
+  passing_score: number | null;
+  created_at: string;
+};
+
+type AssignedExamRow = {
+  exam_id: string;
+  access_start_time: string | null;
+  access_end_time: string | null;
+  max_attempts_override: number | null;
+  excused_at: string | null;
+  status_note: string | null;
+  exams?: Record<string, unknown> | Record<string, unknown>[] | null;
+};
+
+type StudentExamAttemptSummary = {
+  status: string | null;
+  attemptNumber: number;
+};
+
+type StudentExamRecord = Record<string, unknown>;
+
+export type StudentAssignedExam = StudentExamBase & {
+  mySessionStatus: string | null;
+  myLifecycleStatus: string;
+  myLifecycleLabel: string;
+  hasRetakeOverride: boolean;
+  isExcused: boolean;
+  status_note: string | null;
+};
+
 function getQuestionCacheKey(examId: string) {
   return `exam:${examId}:questions`;
+}
+
+function getRelationObject<T>(value: T | T[] | null | undefined) {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
 }
 
 function getSessionAnswersCacheKey(sessionId: string, userId: string) {
@@ -123,6 +181,11 @@ async function getAssignedPublishedExamRows(
     .select(
       `
       exam_id,
+      access_start_time,
+      access_end_time,
+      max_attempts_override,
+      excused_at,
+      status_note,
       exams!inner (${STUDENT_EXAM_SELECT})
     `
     )
@@ -134,17 +197,63 @@ async function getAssignedPublishedExamRows(
   }
 
   const { data } = await query;
-  return data ?? [];
+  return ((data ?? []) as unknown) as AssignedExamRow[];
 }
 
-async function getAssignedPublishedExam(
+function mergeAssignedExamAccess(
+  row: AssignedExamRow,
+  latestSession: StudentExamAttemptSummary | null = null
+) : StudentAssignedExam | null {
+  const exam = getRelationObject(row.exams);
+  if (!exam) return null;
+  const examRecord = exam as StudentExamBase;
+
+  const examAccess = getEffectiveExamAccess(
+    {
+      start_time: String(examRecord.start_time),
+      end_time: String(examRecord.end_time),
+      max_attempts: Number(examRecord.max_attempts ?? 1),
+    },
+    row as RecipientAccessOverride
+  );
+  const lifecycle = deriveStudentExamLifecycle({
+    exam: {
+      start_time: String(examRecord.start_time),
+      end_time: String(examRecord.end_time),
+      max_attempts: Number(examRecord.max_attempts ?? 1),
+    },
+    recipient: row,
+    latestSessionStatus: latestSession?.status ?? null,
+    latestAttemptNumber: latestSession?.attemptNumber ?? 0,
+  });
+
+  return {
+    ...examRecord,
+    start_time: examAccess.effectiveStartTime,
+    end_time: examAccess.effectiveEndTime,
+    max_attempts: examAccess.effectiveMaxAttempts,
+    mySessionStatus: latestSession?.status ?? null,
+    myLifecycleStatus: lifecycle.key,
+    myLifecycleLabel: lifecycle.label,
+    hasRetakeOverride: examAccess.hasRetakeOverride,
+    isExcused: examAccess.isExcused,
+    status_note: row.status_note ?? null,
+  };
+}
+
+async function getAssignedPublishedExamRecord(
   supabase: SupabaseServerClient,
   userId: string,
   examId: string
 ) {
   const rows = await getAssignedPublishedExamRows(supabase, userId, examId);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (rows[0] as any)?.exams ?? null;
+  const row = rows[0] ?? null;
+  if (!getRelationObject(row?.exams)) return null;
+
+  return {
+    row,
+    exam: mergeAssignedExamAccess(row),
+  };
 }
 
 function getPercentage(totalScore: number, maxScore: number) {
@@ -191,9 +300,35 @@ function parseMatchingPairs(options: unknown) {
     );
 }
 
+function getStudentSafeQuestions<
+  T extends { correct_answer?: unknown; passage_id?: string | null }
+>(
+  questions: T[]
+) {
+  return questions.map((question) => {
+    const safeQuestion = { ...question } as T & {
+      options?: unknown;
+      type?: unknown;
+      explanation?: unknown;
+      matching_prompts?: string[];
+      matching_choices?: string[];
+    };
+    delete safeQuestion.correct_answer;
+    delete safeQuestion.explanation;
+
+    if (safeQuestion.type === "matching") {
+      const matchingPairs = parseMatchingPairs(safeQuestion.options);
+      safeQuestion.matching_prompts = matchingPairs.map((pair) => pair.left);
+      safeQuestion.matching_choices = matchingPairs.map((pair) => pair.right);
+    }
+
+    return safeQuestion;
+  });
+}
+
 /**
  * Оюутанд оноогдсон шалгалтуудыг авах
- * exam_recipients → exams
+ * exam_recipients → exams + хамгийн сүүлийн session status
  */
 export async function getStudentExams() {
   const supabase = await createClient();
@@ -203,18 +338,54 @@ export async function getStudentExams() {
   if (!user) return [];
 
   const rows = await getAssignedPublishedExamRows(supabase, user.id);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const exams = rows.map((row: any) => row.exams).filter(Boolean);
+  const rawExams = rows
+    .map((row) => getRelationObject(row.exams))
+    .filter((exam): exam is StudentExamRecord => Boolean(exam));
 
-  return Array.from(
-    new Map(
-      exams.map((exam) => [exam.id as string, exam])
-    ).values()
-  ).sort(
-    (a, b) =>
-      new Date(a.start_time as string).getTime() -
-      new Date(b.start_time as string).getTime()
+  const uniqueExams = Array.from(
+    new Map(rawExams.map((exam) => [String(exam.id), exam])).values()
   );
+
+  if (uniqueExams.length === 0) return [];
+
+  // Хамгийн сүүлийн session status-г нэмэх
+  const { data: sessions } = await supabase
+    .from("exam_sessions")
+    .select("exam_id, status, attempt_number")
+    .eq("user_id", user.id)
+    .in("exam_id", uniqueExams.map((e) => e.id as string))
+    .order("attempt_number", { ascending: false });
+
+  const sessionMap = new Map<string, StudentExamAttemptSummary>();
+  for (const s of sessions ?? []) {
+    if (!sessionMap.has(s.exam_id as string)) {
+      sessionMap.set(s.exam_id as string, {
+        status: s.status as string,
+        attemptNumber: Number(s.attempt_number ?? 0),
+      });
+    }
+  }
+
+  const rowMap = new Map(rows.map((row) => [row.exam_id, row]));
+
+  return uniqueExams
+    .map((exam) =>
+      mergeAssignedExamAccess(
+        rowMap.get(String(exam.id)) as AssignedExamRow,
+        sessionMap.get(String(exam.id)) ?? null
+      )
+    )
+    .filter(
+      (
+        exam
+      ): exam is NonNullable<ReturnType<typeof mergeAssignedExamAccess>> =>
+        Boolean(exam)
+    )
+    .sort(
+      (left, right) =>
+        new Date(String(left.start_time)).getTime() -
+        new Date(String(right.start_time)).getTime()
+    );
 }
 
 /**
@@ -227,8 +398,15 @@ export async function getExamForStudent(examId: string) {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const exam = await getAssignedPublishedExam(supabase, user.id, examId);
-  if (!exam) return null;
+  const assignedExam = await getAssignedPublishedExamRecord(
+    supabase,
+    user.id,
+    examId
+  );
+  if (!assignedExam?.exam) return null;
+  const exam = assignedExam.exam;
+
+  if (assignedExam.row.excused_at) return null;
 
   // Redis cache шалгах
   const cacheKey = getQuestionCacheKey(examId);
@@ -238,10 +416,35 @@ export async function getExamForStudent(examId: string) {
       typeof cached === "string"
         ? JSON.parse(cached)
         : cached;
-    return parsed as {
-      exam: Record<string, unknown>;
-      questions: Record<string, unknown>[];
+    return {
+      exam: {
+        ...((parsed as { examBase?: Record<string, unknown> }).examBase ?? {}),
+        ...exam,
+      },
+      questions: (parsed as { questions?: Record<string, unknown>[] })
+        .questions ?? [],
     };
+  }
+
+  const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
+  if (snapshot) {
+    const result = {
+      exam: {
+        ...exam,
+        ...snapshot.exam,
+      },
+      questions: getStudentSafeQuestions(snapshot.questions),
+    };
+    const cachePayload = {
+      examBase: snapshot.exam,
+      questions: result.questions,
+    };
+
+    const endTime = new Date(exam.end_time).getTime();
+    const now = Date.now();
+    const ttlSeconds = Math.max(Math.floor((endTime - now) / 1000), 60);
+    await redis.set(cacheKey, JSON.stringify(cachePayload), { ex: ttlSeconds });
+    return result;
   }
 
   const { data: questions } = await supabase
@@ -250,22 +453,26 @@ export async function getExamForStudent(examId: string) {
     .eq("exam_id", examId)
     .order("order_index", { ascending: true });
 
-  const safeQuestions = (questions ?? []).map((question) => {
-    const safeQuestion = { ...question };
-    delete safeQuestion.correct_answer;
-    return safeQuestion;
-  });
+  const safeQuestions = getStudentSafeQuestions(
+    (questions ?? []) as Array<
+      Record<string, unknown> & { passage_id?: string | null }
+    >
+  );
   const passageAwareQuestions = await attachPassagesToQuestions(
     supabase,
     safeQuestions
   );
   const result = { exam, questions: passageAwareQuestions };
+  const cachePayload = {
+    examBase: getRelationObject(assignedExam.row.exams) ?? exam,
+    questions: passageAwareQuestions,
+  };
 
   // Redis-д cache хийх (шалгалтын хугацаа дуустал)
   const endTime = new Date(exam.end_time).getTime();
   const now = Date.now();
   const ttlSeconds = Math.max(Math.floor((endTime - now) / 1000), 60);
-  await redis.set(cacheKey, JSON.stringify(result), { ex: ttlSeconds });
+  await redis.set(cacheKey, JSON.stringify(cachePayload), { ex: ttlSeconds });
 
   return result;
 }
@@ -287,8 +494,16 @@ export async function startExamSession(examId: string) {
     return { error: "Хэт олон эхлүүлэх оролдлого илгээлээ. Түр хүлээгээд дахин оролдоно уу." };
   }
 
-  const exam = await getAssignedPublishedExam(supabase, user.id, examId);
-  if (!exam) return { error: "Энэ шалгалт танд оноогдоогүй байна" };
+  const assignedExam = await getAssignedPublishedExamRecord(
+    supabase,
+    user.id,
+    examId
+  );
+  if (!assignedExam?.exam) return { error: "Энэ шалгалт танд оноогдоогүй байна" };
+  if (assignedExam.row.excused_at) {
+    return { error: "Та энэ шалгалтаас чөлөөлөгдсөн байна" };
+  }
+  const exam = assignedExam.exam;
 
   const now = Date.now();
   const startTime = new Date(exam.start_time as string).getTime();
@@ -365,7 +580,7 @@ export async function startExamSession(examId: string) {
     const maxAttempts = Number(exam.max_attempts ?? 1);
 
     if (nextAttemptNumber > maxAttempts) {
-      return { error: "Шалгалтын оролдлогын эрх дууссан байна" };
+      return { error: "Шалгалтын оролдлогын эрх дууссан байна", redirectToResult: true };
     }
 
     const { data: session, error } = await supabase
@@ -431,6 +646,16 @@ export async function saveAnswer(
     return { success: true, skipped: true };
   }
 
+  if (answer === "") {
+    if (existingAnswer == null) {
+      return { success: true, skipped: true };
+    }
+
+    await redis.hdel(redisKey, questionId);
+    await redis.expire(redisKey, 7200);
+    return { success: true };
+  }
+
   await redis.hset(redisKey, { [questionId]: answer });
   await redis.expire(redisKey, 7200); // 2 цаг
   return { success: true };
@@ -459,7 +684,7 @@ export async function submitExam(sessionId: string) {
     .select("id, exam_id, status, total_score, max_score")
     .eq("id", sessionId)
     .eq("user_id", user.id)
-    .single();
+    .maybeSingle();
 
   if (!session) return { error: "Session олдсонгүй" };
 
@@ -523,27 +748,43 @@ export async function submitExam(sessionId: string) {
       if (flushError) return { error: flushError.message };
     }
 
+    const snapshot = await getStoredPublishedExamSnapshot(
+      supabase,
+      session.exam_id
+    );
+    const snapshotQuestionMap = getSnapshotQuestionMap(snapshot);
+
     const [{ data: answers }, { data: questions }] = await Promise.all([
       supabase
         .from("answers")
-        .select("id, answer, score, questions(type, correct_answer, points, options)")
+        .select("id, question_id, answer, score")
         .eq("session_id", sessionId),
-      supabase
-        .from("questions")
-        .select("id, type, points")
-        .eq("exam_id", session.exam_id),
+      snapshot
+        ? Promise.resolve({
+            data: snapshot.questions.map((question) => ({
+              id: question.id,
+              type: question.type,
+              points: question.points,
+              correct_answer: question.correct_answer,
+              options: question.options,
+            })),
+          })
+        : supabase
+            .from("questions")
+            .select("id, type, points, correct_answer, options")
+            .eq("exam_id", session.exam_id),
     ]);
 
     let totalScore = 0;
-    const maxScore = (questions ?? []).reduce(
+    const maxScore = snapshot?.stats.total_points ?? (questions ?? []).reduce(
       (sum, question) => sum + Number(question.points ?? 0),
       0
     );
 
     for (const ans of answers ?? []) {
-      const question = Array.isArray(ans.questions)
-        ? ans.questions[0]
-        : ans.questions;
+      const question =
+        snapshotQuestionMap.get(ans.question_id) ??
+        (questions ?? []).find((item) => item.id === ans.question_id);
       if (!question) continue;
 
       if (
@@ -613,10 +854,10 @@ export async function submitExam(sessionId: string) {
     }
 
     // Essay асуулт байхгүй бол автоматаар "graded" болгоно
-    const hasEssayQuestions = (questions ?? []).some((q) => q.type === "essay");
+    const hasEssayQuestions = snapshot?.stats.has_essay_questions ?? (questions ?? []).some((q) => q.type === "essay");
     const finalStatus = hasEssayQuestions ? "submitted" : "graded";
 
-    await supabase
+    const { error: updateError } = await supabase
       .from("exam_sessions")
       .update({
         status: finalStatus,
@@ -626,6 +867,8 @@ export async function submitExam(sessionId: string) {
       })
       .eq("id", sessionId)
       .eq("status", "in_progress");
+
+    if (updateError) return { error: updateError.message };
 
     await redis.del(redisKey);
     await cacheSessionMeta(sessionId, user.id, finalStatus);
@@ -702,9 +945,12 @@ export async function getExamResult(examId: string) {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: session } = await supabase
+  const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
+  const snapshotQuestionMap = getSnapshotQuestionMap(snapshot);
+
+  const { data: session, error: sessionError } = await supabase
     .from("exam_sessions")
-    .select("*, exams(title, passing_score)")
+    .select("id, status, total_score, max_score, submitted_at, attempt_number, exam_id, exams(title, passing_score)")
     .eq("exam_id", examId)
     .eq("user_id", user.id)
     .in("status", ["submitted", "graded"])
@@ -712,18 +958,33 @@ export async function getExamResult(examId: string) {
     .limit(1)
     .maybeSingle();
 
+  if (sessionError) {
+    console.error("[getExamResult] session query error:", sessionError.message);
+    return null;
+  }
+
   if (!session) return null;
 
   // Per-question breakdown: хариулт + асуулт мэдээлэл
   const { data: answers } = await supabase
     .from("answers")
     .select(
-      "id, answer, score, is_correct, feedback, questions(id, type, content, correct_answer, points, order_index, explanation)"
+      "id, question_id, answer, score, is_correct, feedback, questions(id, type, content, content_html, image_url, options, correct_answer, points, order_index, explanation)"
     )
     .eq("session_id", session.id)
     .order("questions(order_index)", { ascending: true });
 
-  return { ...session, answers: answers ?? [] };
+  const snapshotAwareAnswers = (answers ?? []).map((answer) => {
+    const snapshotQuestion = snapshotQuestionMap.get(String(answer.question_id));
+    if (!snapshotQuestion) return answer;
+
+    return {
+      ...answer,
+      questions: snapshotQuestion,
+    };
+  });
+
+  return { ...session, answers: snapshotAwareAnswers };
 }
 
 /**

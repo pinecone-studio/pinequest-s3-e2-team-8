@@ -1125,6 +1125,42 @@ set
   usage_count = excluded.usage_count,
   updated_at = now();
 
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'question_bank'
+      and column_name = 'visibility'
+  ) then
+    update public.question_bank
+    set
+      visibility = 'shared_subject',
+      last_used_at = now() - interval '3 day'
+    where id in (
+      '80000000-0000-0000-0000-000000000001'::uuid,
+      '80000000-0000-0000-0000-000000000005'::uuid,
+      '80000000-0000-0000-0000-000000000007'::uuid
+    );
+
+    update public.question_bank
+    set
+      visibility = 'admin_curated',
+      last_used_at = now() - interval '1 day'
+    where id in (
+      '80000000-0000-0000-0000-000000000003'::uuid,
+      '80000000-0000-0000-0000-000000000010'::uuid
+    );
+
+    update public.question_bank
+    set
+      visibility = 'archived',
+      last_used_at = now() - interval '45 day'
+    where id = '80000000-0000-0000-0000-000000000006'::uuid;
+  end if;
+end $$;
+
 -- -------------------------------------------------
 -- Sessions, answers, and proctor events
 -- -------------------------------------------------

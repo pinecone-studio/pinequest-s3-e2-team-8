@@ -49,16 +49,16 @@ export async function syncExamRecipients(
     new Set((assignments ?? []).map((assignment) => assignment.group_id))
   );
 
-  const { error: deleteError } = await supabase
-    .from("exam_recipients")
-    .delete()
-    .eq("exam_id", examId);
-
-  if (deleteError) {
-    return { success: false, error: deleteError.message };
-  }
-
   if (groupIds.length === 0) {
+    const { error: deleteAllError } = await supabase
+      .from("exam_recipients")
+      .delete()
+      .eq("exam_id", examId);
+
+    if (deleteAllError) {
+      return { success: false, error: deleteAllError.message };
+    }
+
     return { success: true, recipientCount: 0 };
   }
 
@@ -76,7 +76,30 @@ export async function syncExamRecipients(
   );
 
   if (studentIds.length === 0) {
+    const { error: deleteAllError } = await supabase
+      .from("exam_recipients")
+      .delete()
+      .eq("exam_id", examId);
+
+    if (deleteAllError) {
+      return { success: false, error: deleteAllError.message };
+    }
+
     return { success: true, recipientCount: 0 };
+  }
+
+  const { error: deleteError } = await supabase
+    .from("exam_recipients")
+    .delete()
+    .eq("exam_id", examId)
+    .not(
+      "student_id",
+      "in",
+      `(${studentIds.map((id) => `"${id}"`).join(",")})`
+    );
+
+  if (deleteError) {
+    return { success: false, error: deleteError.message };
   }
 
   const fallbackAssignedBy =
@@ -90,7 +113,10 @@ export async function syncExamRecipients(
 
   const { error: insertError } = await supabase
     .from("exam_recipients")
-    .insert(rows);
+    .upsert(rows, {
+      onConflict: "exam_id,student_id",
+      ignoreDuplicates: true,
+    });
 
   if (insertError) {
     return { success: false, error: insertError.message };

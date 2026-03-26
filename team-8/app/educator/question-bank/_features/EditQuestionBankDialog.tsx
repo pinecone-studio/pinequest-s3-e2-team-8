@@ -6,7 +6,12 @@ import {
   deleteQuestionBankItem,
   updateQuestionBankItem,
 } from "@/lib/question/actions";
-import type { QuestionBank, QuestionType, Subject } from "@/types";
+import type {
+  QuestionBank,
+  QuestionBankVisibility,
+  QuestionType,
+  Subject,
+} from "@/types";
 import LatexShortcutPanel from "@/components/math/LatexShortcutPanel";
 import { Button } from "@/components/ui/button";
 import {
@@ -57,6 +62,7 @@ const difficultyOptions = [
 interface EditQuestionBankDialogProps {
   question: QuestionBank;
   subjects: Subject[];
+  canAdminCurate: boolean;
 }
 
 interface MatchingPair {
@@ -121,11 +127,15 @@ function getMatchingPairs(question: QuestionBank): MatchingPair[] {
 export default function EditQuestionBankDialog({
   question,
   subjects,
+  canAdminCurate,
 }: EditQuestionBankDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<QuestionType>(question.type);
   const [subjectId, setSubjectId] = useState(question.subject_id ?? "__none");
+  const [visibility, setVisibility] = useState<QuestionBankVisibility>(
+    question.visibility
+  );
   const [difficulty, setDifficulty] = useState(question.difficulty);
   const [options, setOptions] = useState<string[]>(() => getChoiceOptions(question));
   const [correctAnswer, setCorrectAnswer] = useState(question.correct_answer ?? "");
@@ -147,6 +157,7 @@ export default function EditQuestionBankDialog({
   function resetState(nextType: QuestionType = question.type) {
     setType(nextType);
     setSubjectId(question.subject_id ?? "__none");
+    setVisibility(question.visibility);
     setDifficulty(question.difficulty);
     setOptions(getChoiceOptions(question));
     setCorrectAnswer(question.correct_answer ?? "");
@@ -252,6 +263,7 @@ export default function EditQuestionBankDialog({
     formData.set("type", type);
     formData.set("difficulty", difficulty);
     formData.set("subject_id", subjectId === "__none" ? "" : subjectId);
+    formData.set("visibility", visibility);
 
     if (type === "multiple_choice") {
       const validOptions = options.map((option) => option.trim()).filter(Boolean);
@@ -402,6 +414,34 @@ export default function EditQuestionBankDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Хадгалах төлөв</Label>
+            <Select
+              value={visibility}
+              onValueChange={(value) =>
+                setVisibility(value as QuestionBankVisibility)
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="private">Хувийн</SelectItem>
+                <SelectItem value="shared_subject">Хичээлийн дундын</SelectItem>
+                {canAdminCurate && (
+                  <SelectItem value="admin_curated">
+                    Баталгаажсан сан
+                  </SelectItem>
+                )}
+                <SelectItem value="archived">Архив</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Shared болон curated төлөвт оруулахдаа тухайн асуултад хичээл
+              оноосон байх шаардлагатай.
+            </p>
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

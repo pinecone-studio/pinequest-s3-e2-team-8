@@ -14,7 +14,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { BarChart2, MoreVertical, PlusCircle } from "lucide-react";
+import type { ExamLifecycleSummary } from "@/lib/exam-lifecycle";
 
 interface Exam {
   id: string;
@@ -29,6 +40,7 @@ interface Exam {
   shuffle_options: boolean;
   subjects?: { name: string } | null;
   questions: { count: number }[];
+  lifecycle: ExamLifecycleSummary | null;
 }
 
 interface Props {
@@ -37,6 +49,8 @@ interface Props {
 
 export default function ExamList({ exams }: Props) {
   const [currentTime, setCurrentTime] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     const updateCurrentTime = () => setCurrentTime(Date.now());
@@ -47,19 +61,52 @@ export default function ExamList({ exams }: Props) {
     return () => window.clearInterval(interval);
   }, []);
 
-  function getScheduleStatus(startTime: string, endTime: string) {
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    const result = await deleteExam(deleteTarget.id);
+    setDeleteTarget(null);
+    if (result?.error) setActionError(result.error);
+  }
+
+  async function handlePublish(examId: string) {
+    setActionError(null);
+    const result = await publishExam(examId);
+    if (result?.error) setActionError(result.error);
+  }
+
+  function getFallbackLifecycle(startTime: string, endTime: string, isPublished: boolean) {
     const start = new Date(startTime).getTime();
     const end = new Date(endTime).getTime();
 
+    if (!isPublished) {
+      return {
+        label: "Ноорог",
+        description: "Шалгалтаа нийтлэхээс өмнө агуулга, assignment-аа шалгана уу.",
+        variant: "outline" as const,
+      };
+    }
+
     if (currentTime < start) {
-      return { label: "Удахгүй", variant: "outline" as const };
+      return {
+        label: "Товлогдсон",
+        description: "Шалгалт нийтлэгдсэн бөгөөд эхлэх цагаа хүлээж байна.",
+        variant: "outline" as const,
+      };
     }
 
     if (currentTime <= end) {
-      return { label: "Явагдаж байна", variant: "secondary" as const };
+      return {
+        label: "Явагдаж байна",
+        description: "Сурагчид одоогоор шалгалт өгч байна.",
+        variant: "default" as const,
+      };
     }
 
-    return { label: "Дууссан", variant: "secondary" as const };
+    return {
+      label: "Дууссан",
+      description: "Шалгалтын идэвхтэй хугацаа дууссан байна.",
+      variant: "secondary" as const,
+    };
   }
 
   if (exams.length === 0) {
@@ -81,11 +128,50 @@ export default function ExamList({ exams }: Props) {
   }
 
   return (
+    <>
+      {actionError && (
+        <div className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {actionError}
+          <button
+            className="ml-2 underline"
+            onClick={() => setActionError(null)}
+          >
+            Хаах
+          </button>
+        </div>
+      )}
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Шалгалт устгах уу?</AlertDialogTitle>
+            <AlertDialogDescription>
+              &ldquo;{deleteTarget?.title}&rdquo; шалгалтыг устгах гэж байна. Энэ үйлдлийг буцааж болохгүй.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Цуцлах</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDelete}
+            >
+              Устгах
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       {exams.map((exam) => {
         const qCount = exam.questions?.[0]?.count ?? 0;
         const startDate = formatDateTimeUB(exam.start_time);
-        const scheduleStatus = getScheduleStatus(exam.start_time, exam.end_time);
+        const lifecycle =
+          exam.lifecycle ??
+          getFallbackLifecycle(
+            exam.start_time,
+            exam.end_time,
+            exam.is_published
+          );
         return (
           <Card key={exam.id} className="flex flex-col">
             <CardHeader className="flex-row items-start justify-between space-y-0 pb-2">
@@ -114,14 +200,14 @@ export default function ExamList({ exams }: Props) {
                     </DropdownMenuItem>
                   )}
                   {!exam.is_published && qCount > 0 && (
-                    <DropdownMenuItem onClick={() => publishExam(exam.id)}>
+                    <DropdownMenuItem onClick={() => handlePublish(exam.id)}>
                       Нийтлэх
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="text-destructive"
-                    onClick={() => deleteExam(exam.id)}
+                    onClick={() => setDeleteTarget({ id: exam.id, title: exam.title })}
                   >
                     Устгах
                   </DropdownMenuItem>
@@ -133,15 +219,10 @@ export default function ExamList({ exams }: Props) {
                 <p className="text-xs text-muted-foreground line-clamp-2">{exam.description}</p>
               )}
               <div className="flex flex-wrap gap-2">
-                <Badge variant={exam.is_published ? "default" : "secondary"}>
-                  {exam.is_published ? "Нийтлэгдсэн" : "Ноорог"}
-                </Badge>
+                <Badge variant={lifecycle.variant}>{lifecycle.label}</Badge>
                 <Badge variant="outline">{qCount} асуулт</Badge>
                 <Badge variant="outline">{exam.duration_minutes} мин</Badge>
                 <Badge variant="outline">{exam.max_attempts} оролдлого</Badge>
-                <Badge variant={scheduleStatus.variant}>
-                  {scheduleStatus.label}
-                </Badge>
                 {exam.subjects?.name && (
                   <Badge variant="secondary">{exam.subjects.name}</Badge>
                 )}
@@ -149,10 +230,13 @@ export default function ExamList({ exams }: Props) {
                   <Badge variant="outline">Сонголт холих</Badge>
                 )}
               </div>
-              <p className="text-xs text-muted-foreground">{startDate}</p>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <p>{startDate}</p>
+                <p>{lifecycle.description}</p>
+              </div>
               <Link href={`/educator/exams/${exam.id}/questions`} className="mt-auto">
                 <Button variant="outline" size="sm" className="w-full">
-                  Засах
+                  {exam.is_published ? "Харах" : "Засах"}
                 </Button>
               </Link>
             </CardContent>
@@ -160,5 +244,6 @@ export default function ExamList({ exams }: Props) {
         );
       })}
     </div>
+    </>
   );
 }

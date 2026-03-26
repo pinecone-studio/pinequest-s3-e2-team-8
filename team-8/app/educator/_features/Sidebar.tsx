@@ -1,19 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation"; // Added to handle the black background active state
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { logout } from "@/lib/auth/actions";
 import {
-  CalendarDays,
-  LucideIcon,
-  ChevronLeft,
-  HomeIcon,
   Book,
-  Plus,
-  FileSpreadsheet,
-  LogOut,
+  CalendarDays,
+  CheckSquare,
+  ChevronLeft,
   FilePlusCorner,
+  FileSpreadsheet,
+  HomeIcon,
+  LogOut,
+  LucideIcon,
+  Plus,
+  UserCircle2,
   Users,
 } from "lucide-react";
 import Logo from "@/app/_icons/Logo";
@@ -35,7 +37,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { href: "/educator/new-question", label: "Шинэ асуулт", icon: Plus },
   {
     href: "/educator/create-exam",
-    label: "Шинэ шалгалт",
+    label: "Шалгалт үүсгэх",
     icon: FilePlusCorner,
   },
   {
@@ -44,23 +46,21 @@ const ALL_NAV_ITEMS: NavItem[] = [
     icon: FileSpreadsheet,
   },
   { href: "/educator/groups", label: "Бүлгүүд", icon: Users },
+  { href: "/educator/grading", label: "Дүн шалгах", icon: CheckSquare },
   { href: "/educator/schedule", label: "Хуваарь", icon: CalendarDays },
+  { href: "/educator/profile", label: "Профайл", icon: UserCircle2 },
 ];
-
-const MENU_NAV_ITEMS: NavItem[] = ALL_NAV_ITEMS;
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   return (
     <aside
-      className={`flex h-screen flex-col justify-between  bg-white pt-6 shadow-xl transition-all duration-200 ${
+      className={`flex h-screen flex-col justify-between bg-white pt-6 shadow-xl transition-all duration-200 ${
         isCollapsed ? "w-[70px] px-2" : "w-[260px] px-4"
       }`}
     >
-      {/* Navigation Items */}
       <div className="flex flex-col gap-6">
         <div className="flex items-start justify-between">
           {!isCollapsed ? <Logo /> : <div className="h-6 w-6" />}
@@ -68,7 +68,7 @@ export default function Sidebar() {
             type="button"
             aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             onClick={() => setIsCollapsed((prev) => !prev)}
-            className="rounded-lg  p-1 text-gray-600 transition-colors hover:border-[#4078C1] hover:text-[#4078C1]"
+            className="rounded-lg p-1 text-gray-600 transition-colors hover:text-[#4078C1]"
           >
             <ChevronLeft
               size={28}
@@ -78,11 +78,13 @@ export default function Sidebar() {
             />
           </button>
         </div>
+
         <nav className="flex flex-col gap-2">
-          {MENU_NAV_ITEMS.map((item) => {
+          {ALL_NAV_ITEMS.map((item) => {
             const Icon = item.icon;
-            // Checks if current path matches the link
-            const isActive = pathname === item.href;
+            const isActive =
+              pathname === item.href ||
+              (item.href !== "/educator" && pathname.startsWith(item.href));
 
             return (
               <Link
@@ -97,11 +99,11 @@ export default function Sidebar() {
                 <Icon
                   size={20}
                   strokeWidth={isActive ? 2.5 : 2}
-                  className={`${
+                  className={
                     isActive
                       ? "text-[#4078C1]"
                       : "text-[#575555] group-hover:text-[#4078C1]"
-                  }`}
+                  }
                 />
                 {!isCollapsed && <span>{item.label}</span>}
               </Link>
@@ -110,16 +112,16 @@ export default function Sidebar() {
         </nav>
       </div>
 
-      <div className="mt-auto flex items-center justify-between ">
+      <div className="mt-auto flex items-center justify-between">
         <form action={logout}>
           <button
             type="submit"
-            className={`group flex items-center gap-3 cursor-pointer rounded-md transition-colors hover:text-[#4078C1] ${
+            className={`group flex cursor-pointer items-center gap-3 rounded-md transition-colors hover:text-[#4078C1] ${
               isCollapsed ? "justify-center pl-4 pb-4" : "pl-3"
             }`}
             aria-label="Гарах"
           >
-            <LogOut className="w-7 h-7" />
+            <LogOut className="h-7 w-7" />
             {!isCollapsed && (
               <p className="text-[15px] font-semibold text-[#7F7F7F] group-hover:text-[#4078C1]">
                 Гарах

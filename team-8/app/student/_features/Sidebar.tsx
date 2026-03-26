@@ -5,20 +5,13 @@ import { usePathname } from "next/navigation"; // Added to handle the black back
 import { useState } from "react";
 import { logout } from "@/lib/auth/actions";
 import {
-  CalendarDays,
   LucideIcon,
   ChevronLeft,
   HomeIcon,
-  Book,
-  Plus,
   ListCheck,
-  FileSpreadsheet,
   LogOut,
-  FilePlusCorner,
-  Users,
 } from "lucide-react";
 import Logo from "@/app/_icons/Logo";
-import SideBarImage from "@/app/_icons/SideBarImage";
 import Tsunh from "@/app/_icons/Tsunh";
 
 interface NavItem {
@@ -36,7 +29,6 @@ const MENU_NAV_ITEMS: NavItem[] = ALL_NAV_ITEMS;
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   return (

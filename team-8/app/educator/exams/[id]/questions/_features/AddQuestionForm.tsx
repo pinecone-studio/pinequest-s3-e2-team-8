@@ -3,6 +3,7 @@
 import { useState, type ClipboardEvent } from "react";
 import { addQuestion } from "@/lib/question/actions";
 import { parsePastedQuestionText } from "@/lib/question/paste";
+import MathContent from "@/components/math/MathContent";
 import LatexShortcutPanel from "@/components/math/LatexShortcutPanel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -64,6 +65,10 @@ function createEmptyMatchingPair(): MatchingPair {
 export default function AddQuestionForm({ examId }: Props) {
   const [type, setType] = useState<QuestionType>("multiple_choice");
   const [isFormulaToolOpen, setIsFormulaToolOpen] = useState(false);
+  const [activeFormulaTarget, setActiveFormulaTarget] = useState({
+    id: "content",
+    label: "Асуулт",
+  });
   const [content, setContent] = useState("");
   const [options, setOptions] = useState(["", ""]);
   const [correctAnswer, setCorrectAnswer] = useState("");
@@ -320,7 +325,7 @@ export default function AddQuestionForm({ examId }: Props) {
               aria-expanded={isFormulaToolOpen}
               onClick={() => setIsFormulaToolOpen((prev) => !prev)}
             >
-              Formula Tool
+              Томьёоны самбар
               <span className="ml-2 text-xs text-muted-foreground">
                 {isFormulaToolOpen ? "Хаах" : "Нээх"}
               </span>
@@ -352,9 +357,10 @@ export default function AddQuestionForm({ examId }: Props) {
           {isFormulaToolOpen && (
             <div id="question-formula-tool">
               <LatexShortcutPanel
-                targetId="content"
-                title="Formula Tool"
-                description="Асуулт доторх томьёо, язгуур, хими, физикийн тэмдэгтээ шууд оруулна."
+                targetId={activeFormulaTarget.id}
+                targetLabel={activeFormulaTarget.label}
+                title="Томьёоны самбар"
+                description="Cursor-оо байрлуулсан талбартаа томьёо, тэмдэгтээ шууд оруулна."
               />
             </div>
           )}
@@ -367,6 +373,12 @@ export default function AddQuestionForm({ examId }: Props) {
               value={content}
               onChange={(event) => setContent(event.target.value)}
               onPaste={handleContentPaste}
+              onFocus={() =>
+                setActiveFormulaTarget({
+                  id: "content",
+                  label: "Асуулт",
+                })
+              }
               placeholder="Асуултаа энд бичнэ үү..."
               rows={4}
               required
@@ -376,6 +388,21 @@ export default function AddQuestionForm({ examId }: Props) {
               текстээ paste хийвэл автоматаар таньж бөглөнө.
             </p>
           </div>
+
+          {content.trim() && (
+            <div className="space-y-2 rounded-xl border bg-muted/10 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">Урьдчилан харах</p>
+                <p className="text-xs text-muted-foreground">
+                  Томьёо хэрхэн render болохыг эндээс шууд шалгана.
+                </p>
+              </div>
+              <MathContent
+                text={content}
+                className="prose max-w-none text-sm leading-6 text-foreground"
+              />
+            </div>
+          )}
 
           {(type === "multiple_choice" || type === "multiple_response") && (
             <div className="space-y-3">
@@ -405,8 +432,15 @@ export default function AddQuestionForm({ examId }: Props) {
                       disabled={!option.trim()}
                     />
                     <Input
+                      id={`option-${index}`}
                       value={option}
                       onChange={(event) => updateOption(index, event.target.value)}
+                      onFocus={() =>
+                        setActiveFormulaTarget({
+                          id: `option-${index}`,
+                          label: `Хариулт ${index + 1}`,
+                        })
+                      }
                       placeholder={`Хариулт ${index + 1}`}
                     />
                     {options.length > 2 && (
@@ -436,6 +470,12 @@ export default function AddQuestionForm({ examId }: Props) {
                 id="fill_blank_answer"
                 value={correctAnswer}
                 onChange={(event) => setCorrectAnswer(event.target.value)}
+                onFocus={() =>
+                  setActiveFormulaTarget({
+                    id: "fill_blank_answer",
+                    label: "Нөхөх зөв хариулт",
+                  })
+                }
                 placeholder="Зөв хариултаа бичнэ үү"
               />
             </div>
@@ -456,17 +496,31 @@ export default function AddQuestionForm({ examId }: Props) {
                   className="grid gap-2 md:grid-cols-[1fr_auto_1fr_auto] md:items-center"
                 >
                   <Input
+                    id={`matching-left-${index}`}
                     value={pair.left}
                     onChange={(event) =>
                       updateMatchingPair(index, "left", event.target.value)
+                    }
+                    onFocus={() =>
+                      setActiveFormulaTarget({
+                        id: `matching-left-${index}`,
+                        label: `Холбох мөр ${index + 1} · Зүүн тал`,
+                      })
                     }
                     placeholder={`Зүүн тал ${index + 1}`}
                   />
                   <span className="text-center text-sm text-muted-foreground">→</span>
                   <Input
+                    id={`matching-right-${index}`}
                     value={pair.right}
                     onChange={(event) =>
                       updateMatchingPair(index, "right", event.target.value)
+                    }
+                    onFocus={() =>
+                      setActiveFormulaTarget({
+                        id: `matching-right-${index}`,
+                        label: `Холбох мөр ${index + 1} · Баруун тал`,
+                      })
                     }
                     placeholder={`Баруун тал ${index + 1}`}
                   />

@@ -2,9 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import {
+  getSnapshotQuestionMap,
+  getStoredPublishedExamSnapshot,
+} from "@/lib/exam-snapshot";
+import { canManageExam, isAdminUser } from "@/lib/exam-scope";
 import { attachPassagesToAnswers } from "@/lib/question-passages";
-
-type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
 function getRelationObject<T>(value: T | T[] | null | undefined) {
   if (Array.isArray(value)) {
@@ -12,71 +15,6 @@ function getRelationObject<T>(value: T | T[] | null | undefined) {
   }
 
   return value ?? null;
-}
-
-async function isAdminUser(
-  supabase: SupabaseServerClient,
-  userId: string
-) {
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", userId)
-    .maybeSingle();
-
-  return profile?.role === "admin";
-}
-
-async function canManageExam(
-  supabase: SupabaseServerClient,
-  examId: string,
-  userId: string
-) {
-  // Admin can manage any exam
-  if (await isAdminUser(supabase, userId)) return true;
-
-  // Owner can always manage their own exam
-  const { data: exam } = await supabase
-    .from("exams")
-    .select("id, subject_id")
-    .eq("id", examId)
-    .eq("created_by", userId)
-    .maybeSingle();
-
-  if (exam) return true;
-
-  // Teacher can manage if they have a teaching_assignment for the exam's subject
-  // in one of the groups the exam is actually assigned to (group-specific, not subject-wide)
-  const { data: examData } = await supabase
-    .from("exams")
-    .select("subject_id")
-    .eq("id", examId)
-    .maybeSingle();
-
-  if (!examData?.subject_id) return false;
-
-  // Get groups this exam is assigned to
-  const { data: examAssignments } = await supabase
-    .from("exam_assignments")
-    .select("group_id")
-    .eq("exam_id", examId);
-
-  if (!examAssignments || examAssignments.length === 0) return false;
-
-  const groupIds = examAssignments.map((a) => a.group_id);
-
-  // Check if teacher has an active teaching_assignment for this subject in any of those groups
-  const { data: ta } = await supabase
-    .from("teaching_assignments")
-    .select("id")
-    .eq("teacher_id", userId)
-    .eq("subject_id", examData.subject_id)
-    .in("group_id", groupIds)
-    .eq("is_active", true)
-    .limit(1)
-    .maybeSingle();
-
-  return !!ta;
 }
 
 export async function getPendingSubmissions() {
@@ -172,6 +110,9 @@ export async function getSessionForGrading(sessionId: string) {
   const canManage = await canManageExam(supabase, exam.id, user.id);
   if (!canManage) return null;
 
+  const snapshot = await getStoredPublishedExamSnapshot(supabase, exam.id);
+  const snapshotQuestionMap = getSnapshotQuestionMap(snapshot);
+
   const [{ data: answers }, proctorEventsResult] = await Promise.all([
     supabase
       .from("answers")
@@ -190,10 +131,21 @@ export async function getSessionForGrading(sessionId: string) {
       ? []
       : (proctorEventsResult.data ?? []);
 
-  const passageAwareAnswers = await attachPassagesToAnswers(
-    supabase,
-    answers ?? []
-  );
+  const passageAwareAnswers =
+    snapshot && snapshotQuestionMap.size > 0
+      ? (answers ?? []).map((answer) => {
+          const questionId = String(
+            Array.isArray(answer.questions)
+              ? answer.questions[0]?.id
+              : answer.questions?.id
+          );
+          const snapshotQuestion = snapshotQuestionMap.get(questionId);
+
+          return snapshotQuestion
+            ? { ...answer, questions: snapshotQuestion }
+            : answer;
+        })
+      : await attachPassagesToAnswers(supabase, answers ?? []);
 
   return { session, answers: passageAwareAnswers, proctorEvents };
 }
@@ -276,15 +228,26 @@ export async function finalizeGrading(sessionId: string) {
     return { error: "Энэ шалгалтын дүнг баталгаажуулах эрх алга" };
   }
 
+  const snapshot = await getStoredPublishedExamSnapshot(
+    supabase,
+    session.exam_id
+  );
+
   const [{ data: answers }, { data: questions }] = await Promise.all([
     supabase
       .from("answers")
       .select("score")
       .eq("session_id", sessionId),
-    supabase
-      .from("questions")
-      .select("points")
-      .eq("exam_id", session.exam_id),
+    snapshot
+      ? Promise.resolve({
+          data: snapshot.questions.map((question) => ({
+            points: question.points,
+          })),
+        })
+      : supabase
+          .from("questions")
+          .select("points")
+          .eq("exam_id", session.exam_id),
   ]);
 
   let totalScore = 0;

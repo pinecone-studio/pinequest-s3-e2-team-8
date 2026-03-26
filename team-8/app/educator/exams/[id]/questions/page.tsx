@@ -1,14 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { publishExam } from "@/lib/exam/actions";
-import { getExamById } from "@/lib/exam/actions";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { getExamById, publishExam } from "@/lib/exam/actions";
+import { getExamReadiness } from "@/lib/exam-readiness";
 import {
   getQuestionPassagesByExam,
   getQuestionsByExam,
 } from "@/lib/question/actions";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import ExamReadinessPanel from "@/components/exams/exam-readiness-panel";
 import AddQuestionForm from "./_features/AddQuestionForm";
 import QuestionImportActions from "./_features/QuestionImportActions";
 import QuestionList from "./_features/QuestionList";
@@ -26,6 +27,23 @@ export default async function ExamQuestionsPage({ params }: Props) {
   ]);
 
   if (!exam) notFound();
+
+  const readiness = await getExamReadiness(id, {
+    exam: {
+      id: exam.id,
+      title: exam.title,
+      subject_id: exam.subject_id,
+      start_time: exam.start_time,
+      end_time: exam.end_time,
+      duration_minutes: exam.duration_minutes,
+      is_published: exam.is_published,
+    },
+    questions: questions.map((question) => ({
+      type: question.type,
+      points: question.points,
+    })),
+    passageCount: passages.length,
+  });
 
   async function handlePublish() {
     "use server";
@@ -62,14 +80,20 @@ export default async function ExamQuestionsPage({ params }: Props) {
           </div>
         </div>
 
-        {!exam.is_published && questions.length > 0 && (
+        {!exam.is_published && (
           <form action={handlePublish}>
-            <Button type="submit" className="bg-green-600 hover:bg-green-700">
+            <Button
+              type="submit"
+              className="bg-green-600 hover:bg-green-700"
+              disabled={!readiness?.canPublish}
+            >
               Нийтлэх
             </Button>
           </form>
         )}
       </div>
+
+      {readiness && <ExamReadinessPanel readiness={readiness} examId={id} />}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-4">
@@ -87,8 +111,8 @@ export default async function ExamQuestionsPage({ params }: Props) {
 
           {exam.is_published ? (
             <div className="rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
-              Энэ шалгалт нийтлэгдсэн тул асуулт нэмэх, устгах, сангаас импортлох
-              боломжгүй.
+              Энэ шалгалт нийтлэгдсэн тул асуулт нэмэх, устгах, сангаас
+              импортлох боломжгүй.
             </div>
           ) : (
             <AddQuestionForm examId={id} passages={passages} />

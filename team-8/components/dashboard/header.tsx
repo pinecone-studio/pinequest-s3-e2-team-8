@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { logout } from "@/lib/auth/actions";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import PineconeLogo from "@/app/_icons/PineconeLogo";
 import {
@@ -25,6 +26,12 @@ const roleColors: Record<string, string> = {
   student: "bg-blue-500/10 text-blue-700 dark:text-blue-300",
   teacher: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
   admin: "bg-purple-500/10 text-purple-700 dark:text-purple-300",
+};
+
+const profilePaths: Record<string, string> = {
+  student: "/student/profile",
+  teacher: "/educator/profile",
+  admin: "/admin",
 };
 
 export function DashboardHeader({ profile }: { profile: Profile }) {
@@ -53,16 +60,29 @@ export function DashboardHeader({ profile }: { profile: Profile }) {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="relative h-9 w-9 rounded-full">
               <Avatar className="h-9 w-9">
+                {profile.avatar_url ? (
+                  <AvatarImage
+                    src={profile.avatar_url}
+                    alt={profile.full_name || profile.email}
+                  />
+                ) : null}
                 <AvatarFallback>{initials}</AvatarFallback>
               </Avatar>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <div className="px-2 py-1.5">
-              <p className="text-sm font-medium">{profile.full_name || "Хэрэглэгч"}</p>
+              <p className="text-sm font-medium">
+                {profile.full_name || "Хэрэглэгч"}
+              </p>
               <p className="text-xs text-muted-foreground">{profile.email}</p>
             </div>
             <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href={profilePaths[profile.role] ?? "/"}>
+                Профайл
+              </Link>
+            </DropdownMenuItem>
             <form action={logout}>
               <DropdownMenuItem asChild className="cursor-pointer text-destructive">
                 <button type="submit" className="w-full text-left">

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getAllowedSubjectIds } from "@/lib/teacher/permissions";
 import {
   buildQuestionImportDrafts,
   draftToQuestionFormShape,
@@ -11,7 +12,173 @@ import {
   attachPassagesToQuestions,
   getQuestionPassagesByExam as loadQuestionPassagesByExam,
 } from "@/lib/question-passages";
-import type { QuestionImportDraft } from "@/types";
+import type {
+  Difficulty,
+  QuestionBank,
+  QuestionImportDraft,
+  QuestionBankSummary,
+  QuestionBankVisibility,
+} from "@/types";
+
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+type QuestionBankRow = Pick<
+  QuestionBank,
+  "id" | "created_by" | "subject_id" | "visibility"
+>;
+
+type QuestionBankAccessContext = {
+  userId: string;
+  isAdmin: boolean;
+  allowedSubjectIds: string[];
+  allowedSubjectSet: Set<string>;
+};
+
+const QUESTION_BANK_VISIBILITIES: QuestionBankVisibility[] = [
+  "private",
+  "shared_subject",
+  "admin_curated",
+  "archived",
+];
+const QUESTION_BANK_GOVERNANCE_ERROR =
+  "Question bank governance feature ашиглахын өмнө хамгийн сүүлийн DB migration-аа apply хийнэ үү.";
+const QUESTION_BANK_USAGE_TRACKING_WARNING =
+  "Асуулт шалгалт руу амжилттай орлоо, гэхдээ ашиглалтын тоо шинэчлэгдсэнгүй. Usage tracking migration-аа apply хийгээд schema cache-аа refresh хийнэ үү.";
+
+function isQuestionBankVisibility(
+  value: string
+): value is QuestionBankVisibility {
+  return QUESTION_BANK_VISIBILITIES.includes(value as QuestionBankVisibility);
+}
+
+async function getQuestionBankAccessContext(
+  supabase: SupabaseServerClient,
+  userId: string
+): Promise<QuestionBankAccessContext> {
+  const allowedSubjectIds = await getAllowedSubjectIds(supabase, userId);
+
+  return {
+    userId,
+    isAdmin: allowedSubjectIds === null,
+    allowedSubjectIds: allowedSubjectIds ?? [],
+    allowedSubjectSet: new Set(allowedSubjectIds ?? []),
+  };
+}
+
+function buildQuestionBankScopeQuery(
+  supabase: SupabaseServerClient,
+  context: QuestionBankAccessContext
+) {
+  const baseQuery = supabase
+    .from("question_bank")
+    .select("*, subjects(name)")
+    .order("updated_at", { ascending: false });
+
+  if (context.isAdmin) {
+    return baseQuery;
+  }
+
+  if (context.allowedSubjectIds.length === 0) {
+    return baseQuery.eq("created_by", context.userId);
+  }
+
+  return baseQuery.or(
+    [
+      `created_by.eq.${context.userId}`,
+      `and(visibility.eq.shared_subject,subject_id.in.(${context.allowedSubjectIds.join(",")}))`,
+      `and(visibility.eq.admin_curated,subject_id.in.(${context.allowedSubjectIds.join(",")}))`,
+    ].join(",")
+  );
+}
+
+function canViewQuestionBankItem(
+  question: QuestionBankRow,
+  context: QuestionBankAccessContext
+) {
+  if (context.isAdmin || question.created_by === context.userId) {
+    return true;
+  }
+
+  if (!question.subject_id) {
+    return false;
+  }
+
+  return (
+    (question.visibility === "shared_subject" ||
+      question.visibility === "admin_curated") &&
+    context.allowedSubjectSet.has(question.subject_id)
+  );
+}
+
+function canManageQuestionBankItem(
+  question: QuestionBankRow,
+  context: QuestionBankAccessContext
+) {
+  if (question.visibility === "admin_curated") {
+    return context.isAdmin;
+  }
+
+  return context.isAdmin || question.created_by === context.userId;
+}
+
+function buildQuestionBankSummary(
+  questions: QuestionBank[],
+  context: QuestionBankAccessContext
+): QuestionBankSummary {
+  const now = Date.now();
+
+  return questions.reduce<QuestionBankSummary>(
+    (summary, question) => {
+      summary.total += 1;
+      summary.total_usage_count += Number(question.usage_count ?? 0);
+
+      if (canManageQuestionBankItem(question, context)) {
+        summary.manageable += 1;
+      }
+
+      if (
+        question.last_used_at &&
+        now - new Date(question.last_used_at).getTime() <=
+          1000 * 60 * 60 * 24 * 30
+      ) {
+        summary.recently_used_count += 1;
+      }
+
+      if (question.visibility === "private") summary.private_count += 1;
+      if (question.visibility === "shared_subject") {
+        summary.shared_subject_count += 1;
+      }
+      if (question.visibility === "admin_curated") {
+        summary.admin_curated_count += 1;
+      }
+      if (question.visibility === "archived") summary.archived_count += 1;
+
+      return summary;
+    },
+    {
+      total: 0,
+      manageable: 0,
+      private_count: 0,
+      shared_subject_count: 0,
+      admin_curated_count: 0,
+      archived_count: 0,
+      total_usage_count: 0,
+      recently_used_count: 0,
+    }
+  );
+}
+
+function normalizeQuestionBankRecord(
+  question: Partial<QuestionBank>
+): QuestionBank {
+  return {
+    ...question,
+    visibility:
+      isQuestionBankVisibility(String(question.visibility ?? ""))
+        ? (question.visibility as QuestionBankVisibility)
+        : "private",
+    last_used_at: question.last_used_at ?? null,
+  } as QuestionBank;
+}
 
 function getQuestionTypeMigrationHint(error: { code?: string; message?: string } | null) {
   if (!error) return null;
@@ -269,6 +436,7 @@ export async function addQuestion(examId: string, formData: FormData) {
       .from("question_bank")
       .update({
         usage_count: Number(matchingBankEntry.usage_count ?? 0) + 1,
+        last_used_at: new Date().toISOString(),
         points,
         explanation,
         content_html,
@@ -294,6 +462,7 @@ export async function addQuestion(examId: string, formData: FormData) {
       tags,
       explanation,
       usage_count: 1,
+      last_used_at: new Date().toISOString(),
     });
   }
 
@@ -601,48 +770,60 @@ export async function getQuestionPassagesByExam(examId: string) {
   return loadQuestionPassagesByExam(supabase, examId);
 }
 
-export async function getQuestionBank() {
+export async function getQuestionBankDashboardData() {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return [];
-
-  // Base query: teacher's own questions
-  let query = supabase
-    .from("question_bank")
-    .select("*, subjects(name)")
-    .eq("created_by", user.id)
-    .order("updated_at", { ascending: false });
-
-  // Subject scope: strict filter by teacher's assigned subjects
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  const isAdmin = profile?.role === "admin";
-
-  if (!isAdmin) {
-    const { data: tsRows } = await supabase
-      .from("teacher_subjects")
-      .select("subject_id")
-      .eq("teacher_id", user.id);
-
-    const allowedSubjectIds = tsRows?.map((r) => r.subject_id) ?? [];
-
-    if (allowedSubjectIds.length > 0) {
-      // Show questions from their subjects OR questions with no subject
-      query = query.or(
-        `subject_id.in.(${allowedSubjectIds.join(",")}),subject_id.is.null`
-      );
-    }
-    // If no subjects assigned, they only see their own questions (base query already filters by created_by)
+  if (!user) {
+    return {
+      questions: [] as QuestionBank[],
+      summary: {
+        total: 0,
+        manageable: 0,
+        private_count: 0,
+        shared_subject_count: 0,
+        admin_curated_count: 0,
+        archived_count: 0,
+        total_usage_count: 0,
+        recently_used_count: 0,
+      } satisfies QuestionBankSummary,
+      viewerId: null,
+      isAdmin: false,
+    };
   }
 
-  const { data } = await query;
-  return data ?? [];
+  const context = await getQuestionBankAccessContext(supabase, user.id);
+  const { data, error } = await buildQuestionBankScopeQuery(supabase, context);
+  const fallbackQuery = context.isAdmin
+    ? supabase
+        .from("question_bank")
+        .select("*, subjects(name)")
+        .order("updated_at", { ascending: false })
+    : supabase
+        .from("question_bank")
+        .select("*, subjects(name)")
+        .eq("created_by", user.id)
+        .order("updated_at", { ascending: false });
+  const scopedRows =
+    error?.code === "42703"
+      ? (await fallbackQuery).data ?? []
+      : data ?? [];
+  const questions = (scopedRows as Partial<QuestionBank>[]).map(
+    normalizeQuestionBankRecord
+  );
+
+  return {
+    questions,
+    summary: buildQuestionBankSummary(questions, context),
+    viewerId: user.id,
+    isAdmin: context.isAdmin,
+  };
+}
+
+export async function getQuestionBank() {
+  const data = await getQuestionBankDashboardData();
+  return data.questions;
 }
 
 export async function importQuestionFromBank(
@@ -662,16 +843,34 @@ export async function importQuestionFromBank(
     return { error: "Нийтлэгдсэн шалгалтад сангаас асуулт нэмэх боломжгүй" };
   }
 
-  const { data: bankQuestion } = await supabase
+  const context = await getQuestionBankAccessContext(supabase, user.id);
+  const { data: bankQuestion, error: bankQuestionError } = await supabase
     .from("question_bank")
     .select(
-      "id, type, content, content_html, image_url, options, correct_answer, points, explanation, usage_count"
+      "id, subject_id, created_by, visibility, type, content, content_html, image_url, options, correct_answer, points, explanation, usage_count, last_used_at"
     )
     .eq("id", bankQuestionId)
-    .eq("created_by", user.id)
     .maybeSingle();
 
+  if (bankQuestionError?.code === "42703") {
+    return { error: QUESTION_BANK_GOVERNANCE_ERROR };
+  }
   if (!bankQuestion) return { error: "Асуултын сангийн бичлэг олдсонгүй" };
+  if (!canViewQuestionBankItem(bankQuestion, context)) {
+    return { error: "Энэ асуултыг импортлох эрх байхгүй байна" };
+  }
+  if (bankQuestion.visibility === "archived") {
+    return { error: "Архивласан асуултыг шалгалт руу оруулах боломжгүй" };
+  }
+  if (
+    exam.subject_id &&
+    bankQuestion.subject_id &&
+    exam.subject_id !== bankQuestion.subject_id
+  ) {
+    return {
+      error: "Өөр хичээлийн асуултыг энэ шалгалт руу оруулах боломжгүй",
+    };
+  }
 
   const { data: existing } = await supabase
     .from("questions")
@@ -699,15 +898,25 @@ export async function importQuestionFromBank(
 
   if (insertError) return { error: insertError.message };
 
-  await supabase
-    .from("question_bank")
-    .update({
-      usage_count: Number(bankQuestion.usage_count ?? 0) + 1,
-    })
-    .eq("id", bankQuestionId);
+  // Use SECURITY DEFINER RPC so non-owners importing shared questions can also increment.
+  // Import itself should still succeed even if usage analytics cannot be updated yet.
+  const { error: usageError } = await supabase.rpc(
+    "increment_bank_question_usage",
+    { p_item_id: bankQuestionId }
+  );
 
   revalidatePath(`/educator/exams/${examId}/questions`);
   revalidatePath("/educator/question-bank");
+  if (usageError) {
+    return {
+      success: true,
+      warning:
+        usageError.code === "PGRST202" || usageError.code === "42883"
+          ? QUESTION_BANK_USAGE_TRACKING_WARNING
+          : `Асуулт импортлогдлоо, гэхдээ ашиглалтын тоо шинэчлэгдэхэд алдаа гарлаа: ${usageError.message}`,
+    };
+  }
+
   return { success: true };
 }
 
@@ -721,40 +930,31 @@ export async function updateQuestionBankItem(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
 
-  const { data: existing } = await supabase
+  const context = await getQuestionBankAccessContext(supabase, user.id);
+  const { data: existing, error: existingError } = await supabase
     .from("question_bank")
-    .select("id")
+    .select("id, created_by, subject_id, visibility")
     .eq("id", bankQuestionId)
-    .eq("created_by", user.id)
     .maybeSingle();
 
+  if (existingError?.code === "42703") {
+    return { error: QUESTION_BANK_GOVERNANCE_ERROR };
+  }
   if (!existing) return { error: "Асуултын сангийн бичлэг олдсонгүй" };
+  if (!canManageQuestionBankItem(existing, context)) {
+    return { error: "Энэ асуултын сангийн бичлэгийг засах эрх байхгүй байна" };
+  }
 
-  // Subject guard: ensure teacher can only set subject to one they're assigned to
   const newSubjectId = String(formData.get("subject_id") || "").trim() || null;
-  if (newSubjectId) {
-    const { data: profileData } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (profileData?.role !== "admin") {
-      const { data: tsRow } = await supabase
-        .from("teacher_subjects")
-        .select("subject_id")
-        .eq("teacher_id", user.id)
-        .eq("subject_id", newSubjectId)
-        .maybeSingle();
-
-      if (!tsRow) {
-        return { error: "Энэ хичээлд асуулт оноох эрх байхгүй байна" };
-      }
-    }
+  if (newSubjectId && !context.isAdmin && !context.allowedSubjectSet.has(newSubjectId)) {
+    return { error: "Энэ хичээлд асуулт оноох эрх байхгүй байна" };
   }
 
   const type = String(formData.get("type") || "multiple_choice");
   const subject_id = String(formData.get("subject_id") || "").trim() || null;
+  const visibilityValue =
+    String(formData.get("visibility") || existing.visibility).trim() ||
+    existing.visibility;
   const content = String(formData.get("content") || "").trim();
   const content_html = String(formData.get("content_html") || "").trim() || null;
   const image_url = String(formData.get("image_url") || "").trim() || null;
@@ -768,6 +968,20 @@ export async function updateQuestionBankItem(
 
   if (!content && !content_html) {
     return { error: "Асуултын агуулга хоосон байж болохгүй." };
+  }
+  if (!isQuestionBankVisibility(visibilityValue)) {
+    return { error: "Хадгалах төлөв буруу байна." };
+  }
+  if (!context.isAdmin && visibilityValue === "admin_curated") {
+    return { error: "Admin curated төлөвийг зөвхөн админ онооно." };
+  }
+  if (
+    (visibilityValue === "shared_subject" || visibilityValue === "admin_curated") &&
+    !subject_id
+  ) {
+    return {
+      error: "Хуваалцах эсвэл curated болгохын тулд хичээл заавал сонгоно.",
+    };
   }
 
   const questionPayload = buildQuestionPayload(
@@ -783,6 +997,7 @@ export async function updateQuestionBankItem(
     .from("question_bank")
     .update({
       subject_id,
+      visibility: visibilityValue,
       type,
       content,
       content_html,
@@ -795,8 +1010,7 @@ export async function updateQuestionBankItem(
       explanation,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", bankQuestionId)
-    .eq("created_by", user.id);
+    .eq("id", bankQuestionId);
 
   if (error) return { error: error.message };
 
@@ -811,16 +1025,134 @@ export async function deleteQuestionBankItem(bankQuestionId: string) {
   } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
 
+  const context = await getQuestionBankAccessContext(supabase, user.id);
+  const { data: existing, error: existingError } = await supabase
+    .from("question_bank")
+    .select("id, created_by, subject_id, visibility")
+    .eq("id", bankQuestionId)
+    .maybeSingle();
+
+  if (existingError?.code === "42703") {
+    return { error: QUESTION_BANK_GOVERNANCE_ERROR };
+  }
+  if (!existing) return { error: "Асуултын сангийн бичлэг олдсонгүй" };
+  if (!canManageQuestionBankItem(existing, context)) {
+    return { error: "Энэ асуултын сангийн бичлэгийг устгах эрх байхгүй байна" };
+  }
+
   const { error } = await supabase
     .from("question_bank")
     .delete()
-    .eq("id", bankQuestionId)
-    .eq("created_by", user.id);
+    .eq("id", bankQuestionId);
 
   if (error) return { error: error.message };
 
   revalidatePath("/educator/question-bank");
   return { success: true };
+}
+
+export async function bulkUpdateQuestionBankItems(
+  bankQuestionIds: string[],
+  updates: {
+    visibility?: QuestionBankVisibility;
+    difficulty?: Difficulty;
+  }
+) {
+  const ids = Array.from(
+    new Set(bankQuestionIds.map((id) => id.trim()).filter(Boolean))
+  );
+  if (ids.length === 0) {
+    return { error: "Өөрчлөх асуултуудаа сонгоно уу." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const context = await getQuestionBankAccessContext(supabase, user.id);
+  const { data: rows, error: rowsError } = await supabase
+    .from("question_bank")
+    .select("id, created_by, subject_id, visibility")
+    .in("id", ids);
+
+  if (rowsError?.code === "42703") {
+    return { error: QUESTION_BANK_GOVERNANCE_ERROR };
+  }
+  const manageableRows = (rows ?? []).filter((row) =>
+    canManageQuestionBankItem(row, context)
+  );
+
+  if (manageableRows.length === 0) {
+    return { error: "Сонгосон асуултуудад өөрчлөлт хийх эрх байхгүй байна." };
+  }
+
+  const patch: {
+    visibility?: QuestionBankVisibility;
+    difficulty?: Difficulty;
+    updated_at: string;
+  } = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (updates.visibility) {
+    if (!isQuestionBankVisibility(updates.visibility)) {
+      return { error: "Сонгосон төлөв буруу байна." };
+    }
+
+    if (!context.isAdmin && updates.visibility === "admin_curated") {
+      return { error: "Admin curated төлөвийг зөвхөн админ онооно." };
+    }
+
+    if (
+      (updates.visibility === "shared_subject" ||
+        updates.visibility === "admin_curated") &&
+      manageableRows.some((row) => !row.subject_id)
+    ) {
+      return {
+        error:
+          "Хуваалцах гэж буй бүх асуултад хичээл заавал оноосон байх ёстой.",
+      };
+    }
+
+    if (
+      !context.isAdmin &&
+      updates.visibility === "shared_subject" &&
+      manageableRows.some(
+        (row) =>
+          row.subject_id && !context.allowedSubjectSet.has(row.subject_id)
+      )
+    ) {
+      return {
+        error:
+          "Хуваалцах гэж буй асуултуудын хичээлд одоогоор teaching эрх байхгүй байна.",
+      };
+    }
+
+    patch.visibility = updates.visibility;
+  }
+
+  if (updates.difficulty) {
+    patch.difficulty = updates.difficulty;
+  }
+
+  if (!patch.visibility && !patch.difficulty) {
+    return { error: "Өөрчлөх мэдээллээ сонгоно уу." };
+  }
+
+  const { error } = await supabase
+    .from("question_bank")
+    .update(patch)
+    .in(
+      "id",
+      manageableRows.map((row) => row.id)
+    );
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/educator/question-bank");
+  return { success: true, updatedCount: manageableRows.length };
 }
 
 export async function parseImportedQuestionFile(
@@ -848,7 +1180,10 @@ export async function parseImportedQuestionFile(
   const fileName = uploadedFile.name || "questions";
 
   if (!/\.(xlsx|xls|csv)$/i.test(fileName)) {
-    return { error: "Одоогоор зөвхөн Excel (.xlsx, .xls) болон CSV файл дэмжинэ." };
+    return {
+      error:
+        "Одоогоор зөвхөн Excel (.xlsx, .xls) болон CSV файл дэмжинэ.",
+    };
   }
 
   try {
@@ -943,10 +1278,13 @@ export async function importParsedQuestions(
     errors: validateQuestionImportDraft(draft),
   }));
 
-  const invalidDrafts = validatedDrafts.filter((draft) => draft.errors.length > 0);
+  const invalidDrafts = validatedDrafts.filter(
+    (draft) => draft.errors.length > 0
+  );
   if (invalidDrafts.length > 0) {
     return {
-      error: "Зарим асуултын бүтэц дутуу байна. Preview дээр засч дахин оролдоно уу.",
+      error:
+        "Зарим асуултын бүтэц дутуу байна. Preview дээр засч дахин оролдоно уу.",
       drafts: validatedDrafts,
     };
   }
@@ -962,7 +1300,10 @@ export async function importParsedQuestions(
     existing && existing.length > 0 ? existing[0].order_index + 1 : 0;
 
   const insertRows: Record<string, unknown>[] = [];
-  const revalidatedDrafts = validatedDrafts.map((draft) => ({ ...draft, errors: [] }));
+  const revalidatedDrafts = validatedDrafts.map((draft) => ({
+    ...draft,
+    errors: [],
+  }));
 
   for (const draft of validatedDrafts) {
     const normalized = draftToQuestionFormShape(draft);
@@ -980,7 +1321,8 @@ export async function importParsedQuestions(
       );
 
       return {
-        error: "Асуултын төрлийг шалгаж, preview дээрх алдаануудыг засаад дахин оролдоно уу.",
+        error:
+          "Асуултын төрлийг шалгаж, preview дээрх алдаануудыг засаад дахин оролдоно уу.",
         drafts: nextDrafts,
       };
     }

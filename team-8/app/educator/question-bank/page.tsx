@@ -1,6 +1,7 @@
 import { getExamById } from "@/lib/exam/actions";
-import { getQuestionBank } from "@/lib/question/actions";
+import { getQuestionBankDashboardData } from "@/lib/question/actions";
 import { getTeacherSubjects } from "@/lib/subject/actions";
+import type { Subject } from "@/types";
 import QuestionBankBrowser from "./_features/QuestionBankBrowser";
 
 interface QuestionBankPageProps {
@@ -13,11 +14,33 @@ export default async function QuestionBankPage({
   searchParams,
 }: QuestionBankPageProps) {
   const { examId } = await searchParams;
-  const [questions, subjects, targetExam] = await Promise.all([
-    getQuestionBank(),
-    getTeacherSubjects(),
-    examId ? getExamById(examId) : Promise.resolve(null),
-  ]);
+  const [{ questions, summary, viewerId, isAdmin }, subjects, targetExam] =
+    await Promise.all([
+      getQuestionBankDashboardData(),
+      getTeacherSubjects(),
+      examId ? getExamById(examId) : Promise.resolve(null),
+    ]);
+
+  const mergedSubjects = Array.from(
+    new Map(
+      [
+        ...subjects,
+        ...questions.flatMap((question) =>
+          question.subject_id && question.subjects?.name
+            ? [
+                {
+                  id: question.subject_id,
+                  name: question.subjects.name,
+                  description: null,
+                  created_by: null,
+                  created_at: question.created_at,
+                } satisfies Subject,
+              ]
+            : []
+        ),
+      ].map((subject) => [subject.id, subject])
+    ).values()
+  ).sort((left, right) => left.name.localeCompare(right.name, "mn"));
 
   const importUnavailableMessage = examId
     ? !targetExam
@@ -38,9 +61,15 @@ export default async function QuestionBankPage({
 
       <QuestionBankBrowser
         questions={questions}
-        subjects={subjects}
+        summary={summary}
+        viewerId={viewerId}
+        isAdmin={isAdmin}
+        subjects={mergedSubjects}
         examId={!importUnavailableMessage ? targetExam?.id : undefined}
         examTitle={!importUnavailableMessage ? targetExam?.title : undefined}
+        targetExamSubjectId={
+          !importUnavailableMessage ? targetExam?.subject_id ?? undefined : undefined
+        }
         importUnavailableMessage={importUnavailableMessage}
       />
     </div>

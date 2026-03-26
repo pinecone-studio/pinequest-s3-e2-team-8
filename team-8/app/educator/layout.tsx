@@ -1,13 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/actions";
-import Header from "../student/_features/Header";
 import Sidebar from "./_features/Sidebar";
-
-const ROLE_LABELS: Record<string, string> = {
-  student: "Сурагч",
-  teacher: "Багш",
-  admin: "Сургалтын менежер",
-};
 
 export default async function EducatorLayout({
   children,
@@ -22,11 +15,10 @@ export default async function EducatorLayout({
   }
 
   return (
-    <div className="flex min-h-screen bg-zinc-50 text-zinc-900">
-      <Sidebar />
-      <div className="flex min-h-screen flex-1 flex-col">
-        <Header />
-        <main className="flex-1 pl-19 pr-30">{children}</main>
+    <div className="min-h-screen bg-zinc-50 text-zinc-900">
+      <div className="flex min-h-screen">
+        <Sidebar />
+        <main className="flex-1 overflow-y-auto px-8 py-6">{children}</main>
       </div>
     </div>
   );

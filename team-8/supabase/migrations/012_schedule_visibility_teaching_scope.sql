@@ -5,6 +5,10 @@
 --   2. exam_assignments rows for that same scope
 -- This closes the schedule visibility gap without opening
 -- unrelated exams system-wide.
+--
+-- NOTE: The policies created here caused an RLS circular reference
+-- (exams → exam_assignments → exams). Migration 016 replaces them
+-- with SECURITY DEFINER function-based policies that break the cycle.
 -- =============================================
 
 DROP POLICY IF EXISTS "Users can view accessible exams" ON public.exams;
