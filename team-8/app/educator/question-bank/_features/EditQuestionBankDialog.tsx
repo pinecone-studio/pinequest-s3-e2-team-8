@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   deleteQuestionBankItem,
@@ -63,6 +63,7 @@ interface EditQuestionBankDialogProps {
   question: QuestionBank;
   subjects: Subject[];
   canAdminCurate: boolean;
+  trigger?: ReactNode;
 }
 
 interface MatchingPair {
@@ -128,6 +129,7 @@ export default function EditQuestionBankDialog({
   question,
   subjects,
   canAdminCurate,
+  trigger,
 }: EditQuestionBankDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -360,11 +362,15 @@ export default function EditQuestionBankDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button type="button" variant="outline" size="sm">
-          Засах
-        </Button>
-      </DialogTrigger>
+      {trigger ? (
+        <DialogTrigger asChild>{trigger}</DialogTrigger>
+      ) : (
+        <DialogTrigger asChild>
+          <Button type="button" variant="outline" size="sm">
+            Засах
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Асуултын сангийн бичлэг засах</DialogTitle>
