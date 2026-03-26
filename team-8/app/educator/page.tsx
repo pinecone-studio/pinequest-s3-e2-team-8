@@ -26,7 +26,7 @@ export default async function EducatorDashboard() {
           </div>
 
           {/* 2. Adjusted positioning to bottom-0 for a cleaner scale anchor */}
-          <div className="pointer-events-none absolute bottom-0 right-0 hidden h-full w-auto md:block scale-150 origin-bottom-right z-20">
+          <div className="pointer-events-none absolute bottom-0 right-0 hidden h-full w-auto md:block scale-125 origin-bottom-right z-20">
             <DashboardImage />
           </div>
         </div>
