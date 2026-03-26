@@ -1,11 +1,21 @@
 import Link from "next/link";
 import { getGroups } from "@/lib/group/actions";
+import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Users } from "lucide-react";
 import CreateGroupForm from "./_features/CreateGroupForm";
 
 export default async function GroupsPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user?.id ?? "")
+    .maybeSingle();
+  const isAdmin = profile?.role === "admin";
+
   const groups = await getGroups();
 
   const groupTypeLabel: Record<string, string> = {
@@ -25,8 +35,8 @@ export default async function GroupsPage() {
         </div>
       </div>
 
-      {/* Бүлэг үүсгэх форм */}
-      <CreateGroupForm />
+      {/* Бүлэг үүсгэх форм — зөвхөн admin */}
+      {isAdmin && <CreateGroupForm />}
 
       {/* Бүлгийн жагсаалт */}
       {groups.length === 0 ? (

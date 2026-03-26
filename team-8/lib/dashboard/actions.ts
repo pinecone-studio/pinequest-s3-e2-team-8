@@ -6,49 +6,80 @@ export async function getEducatorStats() {
   const supabase = await createClient();
   const {
     data: { user },
+    error: userError,
   } = await supabase.auth.getUser();
-  if (!user) return { totalExams: 0, totalQuestions: 0, activeExams: 0, pendingGrading: 0 };
+  if (userError || !user) {
+    return { totalExams: 0, totalQuestions: 0, activeExams: 0, pendingGrading: 0 };
+  }
 
   const now = new Date().toISOString();
 
-  const [examsRes, questionsRes, activeRes, pendingRes] = await Promise.all([
-    supabase
-      .from("exams")
-      .select("id", { count: "exact", head: true })
-      .eq("created_by", user.id),
-    supabase
-      .from("questions")
-      .select("id", { count: "exact", head: true })
-      .in(
-        "exam_id",
-        (
-          await supabase.from("exams").select("id").eq("created_by", user.id)
-        ).data?.map((e) => e.id) ?? []
-      ),
-    supabase
-      .from("exams")
-      .select("id", { count: "exact", head: true })
-      .eq("created_by", user.id)
-      .eq("is_published", true)
-      .lte("start_time", now)
-      .gte("end_time", now),
-    supabase
-      .from("exam_sessions")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "submitted")
-      .in(
-        "exam_id",
-        (
-          await supabase.from("exams").select("id").eq("created_by", user.id)
-        ).data?.map((e) => e.id) ?? []
-      ),
+  // Own exam IDs (for totalExams, totalQuestions, activeExams)
+  const { data: ownExams } = await supabase
+    .from("exams")
+    .select("id")
+    .eq("created_by", user.id);
+  const ownExamIds = (ownExams ?? []).map((e) => e.id);
+
+  // Teaching-scope exam IDs (for pendingGrading — includes admin-created exams assigned to teacher's groups)
+  const teachingScopeExamIds = new Set<string>(ownExamIds);
+
+  const { data: teachingRows, error: teachingRowsError } = await supabase
+    .from("teaching_assignments")
+    .select("group_id, subject_id")
+    .eq("teacher_id", user.id)
+    .eq("is_active", true);
+
+  if (!teachingRowsError && teachingRows && teachingRows.length > 0) {
+    const groupIds = [...new Set(teachingRows.map((r) => r.group_id))];
+    const { data: assignedExams, error: assignedExamsError } = await supabase
+      .from("exam_assignments")
+      .select("exam_id, group_id, exams(subject_id)")
+      .in("group_id", groupIds);
+
+    for (const ae of assignedExamsError ? [] : assignedExams ?? []) {
+      const subjectId = Array.isArray(ae.exams)
+        ? ae.exams[0]?.subject_id
+        : (ae.exams as { subject_id: string } | null)?.subject_id;
+      // Must match both subject AND group (not just subject)
+      if (teachingRows.find((ta) => ta.subject_id === subjectId && ta.group_id === ae.group_id)) {
+        teachingScopeExamIds.add(ae.exam_id);
+      }
+    }
+  }
+
+  const scopeExamIds = [...teachingScopeExamIds];
+
+  const [questionsRes, activeRes, pendingRes] = await Promise.all([
+    ownExamIds.length > 0
+      ? supabase
+          .from("questions")
+          .select("id", { count: "exact", head: true })
+          .in("exam_id", ownExamIds)
+      : Promise.resolve({ count: 0 }),
+    ownExamIds.length > 0
+      ? supabase
+          .from("exams")
+          .select("id", { count: "exact", head: true })
+          .in("id", ownExamIds)
+          .eq("is_published", true)
+          .lte("start_time", now)
+          .gte("end_time", now)
+      : Promise.resolve({ count: 0 }),
+    scopeExamIds.length > 0
+      ? supabase
+          .from("exam_sessions")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "submitted")
+          .in("exam_id", scopeExamIds)
+      : Promise.resolve({ count: 0 }),
   ]);
 
   return {
-    totalExams: examsRes.count ?? 0,
-    totalQuestions: questionsRes.count ?? 0,
-    activeExams: activeRes.count ?? 0,
-    pendingGrading: pendingRes.count ?? 0,
+    totalExams: ownExamIds.length,
+    totalQuestions: "error" in questionsRes ? 0 : (questionsRes.count ?? 0),
+    activeExams: "error" in activeRes ? 0 : (activeRes.count ?? 0),
+    pendingGrading: "error" in pendingRes ? 0 : (pendingRes.count ?? 0),
   };
 }
 
@@ -56,8 +87,9 @@ export async function getStudentStats() {
   const supabase = await createClient();
   const {
     data: { user },
+    error: userError,
   } = await supabase.auth.getUser();
-  if (!user) return { activeExams: 0, completedExams: 0, avgScore: null };
+  if (userError || !user) return { activeExams: 0, completedExams: 0, avgScore: null };
 
   const now = new Date().toISOString();
 
@@ -80,6 +112,10 @@ export async function getStudentStats() {
       .eq("user_id", user.id)
       .in("status", ["submitted", "graded"]),
   ]);
+
+  if (activeAssignmentsRes.error || sessionsRes.error) {
+    return { activeExams: 0, completedExams: 0, avgScore: null };
+  }
 
   const activeExams = new Set(
     (activeAssignmentsRes.data ?? []).map((assignment) => assignment.exam_id)

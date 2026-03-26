@@ -3,6 +3,8 @@
 import { useState, type ClipboardEvent } from "react";
 import { addQuestion } from "@/lib/question/actions";
 import { parsePastedQuestionText } from "@/lib/question/paste";
+import type { QuestionPassage, QuestionType } from "@/types";
+import MathContent from "@/components/math/MathContent";
 import LatexShortcutPanel from "@/components/math/LatexShortcutPanel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,11 +19,13 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { PlusCircle, Trash2 } from "lucide-react";
-import type { QuestionPassage, QuestionType } from "@/types";
+
+const SCIENCE_SUBJECTS = ["Математик", "Физик", "Хими", "Мэдээлэл зүй"];
 
 interface Props {
   examId: string;
   passages: QuestionPassage[];
+  subjectName: string | null;
 }
 
 interface MatchingPair {
@@ -57,23 +61,44 @@ const questionTypes: { value: QuestionType; label: string; hint: string }[] = [
   },
 ];
 
+const difficultyOptions = [
+  { value: "easy", label: "Хялбар" },
+  { value: "medium", label: "Дунд" },
+  { value: "hard", label: "Хэцүү" },
+];
+
 function createEmptyMatchingPair(): MatchingPair {
   return { left: "", right: "" };
 }
 
-export default function AddQuestionForm({ examId }: Props) {
+export default function AddQuestionForm({
+  examId,
+  passages,
+  subjectName,
+}: Props) {
+  const showLatexPanel =
+    subjectName == null || SCIENCE_SUBJECTS.includes(subjectName);
   const [type, setType] = useState<QuestionType>("multiple_choice");
+  const [difficulty, setDifficulty] = useState("medium");
+  const [selectedPassageId, setSelectedPassageId] = useState("__none");
   const [isFormulaToolOpen, setIsFormulaToolOpen] = useState(false);
   const [content, setContent] = useState("");
   const [options, setOptions] = useState(["", ""]);
   const [correctAnswer, setCorrectAnswer] = useState("");
-  const [multipleCorrectAnswers, setMultipleCorrectAnswers] = useState<string[]>([]);
+  const [multipleCorrectAnswers, setMultipleCorrectAnswers] = useState<
+    string[]
+  >([]);
   const [matchingPairs, setMatchingPairs] = useState<MatchingPair[]>([
     createEmptyMatchingPair(),
     createEmptyMatchingPair(),
   ]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const selectedPassage =
+    selectedPassageId === "__none"
+      ? null
+      : passages.find((passage) => passage.id === selectedPassageId) ?? null;
 
   function resetTypeState(nextType: QuestionType) {
     setType(nextType);
@@ -138,7 +163,7 @@ export default function AddQuestionForm({ examId }: Props) {
 
   function removeOption(index: number) {
     const removedValue = options[index];
-    const nextOptions = options.filter((_, optionIndex) => optionIndex !== index);
+    const nextOptions = options.filter((_, i) => i !== index);
 
     setOptions(nextOptions);
 
@@ -196,7 +221,9 @@ export default function AddQuestionForm({ examId }: Props) {
   function removeMatchingPair(index: number) {
     setMatchingPairs((prev) => {
       const next = prev.filter((_, pairIndex) => pairIndex !== index);
-      return next.length >= 2 ? next : [...next, createEmptyMatchingPair()];
+      return next.length >= 2
+        ? next
+        : [...next, createEmptyMatchingPair()];
     });
   }
 
@@ -205,17 +232,14 @@ export default function AddQuestionForm({ examId }: Props) {
     setError(null);
 
     formData.set("type", type);
-    formData.set("points", "1");
-    formData.set("difficulty", "medium");
-    formData.set("tags", "");
-    formData.set("content_html", "");
-    formData.set("image_url", "");
-    formData.set("explanation", "");
-    formData.set("passage_id", "");
+    formData.set("difficulty", difficulty);
+    formData.set(
+      "passage_id",
+      selectedPassageId === "__none" ? "" : selectedPassageId
+    );
 
     if (type === "multiple_choice") {
       const validOptions = options.map((option) => option.trim()).filter(Boolean);
-
       if (validOptions.length < 2) {
         setError("Дор хаяж 2 хариултын сонголт оруулна уу.");
         setLoading(false);
@@ -287,10 +311,11 @@ export default function AddQuestionForm({ examId }: Props) {
       return;
     }
 
-    resetTypeState(type);
+    resetTypeState("multiple_choice");
+    setDifficulty("medium");
+    setSelectedPassageId("__none");
     setIsFormulaToolOpen(false);
     setContent("");
-
     const form = document.getElementById("question-form") as HTMLFormElement | null;
     form?.reset();
     setLoading(false);
@@ -309,24 +334,27 @@ export default function AddQuestionForm({ examId }: Props) {
             </div>
           )}
 
-          <div className="grid grid-cols-[1fr_auto] items-start gap-2">
-            <Label>Асуултын төрөл</Label>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="shrink-0"
-              aria-controls="question-formula-tool"
-              aria-expanded={isFormulaToolOpen}
-              onClick={() => setIsFormulaToolOpen((prev) => !prev)}
-            >
-              Formula Tool
-              <span className="ml-2 text-xs text-muted-foreground">
-                {isFormulaToolOpen ? "Хаах" : "Нээх"}
-              </span>
-            </Button>
-
-            <div className="col-span-2">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label>Асуултын төрөл</Label>
+                {showLatexPanel && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    aria-controls="question-formula-tool"
+                    aria-expanded={isFormulaToolOpen}
+                    onClick={() => setIsFormulaToolOpen((prev) => !prev)}
+                  >
+                    Formula Tool
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {isFormulaToolOpen ? "Хаах" : "Нээх"}
+                    </span>
+                  </Button>
+                )}
+              </div>
               <Select
                 value={type}
                 onValueChange={(value) => resetTypeState(value as QuestionType)}
@@ -342,14 +370,24 @@ export default function AddQuestionForm({ examId }: Props) {
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-sm text-muted-foreground">
+                {questionTypes.find((item) => item.value === type)?.hint}
+              </p>
             </div>
-
-            <p className="col-span-2 text-sm text-muted-foreground">
-              {questionTypes.find((item) => item.value === type)?.hint}
-            </p>
+            <div className="space-y-2">
+              <Label htmlFor="points">Оноо</Label>
+              <Input
+                id="points"
+                name="points"
+                type="number"
+                min="0.5"
+                step="0.5"
+                defaultValue="1"
+              />
+            </div>
           </div>
 
-          {isFormulaToolOpen && (
+          {showLatexPanel && isFormulaToolOpen && (
             <div id="question-formula-tool">
               <LatexShortcutPanel
                 targetId="content"
@@ -358,6 +396,68 @@ export default function AddQuestionForm({ examId }: Props) {
               />
             </div>
           )}
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Хүндрэлийн түвшин</Label>
+              <Select value={difficulty} onValueChange={setDifficulty}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {difficultyOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tags">Tag-ууд</Label>
+              <Input
+                id="tags"
+                name="tags"
+                placeholder="algebra, grade-10, chapter-2"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Shared passage block</Label>
+            <Select value={selectedPassageId} onValueChange={setSelectedPassageId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Passage сонгохгүй" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none">Холбохгүй</SelectItem>
+                {passages.map((passage, index) => (
+                  <SelectItem key={passage.id} value={passage.id}>
+                    {passage.title || `Block ${index + 1}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Унших эх, зураг, formula context-ийг олон асуулттай холбоход
+              ашиглана.
+            </p>
+            {selectedPassage && (
+              <div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Сонгосон passage
+                </p>
+                {selectedPassage.title && (
+                  <p className="font-medium">{selectedPassage.title}</p>
+                )}
+                <MathContent
+                  html={selectedPassage.content_html}
+                  text={selectedPassage.content}
+                  className="prose prose-sm max-w-none text-foreground"
+                />
+              </div>
+            )}
+          </div>
 
           <div className="space-y-2">
             <Label htmlFor="content">Асуулт</Label>
@@ -377,6 +477,29 @@ export default function AddQuestionForm({ examId }: Props) {
             </p>
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="content_html">
+              Форматтай контент (HTML, заавал биш)
+            </Label>
+            <Textarea
+              id="content_html"
+              name="content_html"
+              placeholder="<p>LaTeX, тайлбар, унших эхийн форматтай хувилбар...</p>"
+              rows={4}
+            />
+            {showLatexPanel && <LatexShortcutPanel targetId="content_html" />}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="image_url">Зургийн URL (заавал биш)</Label>
+            <Input
+              id="image_url"
+              name="image_url"
+              type="url"
+              placeholder="https://example.com/question-image.png"
+            />
+          </div>
+
           {(type === "multiple_choice" || type === "multiple_response") && (
             <div className="space-y-3">
               <Label>Хариултууд</Label>
@@ -384,7 +507,8 @@ export default function AddQuestionForm({ examId }: Props) {
                 const isChecked =
                   type === "multiple_choice"
                     ? correctAnswer === option && option.trim() !== ""
-                    : multipleCorrectAnswers.includes(option) && option.trim() !== "";
+                    : multipleCorrectAnswers.includes(option) &&
+                      option.trim() !== "";
 
                 return (
                   <div key={index} className="flex items-center gap-2">
@@ -462,7 +586,9 @@ export default function AddQuestionForm({ examId }: Props) {
                     }
                     placeholder={`Зүүн тал ${index + 1}`}
                   />
-                  <span className="text-center text-sm text-muted-foreground">→</span>
+                  <span className="text-center text-sm text-muted-foreground">
+                    →
+                  </span>
                   <Input
                     value={pair.right}
                     onChange={(event) =>
@@ -493,6 +619,15 @@ export default function AddQuestionForm({ examId }: Props) {
               </Button>
             </div>
           )}
+
+          <div className="space-y-2">
+            <Label htmlFor="explanation">Тайлбар (заавал биш)</Label>
+            <Input
+              id="explanation"
+              name="explanation"
+              placeholder="Зөв хариултын тайлбар..."
+            />
+          </div>
 
           <Button type="submit" disabled={loading} className="w-full">
             {loading ? "Нэмж байна..." : "Асуулт нэмэх"}

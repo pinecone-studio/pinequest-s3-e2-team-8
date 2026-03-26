@@ -47,7 +47,11 @@ export default async function StudentResultsPage() {
                     </CardTitle>
                     <Badge
                       variant={passed ? "default" : "destructive"}
-                      className={passed ? "bg-green-600" : ""}
+                      className={
+                        passed
+                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                          : ""
+                      }
                     >
                       {passed ? "Тэнцсэн" : "Тэнцээгүй"}
                     </Badge>

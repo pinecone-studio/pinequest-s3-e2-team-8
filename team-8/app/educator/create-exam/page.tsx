@@ -1,8 +1,12 @@
-import { getSubjects } from "@/lib/subject/actions";
+import { getTeacherSubjects } from "@/lib/subject/actions";
+import { getGroups } from "@/lib/group/actions";
 import ExamForm from "./_features/ExamForm";
 
 export default async function CreateExamPage() {
-  const subjects = await getSubjects();
+  const [subjects, groups] = await Promise.all([
+    getTeacherSubjects(),
+    getGroups(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -12,7 +16,7 @@ export default async function CreateExamPage() {
           Шалгалтын мэдээллийг оруулна уу. Дараа нь асуулт нэмэх боломжтой.
         </p>
       </div>
-      <ExamForm subjects={subjects} />
+      <ExamForm subjects={subjects} groups={groups} />
     </div>
   );
 }

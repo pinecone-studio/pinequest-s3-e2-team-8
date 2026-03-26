@@ -16,11 +16,11 @@ export default async function StudentLayout({
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="min-h-screen bg-muted/30 text-foreground">
       <DashboardHeader profile={profile} />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex">
         <DashboardSidebar role="student" />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 px-4 py-6 md:px-8">{children}</main>
       </div>
     </div>
   );

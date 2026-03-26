@@ -13,6 +13,16 @@ import {
 } from "@/lib/question-passages";
 import type { QuestionImportDraft } from "@/types";
 
+function getQuestionTypeMigrationHint(error: { code?: string; message?: string } | null) {
+  if (!error) return null;
+  if (error.code !== "23514") return null;
+
+  return (
+    "Асуултын төрөл хадгалахад DB constraint алдаа гарлаа. " +
+    "Та хамгийн сүүлийн migration-уудаа (ялангуяа `013_expand_question_types.sql`) apply хийсэн эсэхээ шалгаарай."
+  );
+}
+
 function parseStringArray(rawValue: string) {
   try {
     const parsed = JSON.parse(rawValue);
@@ -237,7 +247,9 @@ export async function addQuestion(examId: string, formData: FormData) {
 
   const { error } = await supabase.from("questions").insert(insertPayload);
 
-  if (error) return { error: error.message };
+  if (error) {
+    return { error: getQuestionTypeMigrationHint(error) ?? error.message };
+  }
 
   const { data: existingBankEntries } = await supabase
     .from("question_bank")
@@ -549,7 +561,9 @@ export async function updateQuestion(
     .eq("exam_id", examId)
     .eq("created_by", user.id);
 
-  if (error) return { error: error.message };
+  if (error) {
+    return { error: getQuestionTypeMigrationHint(error) ?? error.message };
+  }
 
   revalidatePath(`/educator/exams/${examId}/questions`);
   return { success: true };
@@ -594,12 +608,40 @@ export async function getQuestionBank() {
   } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const { data } = await supabase
+  // Base query: teacher's own questions
+  let query = supabase
     .from("question_bank")
     .select("*, subjects(name)")
     .eq("created_by", user.id)
     .order("updated_at", { ascending: false });
 
+  // Subject scope: strict filter by teacher's assigned subjects
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  const isAdmin = profile?.role === "admin";
+
+  if (!isAdmin) {
+    const { data: tsRows } = await supabase
+      .from("teacher_subjects")
+      .select("subject_id")
+      .eq("teacher_id", user.id);
+
+    const allowedSubjectIds = tsRows?.map((r) => r.subject_id) ?? [];
+
+    if (allowedSubjectIds.length > 0) {
+      // Show questions from their subjects OR questions with no subject
+      query = query.or(
+        `subject_id.in.(${allowedSubjectIds.join(",")}),subject_id.is.null`
+      );
+    }
+    // If no subjects assigned, they only see their own questions (base query already filters by created_by)
+  }
+
+  const { data } = await query;
   return data ?? [];
 }
 
@@ -687,6 +729,29 @@ export async function updateQuestionBankItem(
     .maybeSingle();
 
   if (!existing) return { error: "Асуултын сангийн бичлэг олдсонгүй" };
+
+  // Subject guard: ensure teacher can only set subject to one they're assigned to
+  const newSubjectId = String(formData.get("subject_id") || "").trim() || null;
+  if (newSubjectId) {
+    const { data: profileData } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    if (profileData?.role !== "admin") {
+      const { data: tsRow } = await supabase
+        .from("teacher_subjects")
+        .select("subject_id")
+        .eq("teacher_id", user.id)
+        .eq("subject_id", newSubjectId)
+        .maybeSingle();
+
+      if (!tsRow) {
+        return { error: "Энэ хичээлд асуулт оноох эрх байхгүй байна" };
+      }
+    }
+  }
 
   const type = String(formData.get("type") || "multiple_choice");
   const subject_id = String(formData.get("subject_id") || "").trim() || null;
