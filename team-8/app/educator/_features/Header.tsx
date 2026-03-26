@@ -33,7 +33,7 @@ export default function Header({
 }) {
   return (
     <header className="sticky top-0 z-50 flex h-14 w-full items-center justify-between border-b border-slate-200/70 bg-slate-50/70 px-4 md:px-6">
-      {/* LEFT: Title */}
+     
       <div className="flex items-center gap-2">
         <PineconeLogo className="h-5 w-5 text-slate-700" />
         <span className="text-sm font-semibold tracking-tight text-slate-800">
