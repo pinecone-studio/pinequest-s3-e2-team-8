@@ -15,7 +15,7 @@ export default async function EducatorDashboard() {
     <div className="flex flex-col  mt-13.75">
       <div className="flex flex-col gap-5.25">
         {/* 1. Removed overflow-hidden so the image can spill out */}
-        <div className="relative h-87.75 rounded-3xl bg-gradient-to-r from-[#fff6e4] via-[#FFF7EE] to-[#ced8e6] p-8">
+        <div className="relative h-87.75 rounded-3xl bg-gradient-to-r from-[#fff6e4] via-[#FFF7EE] to-[#ced8e6] p-11">
           <div className="relative z-10 max-w-2xl space-y-2">
             <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
               Тавтай морилно уу, Лосолмаа
