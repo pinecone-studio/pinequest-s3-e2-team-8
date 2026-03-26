@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/actions";
-import Header from "./_features/Header";
+import Header from "../student/_features/Header";
 import Sidebar from "./_features/Sidebar";
 
 const ROLE_LABELS: Record<string, string> = {

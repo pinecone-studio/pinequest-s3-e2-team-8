@@ -3,6 +3,9 @@ import { getCurrentUser } from "@/lib/auth/actions";
 import { DashboardHeader } from "@/components/dashboard/header";
 import { DashboardSidebar } from "@/components/dashboard/sidebar";
 
+import Sidebar from "./_features/Sidebar";
+import Header from "./_features/Header";
+
 export default async function StudentLayout({
   children,
 }: {
@@ -16,11 +19,11 @@ export default async function StudentLayout({
   }
 
   return (
-    <div className="min-h-screen bg-muted/30 text-foreground">
-      <DashboardHeader profile={profile} />
-      <div className="flex">
-        <DashboardSidebar role="student" />
-        <main className="flex-1 px-4 py-6 md:px-8">{children}</main>
+    <div className="flex min-h-screen bg-zinc-50 text-zinc-900">
+      <Sidebar />
+      <div className="flex min-h-screen flex-1 flex-col">
+        <Header />
+        <main className="flex-1 pl-19 pr-30">{children}</main>
       </div>
     </div>
   );
