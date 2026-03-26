@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getExamById, updateExam } from "@/lib/exam/actions";
 import { getExamReadiness } from "@/lib/exam-readiness";
 import { getTeacherSubjects } from "@/lib/subject/actions";
+import { getExamCreationGroups } from "@/lib/group/actions";
 import ExamReadinessPanel from "@/components/exams/exam-readiness-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,9 +20,10 @@ interface Props {
 export default async function EditExamPage({ params, searchParams }: Props) {
   const { id } = await params;
   const { error: pageError } = await searchParams;
-  const [exam, subjects] = await Promise.all([
+  const [exam, subjects, groups] = await Promise.all([
     getExamById(id),
     getTeacherSubjects(),
+    getExamCreationGroups(),
   ]);
 
   if (!exam) notFound();
@@ -42,6 +44,15 @@ export default async function EditExamPage({ params, searchParams }: Props) {
       points: question.points,
     })),
   });
+
+  const assignedGroupIds = Array.from(
+    new Set(
+      (Array.isArray(exam.exam_assignments) ? exam.exam_assignments : [])
+        .map((assignment: { group_id: string }) => String(assignment.group_id))
+        .filter(Boolean)
+    )
+  );
+  const assignedGroupSet = new Set(assignedGroupIds);
 
   // datetime-local форматаар хөрвүүлэх (UB цагаар: +08:00 хасаж local болгох)
   const toLocal = (iso: string) => {
@@ -123,6 +134,46 @@ export default async function EditExamPage({ params, searchParams }: Props) {
                   defaultValue={exam.description ?? ""}
                   rows={3}
                 />
+              </div>
+
+              <div className="space-y-3 rounded-xl border p-4">
+                <div className="space-y-1">
+                  <Label>Оноох анги / бүлгүүд</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Энэ шалгалтыг ямар анги, сонгон бүлгүүдэд өгөхөө эндээс шинэчилнэ.
+                  </p>
+                </div>
+                {groups.length === 0 ? (
+                  <div className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
+                    Таны заадаг бүлэг одоогоор олдсонгүй.
+                  </div>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {groups.map((group) => (
+                      <label
+                        key={group.id}
+                        className="flex items-start gap-3 rounded-lg border px-3 py-3 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          name="group_ids"
+                          value={group.id}
+                          defaultChecked={assignedGroupSet.has(group.id)}
+                          className="mt-0.5 h-4 w-4 rounded border"
+                        />
+                        <span className="space-y-1">
+                          <span className="block font-medium">{group.name}</span>
+                          <span className="block text-muted-foreground">
+                            {group.grade ? `${group.grade}-р анги` : "Ангийн түвшин заагаагүй"}
+                            {group.allowed_subject_ids.length > 0
+                              ? ` · ${group.allowed_subject_ids.length} хичээл`
+                              : ""}
+                          </span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">

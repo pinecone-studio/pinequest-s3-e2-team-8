@@ -82,6 +82,40 @@ type StudentExamAttemptSummary = {
   startedAt: string | null;
 };
 
+type StudentQuestionPassage = {
+  id: string;
+  title: string | null;
+  content: string;
+  content_html: string | null;
+  image_url: string | null;
+};
+
+export type StudentSafeQuestion = {
+  id: string;
+  type: string;
+  passage_id?: string | null;
+  content: string;
+  content_html: string | null;
+  image_url: string | null;
+  options: string[] | null;
+  matching_prompts?: string[];
+  matching_choices?: string[];
+  points: number;
+  order_index: number;
+  question_passages?: StudentQuestionPassage | null;
+};
+
+type PrepareExamTakePayloadResult =
+  | { error: string }
+  | { redirectTo: string }
+  | {
+      exam: StudentAssignedExam & Record<string, unknown>;
+      questions: StudentSafeQuestion[];
+      sessionId: string;
+      savedAnswers: Record<string, string>;
+      initialTimeLeftSeconds: number;
+    };
+
 export type StudentAssignedExam = StudentExamBase & {
   mySessionStatus: string | null;
   myLifecycleStatus: string;
@@ -274,6 +308,84 @@ async function getAssignedPublishedExamRecord(
     row,
     exam: mergeAssignedExamAccess(row),
   };
+}
+
+async function loadStudentExamPayload(
+  supabase: SupabaseServerClient,
+  examId: string,
+  assignedExam: NonNullable<
+    Awaited<ReturnType<typeof getAssignedPublishedExamRecord>>
+  >
+) {
+  const exam = assignedExam.exam;
+  if (!exam) return null;
+
+  // Redis cache шалгах
+  const cacheKey = getQuestionCacheKey(examId);
+  const cached = await redis.get(cacheKey);
+  if (cached) {
+    const parsed =
+      typeof cached === "string"
+        ? JSON.parse(cached)
+        : cached;
+    return {
+      exam: {
+        ...((parsed as { examBase?: Record<string, unknown> }).examBase ?? {}),
+        ...exam,
+      },
+      questions:
+        ((parsed as { questions?: StudentSafeQuestion[] }).questions ?? []),
+    };
+  }
+
+  const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
+  if (snapshot) {
+    const result = {
+      exam: {
+        ...exam,
+        ...snapshot.exam,
+      },
+      questions: getStudentSafeQuestions(snapshot.questions) as StudentSafeQuestion[],
+    };
+    const cachePayload = {
+      examBase: snapshot.exam,
+      questions: result.questions,
+    };
+
+    const endTime = new Date(exam.end_time).getTime();
+    const now = Date.now();
+    const ttlSeconds = Math.max(Math.floor((endTime - now) / 1000), 60);
+    await redis.set(cacheKey, JSON.stringify(cachePayload), { ex: ttlSeconds });
+    return result;
+  }
+
+  const { data: questions } = await supabase
+    .from("questions")
+    .select("*")
+    .eq("exam_id", examId)
+    .order("order_index", { ascending: true });
+
+  const safeQuestions = getStudentSafeQuestions(
+    (questions ?? []) as Array<
+      Record<string, unknown> & { passage_id?: string | null }
+    >
+  );
+  const passageAwareQuestions = (await attachPassagesToQuestions(
+    supabase,
+    safeQuestions
+  )) as StudentSafeQuestion[];
+  const result = { exam, questions: passageAwareQuestions };
+  const cachePayload = {
+    examBase: getRelationObject(assignedExam.row.exams) ?? exam,
+    questions: passageAwareQuestions,
+  };
+
+  const endTime = new Date(exam.end_time).getTime();
+  const now = Date.now();
+  const ttlSeconds = Math.max(Math.floor((endTime - now) / 1000), 60);
+  await redis.set(cacheKey, JSON.stringify(cachePayload), { ex: ttlSeconds });
+
+  return result;
 }
 
 async function getEffectiveExamAccessForStudent(
@@ -492,77 +604,9 @@ export async function getExamForStudent(examId: string) {
     examId
   );
   if (!assignedExam?.exam) return null;
-  const exam = assignedExam.exam;
 
   if (assignedExam.row.excused_at) return null;
-
-  // Redis cache шалгах
-  const cacheKey = getQuestionCacheKey(examId);
-  const cached = await redis.get(cacheKey);
-  if (cached) {
-    const parsed =
-      typeof cached === "string"
-        ? JSON.parse(cached)
-        : cached;
-    return {
-      exam: {
-        ...((parsed as { examBase?: Record<string, unknown> }).examBase ?? {}),
-        ...exam,
-      },
-      questions: (parsed as { questions?: Record<string, unknown>[] })
-        .questions ?? [],
-    };
-  }
-
-  const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
-  if (snapshot) {
-    const result = {
-      exam: {
-        ...exam,
-        ...snapshot.exam,
-      },
-      questions: getStudentSafeQuestions(snapshot.questions),
-    };
-    const cachePayload = {
-      examBase: snapshot.exam,
-      questions: result.questions,
-    };
-
-    const endTime = new Date(exam.end_time).getTime();
-    const now = Date.now();
-    const ttlSeconds = Math.max(Math.floor((endTime - now) / 1000), 60);
-    await redis.set(cacheKey, JSON.stringify(cachePayload), { ex: ttlSeconds });
-    return result;
-  }
-
-  const { data: questions } = await supabase
-    .from("questions")
-    .select("*")
-    .eq("exam_id", examId)
-    .order("order_index", { ascending: true });
-
-  const safeQuestions = getStudentSafeQuestions(
-    (questions ?? []) as Array<
-      Record<string, unknown> & { passage_id?: string | null }
-    >
-  );
-  const passageAwareQuestions = await attachPassagesToQuestions(
-    supabase,
-    safeQuestions
-  );
-  const result = { exam, questions: passageAwareQuestions };
-  const cachePayload = {
-    examBase: getRelationObject(assignedExam.row.exams) ?? exam,
-    questions: passageAwareQuestions,
-  };
-
-  // Redis-д cache хийх (шалгалтын хугацаа дуустал)
-  const endTime = new Date(exam.end_time).getTime();
-  const now = Date.now();
-  const ttlSeconds = Math.max(Math.floor((endTime - now) / 1000), 60);
-  await redis.set(cacheKey, JSON.stringify(cachePayload), { ex: ttlSeconds });
-
-  return result;
+  return loadStudentExamPayload(supabase, examId, assignedExam);
 }
 
 type FinalizeSessionReason = "submit" | "timeout";
@@ -861,33 +905,31 @@ async function finalizeSessionAttempt(
   }
 }
 
-/**
- * Шалгалт эхлэх — exam_session үүсгэх
- */
-export async function startExamSession(examId: string) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Нэвтрээгүй байна" };
-
+async function startExamSessionForUser(
+  supabase: SupabaseServerClient,
+  userId: string,
+  examId: string,
+  assignedExam?: NonNullable<
+    Awaited<ReturnType<typeof getAssignedPublishedExamRecord>>
+  >
+) {
   const startLimit = await startExamRateLimit.limit(
-    `start-exam:${user.id}:${examId}`
+    `start-exam:${userId}:${examId}`
   );
   if (!startLimit.success) {
     return { error: "Хэт олон эхлүүлэх оролдлого илгээлээ. Түр хүлээгээд дахин оролдоно уу." };
   }
 
-  const assignedExam = await getAssignedPublishedExamRecord(
-    supabase,
-    user.id,
-    examId
-  );
-  if (!assignedExam?.exam) return { error: "Энэ шалгалт танд оноогдоогүй байна" };
-  if (assignedExam.row.excused_at) {
+  const effectiveAssignedExam =
+    assignedExam ??
+    (await getAssignedPublishedExamRecord(supabase, userId, examId));
+  if (!effectiveAssignedExam?.exam) {
+    return { error: "Энэ шалгалт танд оноогдоогүй байна" };
+  }
+  if (effectiveAssignedExam.row.excused_at) {
     return { error: "Та энэ шалгалтаас чөлөөлөгдсөн байна" };
   }
-  const exam = assignedExam.exam;
+  const exam = effectiveAssignedExam.exam;
 
   const now = Date.now();
   const startTime = new Date(exam.start_time as string).getTime();
@@ -904,7 +946,7 @@ export async function startExamSession(examId: string) {
   const existingInProgress = await getInProgressSession(
     supabase,
     examId,
-    user.id
+    userId
   );
 
   if (existingInProgress) {
@@ -918,7 +960,7 @@ export async function startExamSession(examId: string) {
       const finalized = await finalizeSessionAttempt(supabase, {
         sessionId: existingInProgress.id,
         examId,
-        userId: user.id,
+        userId,
         reason: "timeout",
       });
 
@@ -926,19 +968,19 @@ export async function startExamSession(examId: string) {
         return { error: finalized.error };
       }
     } else {
-      await cacheSessionMeta(existingInProgress.id, user.id, "in_progress");
+      await cacheSessionMeta(existingInProgress.id, userId, "in_progress");
       return { session: existingInProgress };
     }
   }
 
-  const lockKey = getStartSessionLockKey(examId, user.id);
+  const lockKey = getStartSessionLockKey(examId, userId);
   const lockAcquired = await redis.set(lockKey, "1", {
     ex: 15,
     nx: true,
   });
 
   if (!lockAcquired) {
-    const lockedSession = await getInProgressSession(supabase, examId, user.id);
+    const lockedSession = await getInProgressSession(supabase, examId, userId);
     if (lockedSession) {
       return { session: lockedSession };
     }
@@ -947,13 +989,12 @@ export async function startExamSession(examId: string) {
   }
 
   try {
-    // Аль хэдийн session байгаа эсэх шалгах
     const { data: sessions } = await supabase
-    .from("exam_sessions")
-    .select("*")
-    .eq("exam_id", examId)
-    .eq("user_id", user.id)
-    .order("attempt_number", { ascending: false });
+      .from("exam_sessions")
+      .select("*")
+      .eq("exam_id", examId)
+      .eq("user_id", userId)
+      .order("attempt_number", { ascending: false });
 
     const concurrentInProgress = sessions?.find(
       (session) => session.status === "in_progress"
@@ -970,7 +1011,7 @@ export async function startExamSession(examId: string) {
         const finalized = await finalizeSessionAttempt(supabase, {
           sessionId: concurrentInProgress.id,
           examId,
-          userId: user.id,
+          userId,
           reason: "timeout",
         });
 
@@ -978,16 +1019,15 @@ export async function startExamSession(examId: string) {
           return { error: finalized.error };
         }
       } else {
-        await cacheSessionMeta(concurrentInProgress.id, user.id, "in_progress");
+        await cacheSessionMeta(concurrentInProgress.id, userId, "in_progress");
         return { session: concurrentInProgress };
       }
     }
 
-    // Сурагч өөр шалгалт өгч байгаа эсэх шалгах (нэг зэрэг хоёр шалгалт өгч болохгүй)
     const { data: otherActiveSession } = await supabase
       .from("exam_sessions")
       .select("id, exam_id, started_at")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("status", "in_progress")
       .neq("exam_id", examId)
       .limit(1)
@@ -996,7 +1036,7 @@ export async function startExamSession(examId: string) {
     if (otherActiveSession) {
       const otherExam = await getEffectiveExamAccessForStudent(
         supabase,
-        user.id,
+        userId,
         otherActiveSession.exam_id
       );
 
@@ -1011,7 +1051,7 @@ export async function startExamSession(examId: string) {
         const finalized = await finalizeSessionAttempt(supabase, {
           sessionId: otherActiveSession.id,
           examId: otherActiveSession.exam_id,
-          userId: user.id,
+          userId,
           reason: "timeout",
         });
 
@@ -1026,8 +1066,7 @@ export async function startExamSession(examId: string) {
       }
     }
 
-    const nextAttemptNumber =
-      (sessions?.[0]?.attempt_number ?? 0) + 1;
+    const nextAttemptNumber = (sessions?.[0]?.attempt_number ?? 0) + 1;
     const maxAttempts = Number(exam.max_attempts ?? 1);
 
     if (nextAttemptNumber > maxAttempts) {
@@ -1038,7 +1077,7 @@ export async function startExamSession(examId: string) {
       .from("exam_sessions")
       .insert({
         exam_id: examId,
-        user_id: user.id,
+        user_id: userId,
         status: "in_progress",
         attempt_number: nextAttemptNumber,
       })
@@ -1050,11 +1089,11 @@ export async function startExamSession(examId: string) {
         const retrySession = await getInProgressSession(
           supabase,
           examId,
-          user.id
+          userId
         );
 
         if (retrySession) {
-          await cacheSessionMeta(retrySession.id, user.id, "in_progress");
+          await cacheSessionMeta(retrySession.id, userId, "in_progress");
           return { session: retrySession };
         }
       }
@@ -1062,11 +1101,138 @@ export async function startExamSession(examId: string) {
       return { error: error.message };
     }
 
-    await cacheSessionMeta(session.id, user.id, "in_progress");
+    await cacheSessionMeta(session.id, userId, "in_progress");
     return { session };
   } finally {
     await redis.del(lockKey);
   }
+}
+
+/**
+ * Шалгалт эхлэх — exam_session үүсгэх
+ */
+export async function startExamSession(examId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+  return startExamSessionForUser(supabase, user.id, examId);
+}
+
+async function getSessionAnswersForUser(
+  supabase: SupabaseServerClient,
+  sessionId: string,
+  userId: string
+) {
+  const redisKey = getSessionAnswersCacheKey(sessionId, userId);
+  const redisAnswers = await redis.hgetall(redisKey);
+  if (redisAnswers && Object.keys(redisAnswers).length > 0) {
+    return redisAnswers as Record<string, string>;
+  }
+
+  const { data: answers } = await supabase
+    .from("answers")
+    .select("question_id, answer")
+    .eq("session_id", sessionId)
+    .eq("user_id", userId);
+
+  const result: Record<string, string> = {};
+  for (const answerRow of answers ?? []) {
+    if (answerRow.answer) result[answerRow.question_id] = answerRow.answer;
+  }
+  return result;
+}
+
+export async function prepareExamTakePayload(
+  examId: string
+): Promise<PrepareExamTakePayloadResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" } as const;
+
+  const assignedExam = await getAssignedPublishedExamRecord(
+    supabase,
+    user.id,
+    examId
+  );
+  if (!assignedExam?.exam) {
+    return { redirectTo: "/student/exams?error=exam_not_found" } as const;
+  }
+  if (assignedExam.row.excused_at) {
+    return { redirectTo: "/student/exams?error=exam_not_found" } as const;
+  }
+
+  const exam = assignedExam.exam;
+  const now = Date.now();
+  const startTime = new Date(exam.start_time as string).getTime();
+  const endTime = new Date(exam.end_time as string).getTime();
+
+  if (now < startTime || now > endTime) {
+    return {
+      redirectTo: `/student/exams?error=time_window&exam=${encodeURIComponent(exam.title)}`,
+    } as const;
+  }
+
+  const [examPayload, sessionResult] = await Promise.all([
+    loadStudentExamPayload(supabase, examId, assignedExam),
+    startExamSessionForUser(supabase, user.id, examId, assignedExam),
+  ]);
+
+  if (!examPayload || !Array.isArray(examPayload.questions) || examPayload.questions.length === 0) {
+    return { redirectTo: "/student/exams?error=questions_not_ready" } as const;
+  }
+
+  if ("error" in sessionResult) {
+    if ("redirectToResult" in sessionResult && sessionResult.redirectToResult) {
+      return { redirectTo: `/student/exams/${examId}/result` } as const;
+    }
+    return {
+      redirectTo: `/student/exams?error=${encodeURIComponent(sessionResult.error ?? "session_failed")}`,
+    } as const;
+  }
+
+  const session = sessionResult.session!;
+  const nowMs = Date.now();
+  const sessionEndsAt =
+    new Date(session.started_at).getTime() +
+    Number(examPayload.exam.duration_minutes) * 60 * 1000;
+  const examEndsAt = new Date(examPayload.exam.end_time as string).getTime();
+  const initialTimeLeftSeconds = Math.max(
+    Math.floor((Math.min(sessionEndsAt, examEndsAt) - nowMs) / 1000),
+    0
+  );
+
+  if (initialTimeLeftSeconds <= 0) {
+    if (session.status === "in_progress") {
+      const finalized = await finalizeSessionAttempt(supabase, {
+        sessionId: session.id,
+        examId,
+        userId: user.id,
+        reason: "timeout",
+      });
+
+      if ("error" in finalized) {
+        return {
+          redirectTo: `/student/exams?error=${encodeURIComponent(finalized.error ?? "timeout_failed")}`,
+        } as const;
+      }
+    }
+
+    return { redirectTo: `/student/exams/${examId}/result` } as const;
+  }
+
+  const savedAnswers = await getSessionAnswersForUser(supabase, session.id, user.id);
+
+  return {
+    exam: examPayload.exam as StudentAssignedExam & Record<string, unknown>,
+    questions: examPayload.questions,
+    sessionId: session.id,
+    savedAnswers,
+    initialTimeLeftSeconds,
+  } satisfies PrepareExamTakePayloadResult;
 }
 
 /**
@@ -1336,24 +1502,5 @@ export async function getSessionAnswers(sessionId: string) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return {};
-
-  // Эхлээд Redis-ээс шалгах
-  const redisKey = getSessionAnswersCacheKey(sessionId, user.id);
-  const redisAnswers = await redis.hgetall(redisKey);
-  if (redisAnswers && Object.keys(redisAnswers).length > 0) {
-    return redisAnswers as Record<string, string>;
-  }
-
-  // Redis-д байхгүй бол DB-ээс
-  const { data: answers } = await supabase
-    .from("answers")
-    .select("question_id, answer")
-    .eq("session_id", sessionId)
-    .eq("user_id", user.id);
-
-  const result: Record<string, string> = {};
-  for (const a of answers ?? []) {
-    if (a.answer) result[a.question_id] = a.answer;
-  }
-  return result;
+  return getSessionAnswersForUser(supabase, sessionId, user.id);
 }

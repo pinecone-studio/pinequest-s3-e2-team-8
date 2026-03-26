@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getExamAssignmentConflictError, getGroupAssignmentConflictError } from "@/lib/exam-conflicts";
+import { getGroupAssignmentConflictError } from "@/lib/exam-conflicts";
 import { syncExamRecipients } from "@/lib/exam-recipients";
 import { getExamPublishGuardError } from "@/lib/exam-readiness";
 import { assignExamToGroupRecord } from "@/lib/exam-assignments";
@@ -13,7 +13,6 @@ import {
 } from "@/lib/exam-session-lifecycle";
 import {
   buildExamLifecycleMap,
-  getExamSubjectAssignmentConsistency,
 } from "@/lib/exam-lifecycle";
 import { getExamManagementScope } from "@/lib/exam-scope";
 import {
@@ -198,6 +197,21 @@ export async function updateExam(examId: string, formData: FormData) {
   const start_time = (formData.get("start_time") as string) + "+08:00";
   const end_time = (formData.get("end_time") as string) + "+08:00";
   const subject_id = ((formData.get("subject_id") as string) || "").trim() || null;
+  const selectedGroupIds = Array.from(
+    new Set(
+      formData
+        .getAll("group_ids")
+        .map((value) => String(value).trim())
+        .filter(Boolean)
+    )
+  );
+  const legacyGroupId = ((formData.get("group_id") as string) || "").trim() || null;
+  const groupIds =
+    selectedGroupIds.length > 0
+      ? selectedGroupIds
+      : legacyGroupId
+        ? [legacyGroupId]
+        : [];
 
   if (new Date(start_time).getTime() >= new Date(end_time).getTime()) {
     return { error: "Дуусах цаг нь эхлэх цагаасаа хойш байх ёстой" };
@@ -220,25 +234,65 @@ export async function updateExam(examId: string, formData: FormData) {
     }
   }
 
-  const title = String(formData.get("title") || "").trim();
-  const assignmentConsistency = await getExamSubjectAssignmentConsistency(
-    supabase,
-    user.id,
-    examId,
-    subject_id
-  );
-  if (assignmentConsistency.error) {
-    return { error: assignmentConsistency.error };
+  if (groupIds.length > 0) {
+    if (allowedIds !== null) {
+      if (!subject_id) {
+        return { error: "Хичээл заавал сонгоно уу" };
+      }
+
+      const allowedGroupIds = await getAllowedGroupIds(
+        supabase,
+        user.id,
+        subject_id
+      ) ?? [];
+
+      const invalidGroupId = groupIds.find(
+        (groupId) => !allowedGroupIds.includes(groupId)
+      );
+      if (invalidGroupId) {
+        return { error: "Энэ бүлэгт энэ хичээлийн шалгалт оноох эрх байхгүй байна" };
+      }
+    }
+
+    const { data: groups } = await supabase
+      .from("student_groups")
+      .select("id")
+      .in("id", groupIds);
+
+    if ((groups ?? []).length !== groupIds.length) {
+      return { error: "Сонгосон бүлгийн зарим нь олдсонгүй" };
+    }
   }
 
-  const conflictError = await getExamAssignmentConflictError(supabase, examId, {
-    title: title || existingExam.title,
-    start_time,
-    end_time,
-  });
-  if (conflictError) {
-    return { error: conflictError };
+  const title = String(formData.get("title") || "").trim();
+  for (const groupId of groupIds) {
+    const conflictError = await getGroupAssignmentConflictError(
+      supabase,
+      groupId,
+      examId,
+      {
+        title: title || existingExam.title,
+        start_time,
+        end_time,
+      }
+    );
+    if (conflictError) {
+      return { error: conflictError };
+    }
   }
+
+  const { data: existingAssignments } = await supabase
+    .from("exam_assignments")
+    .select("group_id")
+    .eq("exam_id", examId);
+
+  const existingGroupIds = Array.from(
+    new Set((existingAssignments ?? []).map((row) => row.group_id))
+  );
+  const groupsToAdd = groupIds.filter((groupId) => !existingGroupIds.includes(groupId));
+  const groupsToRemove = existingGroupIds.filter(
+    (groupId) => !groupIds.includes(groupId)
+  );
 
   const { error } = await supabase
     .from("exams")
@@ -258,6 +312,40 @@ export async function updateExam(examId: string, formData: FormData) {
     .eq("created_by", user.id);
 
   if (error) return { error: error.message };
+
+  const addedGroupIds: string[] = [];
+  for (const groupId of groupsToAdd) {
+    const assignmentResult = await assignExamToGroupRecord(supabase, {
+      examId,
+      groupId,
+      assignedBy: user.id,
+    });
+
+    if ("error" in assignmentResult) {
+      if (addedGroupIds.length > 0) {
+        await supabase
+          .from("exam_assignments")
+          .delete()
+          .eq("exam_id", examId)
+          .in("group_id", addedGroupIds);
+      }
+      return { error: assignmentResult.error };
+    }
+
+    addedGroupIds.push(groupId);
+  }
+
+  if (groupsToRemove.length > 0) {
+    const { error: removeError } = await supabase
+      .from("exam_assignments")
+      .delete()
+      .eq("exam_id", examId)
+      .in("group_id", groupsToRemove);
+
+    if (removeError) {
+      return { error: removeError.message };
+    }
+  }
 
   revalidatePath("/educator");
   revalidatePath(`/educator/exams/${examId}`);
@@ -389,7 +477,9 @@ export async function getExamById(examId: string) {
 
   const { data } = await supabase
     .from("exams")
-    .select("*, subjects(name), questions(*)")
+    .select(
+      "*, subjects(name), questions(*), exam_assignments(group_id, student_groups(id, name, grade, group_type))"
+    )
     .eq("id", examId)
     .eq("created_by", user.id)
     .maybeSingle();

@@ -107,17 +107,25 @@ async function getAssignedGroupIdsForExam(
 export async function getGroupAssignmentConflictError(
   supabase: SupabaseServerClient,
   groupId: string,
-  examId: string
+  examId: string,
+  overrides?: Partial<Pick<ScheduledExam, "title" | "start_time" | "end_time">>
 ) {
   const exam = await getExamSchedule(supabase, examId);
   if (!exam) return "Шалгалтын хуваарь олдсонгүй";
+
+  const targetExam: ScheduledExam = {
+    ...exam,
+    title: overrides?.title ?? exam.title,
+    start_time: overrides?.start_time ?? exam.start_time,
+    end_time: overrides?.end_time ?? exam.end_time,
+  };
 
   const studentIds = await getGroupStudentIds(supabase, groupId);
   if (studentIds.length === 0) return null;
 
   const conflictResult = await getConflictingAssignmentsForStudentsViaRpc(
     supabase,
-    exam,
+    targetExam,
     [groupId]
   );
   if ("error" in conflictResult) return conflictResult.error;
@@ -127,7 +135,7 @@ export async function getGroupAssignmentConflictError(
   if (conflicts.length === 0) return null;
 
   return buildConflictError(
-    exam.title,
+    targetExam.title,
     conflicts.map((conflict) => ({
       studentName: conflict.student_name || "Сурагч",
       conflictingExamTitle: conflict.conflicting_exam_title || "Өөр шалгалт",
