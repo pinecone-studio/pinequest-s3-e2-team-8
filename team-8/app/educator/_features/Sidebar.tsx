@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation"; // Added to handle the black background active state
 import { useState } from "react";
+import { logout } from "@/lib/auth/actions";
 import {
   CalendarDays,
   LucideIcon,
@@ -26,15 +27,23 @@ interface NavItem {
 
 const ALL_NAV_ITEMS: NavItem[] = [
   { href: "/educator", label: "Нүүр хуудас", icon: HomeIcon },
-  { href: "/educator/exams", label: "Асуултын сан", icon: Book },
-  { href: "/educator/create-exam", label: "Шинэ асуулт", icon: Plus },
   {
     href: "/educator/question-bank",
+    label: "Асуултын сан",
+    icon: Book,
+  },
+  { href: "/educator/grading", label: "Шинэ асуулт", icon: Plus },
+  {
+    href: "/educator/create-exam",
     label: "Шинэ шалгалт",
     icon: FilePlusCorner,
   },
-  { href: "/educator/groups", label: "Шалгалтууд", icon: FileSpreadsheet },
-  { href: "/educator/grading", label: "Бүлгүүд", icon: Users },
+  {
+    href: "/educator/exams",
+    label: "Шалгалтууд",
+    icon: FileSpreadsheet,
+  },
+  { href: "/educator/groups", label: "Бүлгүүд", icon: Users },
   { href: "/educator/schedule", label: "Хуваарь", icon: CalendarDays },
 ];
 
@@ -47,7 +56,7 @@ export default function Sidebar() {
 
   return (
     <aside
-      className={`flex h-screen flex-col justify-between rounded-xl  bg-white pt-6 shadow-xl transition-all duration-200 ${
+      className={`flex h-screen flex-col justify-between  bg-white pt-6 shadow-xl transition-all duration-200 ${
         isCollapsed ? "w-[70px] px-2" : "w-[260px] px-4"
       }`}
     >
@@ -62,7 +71,7 @@ export default function Sidebar() {
             className="rounded-lg  p-1 text-gray-600 transition-colors hover:border-[#4078C1] hover:text-[#4078C1]"
           >
             <ChevronLeft
-              size={18}
+              size={28}
               className={`transition-transform duration-200 ${
                 isCollapsed ? "rotate-180" : ""
               }`}
@@ -102,16 +111,22 @@ export default function Sidebar() {
       </div>
 
       <div className="mt-auto flex items-center justify-between pb-4">
-        <div
-          className={`flex items-center gap-3 ${
-            isCollapsed ? "justify-center pl-0" : "pl-1"
-          }`}
-        >
-          <LogOut className="w-7 h-7" />
-          {!isCollapsed && (
-            <p className="text-[15px] font-semibold text-[#7F7F7F]">Гарах</p>
-          )}
-        </div>
+        <form action={logout}>
+          <button
+            type="submit"
+            className={`group flex items-center gap-3 rounded-md transition-colors hover:text-[#4078C1] ${
+              isCollapsed ? "justify-center pl-0" : "pl-1"
+            }`}
+            aria-label="Гарах"
+          >
+            <LogOut className="w-7 h-7" />
+            {!isCollapsed && (
+              <p className="text-[15px] font-semibold text-[#7F7F7F] group-hover:text-[#4078C1]">
+                Гарах
+              </p>
+            )}
+          </button>
+        </form>
 
         {!isCollapsed && <SideBarImage />}
       </div>
