@@ -1,16 +1,21 @@
-import PineconeLogo from "@/app/_icons/PineconeLogo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Bell } from "lucide-react";
+import { Bell, Search, X } from "lucide-react";
 
 export default function Header() {
   return (
-    <header className="sticky top-0 z-50 flex h-14 w-full items-center justify-between border-b border-slate-200/70 bg-slate-50/70 px-4 md:px-6">
-     
-      <div className="flex items-center gap-2">
-        <PineconeLogo className="h-5 w-5 text-slate-700" />
-        <span className="text-sm font-semibold tracking-tight text-slate-800">
-          ExamPanel
-        </span>
+    <header className="flex h-21.25 w-full shrink-0 items-center justify-between pl-19 pr-30">
+      {/* Search Bar Container */}
+      <div className="relative flex items-center">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#808084]" />
+          <input
+            className="h-10 w-80 rounded-[10px] border-none bg-[#E5E5E5] pl-10 pr-10 text-sm outline-none transition-all focus:ring-2 focus:ring-primary/20"
+            placeholder="Хайх"
+          />
+          <button className="h-4.5 w-4.5 bg-[#808084] absolute right-2.25 top-1/2 flex items-center justify-center rounded-full -translate-y-1/2">
+            <X className="h-4.5 w-4.5 text-white" />
+          </button>
+        </div>
       </div>
 
       {/* Right Side: Notifications & Profile */}
