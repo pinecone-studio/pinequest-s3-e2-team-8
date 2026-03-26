@@ -17,7 +17,7 @@ export default async function EducatorDashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#fff6e4] via-[#FFF7EE] to-[#ced8e6] px-8 py-4">
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#FFD372] via-[#FFF7EE] to-[#ced8e6] px-8 py-4">
         <div className="relative z-10 max-w-2xl space-y-2">
           <h2 className="text-2xl font-bold tracking-tight md:text-3xl">
             Багшийн самбар
