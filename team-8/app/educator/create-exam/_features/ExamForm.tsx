@@ -395,7 +395,7 @@ export default function ExamForm({
                           prev === "start-date" ? null : "start-date"
                         )
                       }
-                      className="flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm"
+                      className="flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <span>{formatDateLabel(startDate)}</span>
                       <CalendarDays className="h-4 w-4 text-muted-foreground" />
@@ -409,7 +409,7 @@ export default function ExamForm({
                             onClick={() =>
                               setStartMonth((prev) => shiftMonth(prev, -1))
                             }
-                            className="rounded-md p-1 hover:bg-muted"
+                            className="rounded-md p-1 transition-[transform,box-shadow,background-color] duration-150 ease-out hover:-translate-y-px hover:bg-muted hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           >
                             <ChevronLeft className="h-4 w-4" />
                           </button>
@@ -421,7 +421,7 @@ export default function ExamForm({
                             onClick={() =>
                               setStartMonth((prev) => shiftMonth(prev, 1))
                             }
-                            className="rounded-md p-1 hover:bg-muted"
+                            className="rounded-md p-1 transition-[transform,box-shadow,background-color] duration-150 ease-out hover:-translate-y-px hover:bg-muted hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           >
                             <ChevronRight className="h-4 w-4" />
                           </button>
@@ -444,7 +444,7 @@ export default function ExamForm({
                                 setStartDate(day.value);
                                 setOpenPicker(null);
                               }}
-                              className={`h-10 rounded-xl text-sm transition-colors ${
+                              className={`h-10 rounded-xl text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                                 startDate === day.value
                                   ? "bg-black text-white"
                                   : day.muted
@@ -468,7 +468,7 @@ export default function ExamForm({
                           prev === "start-time" ? null : "start-time"
                         )
                       }
-                      className="flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm"
+                      className="flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <span>{startClock || "Цаг сонгох"}</span>
                       <Clock3 className="h-4 w-4 text-muted-foreground" />
@@ -482,7 +482,7 @@ export default function ExamForm({
                               <button
                                 type="button"
                                 onClick={() => adjustStartTime("hour", 1)}
-                                className="flex w-full justify-center rounded-md py-1 hover:bg-muted"
+                                className="flex w-full justify-center rounded-md py-1 transition-[transform,box-shadow,background-color] duration-150 ease-out hover:-translate-y-px hover:bg-muted hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
                                 <ChevronRight className="h-4 w-4 -rotate-90" />
                               </button>
@@ -492,7 +492,7 @@ export default function ExamForm({
                               <button
                                 type="button"
                                 onClick={() => adjustStartTime("hour", -1)}
-                                className="flex w-full justify-center rounded-md py-1 hover:bg-muted"
+                                className="flex w-full justify-center rounded-md py-1 transition-[transform,box-shadow,background-color] duration-150 ease-out hover:-translate-y-px hover:bg-muted hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
                                 <ChevronRight className="h-4 w-4 rotate-90" />
                               </button>
@@ -506,7 +506,7 @@ export default function ExamForm({
                               <button
                                 type="button"
                                 onClick={() => adjustStartTime("minute", 1)}
-                                className="flex w-full justify-center rounded-md py-1 hover:bg-muted"
+                                className="flex w-full justify-center rounded-md py-1 transition-[transform,box-shadow,background-color] duration-150 ease-out hover:-translate-y-px hover:bg-muted hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
                                 <ChevronRight className="h-4 w-4 -rotate-90" />
                               </button>
@@ -516,7 +516,7 @@ export default function ExamForm({
                               <button
                                 type="button"
                                 onClick={() => adjustStartTime("minute", -1)}
-                                className="flex w-full justify-center rounded-md py-1 hover:bg-muted"
+                                className="flex w-full justify-center rounded-md py-1 transition-[transform,box-shadow,background-color] duration-150 ease-out hover:-translate-y-px hover:bg-muted hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
                                 <ChevronRight className="h-4 w-4 rotate-90" />
                               </button>
@@ -545,7 +545,7 @@ export default function ExamForm({
                           prev === "end-date" ? null : "end-date"
                         )
                       }
-                      className="flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm"
+                      className="flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <span>{formatDateLabel(endDate)}</span>
                       <CalendarDays className="h-4 w-4 text-muted-foreground" />
@@ -559,7 +559,7 @@ export default function ExamForm({
                             onClick={() =>
                               setEndMonth((prev) => shiftMonth(prev, -1))
                             }
-                            className="rounded-md p-1 hover:bg-muted"
+                            className="rounded-md p-1 transition-[transform,box-shadow,background-color] duration-150 ease-out hover:-translate-y-px hover:bg-muted hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           >
                             <ChevronLeft className="h-4 w-4" />
                           </button>
@@ -571,7 +571,7 @@ export default function ExamForm({
                             onClick={() =>
                               setEndMonth((prev) => shiftMonth(prev, 1))
                             }
-                            className="rounded-md p-1 hover:bg-muted"
+                            className="rounded-md p-1 transition-[transform,box-shadow,background-color] duration-150 ease-out hover:-translate-y-px hover:bg-muted hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           >
                             <ChevronRight className="h-4 w-4" />
                           </button>
@@ -594,7 +594,7 @@ export default function ExamForm({
                                 setEndDate(day.value);
                                 setOpenPicker(null);
                               }}
-                              className={`h-10 rounded-xl text-sm transition-colors ${
+                              className={`h-10 rounded-xl text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                                 endDate === day.value
                                   ? "bg-black text-white"
                                   : day.muted
@@ -618,7 +618,7 @@ export default function ExamForm({
                           prev === "end-time" ? null : "end-time"
                         )
                       }
-                      className="flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm"
+                      className="flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <span>{endClock || "Цаг сонгох"}</span>
                       <Clock3 className="h-4 w-4 text-muted-foreground" />
@@ -632,7 +632,7 @@ export default function ExamForm({
                               <button
                                 type="button"
                                 onClick={() => adjustEndTime("hour", 1)}
-                                className="flex w-full justify-center rounded-md py-1 hover:bg-muted"
+                                className="flex w-full justify-center rounded-md py-1 transition-[transform,box-shadow,background-color] duration-150 ease-out hover:-translate-y-px hover:bg-muted hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
                                 <ChevronRight className="h-4 w-4 -rotate-90" />
                               </button>
@@ -642,7 +642,7 @@ export default function ExamForm({
                               <button
                                 type="button"
                                 onClick={() => adjustEndTime("hour", -1)}
-                                className="flex w-full justify-center rounded-md py-1 hover:bg-muted"
+                                className="flex w-full justify-center rounded-md py-1 transition-[transform,box-shadow,background-color] duration-150 ease-out hover:-translate-y-px hover:bg-muted hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
                                 <ChevronRight className="h-4 w-4 rotate-90" />
                               </button>
@@ -656,7 +656,7 @@ export default function ExamForm({
                               <button
                                 type="button"
                                 onClick={() => adjustEndTime("minute", 1)}
-                                className="flex w-full justify-center rounded-md py-1 hover:bg-muted"
+                                className="flex w-full justify-center rounded-md py-1 transition-[transform,box-shadow,background-color] duration-150 ease-out hover:-translate-y-px hover:bg-muted hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
                                 <ChevronRight className="h-4 w-4 -rotate-90" />
                               </button>
@@ -666,7 +666,7 @@ export default function ExamForm({
                               <button
                                 type="button"
                                 onClick={() => adjustEndTime("minute", -1)}
-                                className="flex w-full justify-center rounded-md py-1 hover:bg-muted"
+                                className="flex w-full justify-center rounded-md py-1 transition-[transform,box-shadow,background-color] duration-150 ease-out hover:-translate-y-px hover:bg-muted hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
                                 <ChevronRight className="h-4 w-4 rotate-90" />
                               </button>
@@ -729,12 +729,12 @@ export default function ExamForm({
 
           <Button
             type="submit"
-            disabled={
-              loading || durationSummary.invalid || !durationSummary.minutes
-            }
+            loading={loading}
+            disabled={durationSummary.invalid || !durationSummary.minutes}
+            loadingText="Үүсгэж байна..."
             className="w-full"
           >
-            {loading ? "Үүсгэж байна..." : "Үүсгэх ба асуулт нэмэх →"}
+            Үүсгэх ба асуулт нэмэх →
           </Button>
         </form>
       </CardContent>

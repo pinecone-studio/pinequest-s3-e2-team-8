@@ -3,6 +3,12 @@ import { getCurrentUser } from "@/lib/auth/actions";
 import Header from "./_features/Header";
 import Sidebar from "./_features/Sidebar";
 
+const ROLE_LABELS: Record<string, string> = {
+  student: "Сурагч",
+  teacher: "Багш",
+  admin: "Сургалтын менежер",
+};
+
 export default async function EducatorLayout({
   children,
 }: Readonly<{

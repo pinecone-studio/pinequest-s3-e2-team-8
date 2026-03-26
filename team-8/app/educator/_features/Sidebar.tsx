@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation"; // Added to handle the black background active state
+import { useState } from "react";
 import {
   CheckSquare,
   CalendarDays,
+  Loader2,
   LucideIcon,
   ChevronLeft,
   HomeIcon,
@@ -37,8 +39,13 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { href: "/educator/schedule", label: "Хуваарь", icon: CalendarDays },
 ];
 
+const NAV_SECTIONS: Array<{ title: string; items: NavItem[] }> = [
+  { title: "MENU", items: MENU_NAV_ITEMS },
+];
+
 export default function Sidebar() {
   const pathname = usePathname();
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
 
   return (
     <aside className="flex flex-col h-auto w-65  pt-6 px-3 flex-col border-r border-gray-100 bg-white justify-between shadow-2xl">

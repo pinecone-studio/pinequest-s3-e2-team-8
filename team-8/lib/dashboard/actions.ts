@@ -6,8 +6,11 @@ export async function getEducatorStats() {
   const supabase = await createClient();
   const {
     data: { user },
+    error: userError,
   } = await supabase.auth.getUser();
-  if (!user) return { totalExams: 0, totalQuestions: 0, activeExams: 0, pendingGrading: 0 };
+  if (userError || !user) {
+    return { totalExams: 0, totalQuestions: 0, activeExams: 0, pendingGrading: 0 };
+  }
 
   const now = new Date().toISOString();
 
@@ -21,20 +24,20 @@ export async function getEducatorStats() {
   // Teaching-scope exam IDs (for pendingGrading — includes admin-created exams assigned to teacher's groups)
   const teachingScopeExamIds = new Set<string>(ownExamIds);
 
-  const { data: teachingRows } = await supabase
+  const { data: teachingRows, error: teachingRowsError } = await supabase
     .from("teaching_assignments")
     .select("group_id, subject_id")
     .eq("teacher_id", user.id)
     .eq("is_active", true);
 
-  if (teachingRows && teachingRows.length > 0) {
+  if (!teachingRowsError && teachingRows && teachingRows.length > 0) {
     const groupIds = [...new Set(teachingRows.map((r) => r.group_id))];
-    const { data: assignedExams } = await supabase
+    const { data: assignedExams, error: assignedExamsError } = await supabase
       .from("exam_assignments")
       .select("exam_id, group_id, exams(subject_id)")
       .in("group_id", groupIds);
 
-    for (const ae of assignedExams ?? []) {
+    for (const ae of assignedExamsError ? [] : assignedExams ?? []) {
       const subjectId = Array.isArray(ae.exams)
         ? ae.exams[0]?.subject_id
         : (ae.exams as { subject_id: string } | null)?.subject_id;
@@ -74,9 +77,9 @@ export async function getEducatorStats() {
 
   return {
     totalExams: ownExamIds.length,
-    totalQuestions: questionsRes.count ?? 0,
-    activeExams: activeRes.count ?? 0,
-    pendingGrading: pendingRes.count ?? 0,
+    totalQuestions: "error" in questionsRes ? 0 : (questionsRes.count ?? 0),
+    activeExams: "error" in activeRes ? 0 : (activeRes.count ?? 0),
+    pendingGrading: "error" in pendingRes ? 0 : (pendingRes.count ?? 0),
   };
 }
 
@@ -84,8 +87,9 @@ export async function getStudentStats() {
   const supabase = await createClient();
   const {
     data: { user },
+    error: userError,
   } = await supabase.auth.getUser();
-  if (!user) return { activeExams: 0, completedExams: 0, avgScore: null };
+  if (userError || !user) return { activeExams: 0, completedExams: 0, avgScore: null };
 
   const now = new Date().toISOString();
 
@@ -108,6 +112,10 @@ export async function getStudentStats() {
       .eq("user_id", user.id)
       .in("status", ["submitted", "graded"]),
   ]);
+
+  if (activeAssignmentsRes.error || sessionsRes.error) {
+    return { activeExams: 0, completedExams: 0, avgScore: null };
+  }
 
   const activeExams = new Set(
     (activeAssignmentsRes.data ?? []).map((assignment) => assignment.exam_id)

@@ -27,6 +27,16 @@ interface QuestionBankBrowserProps {
   importUnavailableMessage?: string | null;
 }
 
+function formatDateYMD(value: string | null | undefined) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}.${m}.${day}`;
+}
+
 export default function QuestionBankBrowser({
   questions,
   subjects,
@@ -108,7 +118,7 @@ export default function QuestionBankBrowser({
   return (
     <div className="space-y-6">
       {examId && examTitle ? (
-        <Card>
+        <Card className="border-muted/60">
           <CardContent className="flex flex-col gap-3 pt-4 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="text-sm font-medium">Import mode идэвхтэй</p>
@@ -140,7 +150,7 @@ export default function QuestionBankBrowser({
             <select
               value={typeFilter}
               onChange={(event) => setTypeFilter(event.target.value)}
-              className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <option value="all">Бүх төрөл</option>
               <option value="multiple_choice">Сонголтот</option>
@@ -151,7 +161,7 @@ export default function QuestionBankBrowser({
             <select
               value={difficultyFilter}
               onChange={(event) => setDifficultyFilter(event.target.value)}
-              className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <option value="all">Бүх түвшин</option>
               <option value="easy">Хялбар</option>
@@ -161,7 +171,7 @@ export default function QuestionBankBrowser({
             <select
               value={subjectFilter}
               onChange={(event) => setSubjectFilter(event.target.value)}
-              className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <option value="all">Бүх хичээл</option>
               {availableSubjects.map((subject) => (
@@ -194,64 +204,73 @@ export default function QuestionBankBrowser({
       ) : (
         <div className="space-y-3">
           {filteredQuestions.map((question, idx) => (
-            <Card key={question.id}>
-              <CardContent className="flex items-start gap-4 pt-4">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
-                  {idx + 1}
-                </span>
-                <div className="flex-1 space-y-2">
-                  <MathContent
-                    html={question.content_html}
-                    text={question.content}
-                    className="prose prose-sm max-w-none text-foreground"
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">
-                      {typeLabels[question.type] ?? question.type}
-                    </Badge>
-                    <Badge variant="outline">{question.points} оноо</Badge>
-                    {question.subjects?.name && (
-                      <Badge variant="secondary">{question.subjects.name}</Badge>
-                    )}
-                    <Badge variant="secondary">{question.difficulty}</Badge>
-                    {question.image_url && (
-                      <Badge variant="outline" className="text-xs">
-                        Зурагтай
-                      </Badge>
-                    )}
-                    <Badge variant="outline" className="text-xs text-muted-foreground">
-                      {question.usage_count ?? 0} удаа ашигласан
-                    </Badge>
-                    {lastImportedId === question.id && (
-                      <Badge>Импорт хийсэн</Badge>
-                    )}
-                  </div>
-                  {Array.isArray(question.tags) && question.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {question.tags.map((tag) => (
-                        <Badge key={`${question.id}-${tag}`} variant="secondary" className="text-xs">
-                          #{tag}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                  {question.image_url && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={question.image_url}
-                      alt="Асуултын зураг"
-                      className="max-h-56 rounded-lg border"
+            <Card
+              key={question.id}
+              className="border-muted/60 transition hover:border-muted hover:shadow-sm"
+            >
+              <CardContent className="flex flex-col gap-4 pt-4 md:flex-row md:items-start">
+                <div className="flex items-start gap-4 md:flex-1">
+                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold text-foreground">
+                    {idx + 1}
+                  </span>
+
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <MathContent
+                      html={question.content_html}
+                      text={question.content}
+                      className="prose prose-sm max-w-none text-foreground [&_p]:leading-relaxed"
                     />
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(question.updated_at ?? question.created_at).toLocaleDateString("mn-MN")}
-                  </p>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="outline">
+                        {typeLabels[question.type] ?? question.type}
+                      </Badge>
+                      <Badge variant="outline">{question.points} оноо</Badge>
+                      {question.subjects?.name && (
+                        <Badge variant="secondary">{question.subjects.name}</Badge>
+                      )}
+                      <Badge variant="secondary">{question.difficulty}</Badge>
+                      {question.image_url && (
+                        <Badge variant="outline" className="text-xs">
+                          Зурагтай
+                        </Badge>
+                      )}
+                      <Badge variant="outline" className="text-xs text-muted-foreground">
+                        {question.usage_count ?? 0} удаа ашигласан
+                      </Badge>
+                      {lastImportedId === question.id && (
+                        <Badge>Импорт хийсэн</Badge>
+                      )}
+                    </div>
+
+                    {Array.isArray(question.tags) && question.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {question.tags.map((tag) => (
+                          <Badge key={`${question.id}-${tag}`} variant="secondary" className="text-xs">
+                            #{tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+
+                    {question.image_url && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={question.image_url}
+                        alt="Асуултын зураг"
+                        className="max-h-64 w-full rounded-lg border object-contain md:max-w-xl"
+                        loading="lazy"
+                      />
+                    )}
+
+                    <p className="text-xs text-muted-foreground">
+                      {formatDateYMD(question.updated_at ?? question.created_at)}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex shrink-0 flex-col gap-2">
-                  <EditQuestionBankDialog
-                    question={question}
-                    subjects={subjects}
-                  />
+
+                <div className="flex shrink-0 flex-row gap-2 md:flex-col md:items-end">
+                  <EditQuestionBankDialog question={question} subjects={subjects} />
                   {examId && !importUnavailableMessage ? (
                     <Button
                       type="button"

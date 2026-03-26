@@ -9,6 +9,15 @@ import {
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
+function formatDateYMD(value: string) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}.${m}.${day}`;
+}
+
 export default async function AdminUsersPage({
   searchParams,
 }: {
@@ -19,10 +28,22 @@ export default async function AdminUsersPage({
 
   const roleBadge = (r: string) => {
     if (r === "teacher")
-      return <Badge className="bg-blue-600">Багш</Badge>;
+      return (
+        <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+          Багш
+        </Badge>
+      );
     if (r === "admin")
-      return <Badge className="bg-purple-600">Менежер</Badge>;
-    return <Badge variant="secondary">Сурагч</Badge>;
+      return (
+        <Badge variant="secondary" className="bg-purple-500/10 text-purple-700 dark:text-purple-300">
+          Менежер
+        </Badge>
+      );
+    return (
+      <Badge variant="secondary" className="bg-blue-500/10 text-blue-700 dark:text-blue-300">
+        Сурагч
+      </Badge>
+    );
   };
 
   return (
@@ -104,7 +125,7 @@ export default async function AdminUsersPage({
                   <div className="flex items-center gap-2">
                     {roleBadge(u.role)}
                     <span className="text-xs text-muted-foreground">
-                      {new Date(u.created_at).toLocaleDateString("mn-MN")}
+                      {formatDateYMD(u.created_at)}
                     </span>
                   </div>
                 </div>
