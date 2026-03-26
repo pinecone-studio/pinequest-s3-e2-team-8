@@ -22,6 +22,10 @@ export default async function TakeExamPage({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { exam, questions } = data as any;
 
+  if (!Array.isArray(questions) || questions.length === 0) {
+    redirect("/student/exams?error=questions_not_ready");
+  }
+
   // Шалгалт идэвхтэй эсэх шалгах
   const now = new Date();
   const startTime = new Date(exam.start_time as string);

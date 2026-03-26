@@ -300,12 +300,28 @@ function parseMatchingPairs(options: unknown) {
     );
 }
 
-function getStudentSafeQuestions<T extends { correct_answer?: unknown }>(
+function getStudentSafeQuestions<
+  T extends { correct_answer?: unknown; passage_id?: string | null }
+>(
   questions: T[]
 ) {
   return questions.map((question) => {
-    const safeQuestion = { ...question };
+    const safeQuestion = { ...question } as T & {
+      options?: unknown;
+      type?: unknown;
+      explanation?: unknown;
+      matching_prompts?: string[];
+      matching_choices?: string[];
+    };
     delete safeQuestion.correct_answer;
+    delete safeQuestion.explanation;
+
+    if (safeQuestion.type === "matching") {
+      const matchingPairs = parseMatchingPairs(safeQuestion.options);
+      safeQuestion.matching_prompts = matchingPairs.map((pair) => pair.left);
+      safeQuestion.matching_choices = matchingPairs.map((pair) => pair.right);
+    }
+
     return safeQuestion;
   });
 }
@@ -438,7 +454,9 @@ export async function getExamForStudent(examId: string) {
     .order("order_index", { ascending: true });
 
   const safeQuestions = getStudentSafeQuestions(
-    (questions ?? []) as Array<Record<string, unknown>>
+    (questions ?? []) as Array<
+      Record<string, unknown> & { passage_id?: string | null }
+    >
   );
   const passageAwareQuestions = await attachPassagesToQuestions(
     supabase,
@@ -626,6 +644,16 @@ export async function saveAnswer(
   const existingAnswer = await redis.hget<string | null>(redisKey, questionId);
   if ((existingAnswer ?? "") === answer) {
     return { success: true, skipped: true };
+  }
+
+  if (answer === "") {
+    if (existingAnswer == null) {
+      return { success: true, skipped: true };
+    }
+
+    await redis.hdel(redisKey, questionId);
+    await redis.expire(redisKey, 7200);
+    return { success: true };
   }
 
   await redis.hset(redisKey, { [questionId]: answer });
@@ -941,7 +969,7 @@ export async function getExamResult(examId: string) {
   const { data: answers } = await supabase
     .from("answers")
     .select(
-      "id, question_id, answer, score, is_correct, feedback, questions(id, type, content, correct_answer, points, order_index, explanation)"
+      "id, question_id, answer, score, is_correct, feedback, questions(id, type, content, content_html, image_url, options, correct_answer, points, order_index, explanation)"
     )
     .eq("session_id", session.id)
     .order("questions(order_index)", { ascending: true });

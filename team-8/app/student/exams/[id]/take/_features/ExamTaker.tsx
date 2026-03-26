@@ -20,6 +20,8 @@ interface QuestionItem {
   content_html: string | null;
   image_url: string | null;
   options: string[] | null;
+  matching_prompts?: string[] | null;
+  matching_choices?: string[] | null;
   points: number;
   order_index: number;
   question_passages?: {
@@ -102,6 +104,42 @@ function parseMatchingOptions(options: string[] | null | undefined) {
     );
 }
 
+function normalizeDraftAnswer(questionType: string, answer: string) {
+  if (questionType === "multiple_choice") {
+    return answer.trim() ? answer : null;
+  }
+
+  if (questionType === "essay" || questionType === "fill_blank") {
+    return answer.trim() ? answer : null;
+  }
+
+  if (questionType === "multiple_response") {
+    const nextAnswers = parseStoredArray(answer).filter((item) => item.trim());
+    return nextAnswers.length > 0 ? JSON.stringify(nextAnswers) : null;
+  }
+
+  if (questionType === "matching") {
+    try {
+      const parsed = JSON.parse(answer) as Record<string, string>;
+      const filteredEntries = Object.entries(parsed).filter(
+        ([, value]) => String(value ?? "").trim() !== ""
+      );
+
+      return filteredEntries.length > 0
+        ? JSON.stringify(Object.fromEntries(filteredEntries))
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return answer.trim() ? answer : null;
+}
+
+function isQuestionAnswered(question: QuestionItem, answer: string | undefined) {
+  return normalizeDraftAnswer(question.type, answer ?? "") !== null;
+}
+
 export default function ExamTaker({
   exam,
   questions,
@@ -151,7 +189,15 @@ export default function ExamTaker({
   const currentQuestion = displayQuestions[currentIndex];
   const currentPassage = currentQuestion.question_passages;
   const currentMultipleAnswers = parseStoredArray(answers[currentQuestion.id]);
-  const currentMatchingOptions = parseMatchingOptions(currentQuestion.options);
+  const currentMatchingPrompts =
+    currentQuestion.matching_prompts ??
+    parseMatchingOptions(currentQuestion.options).map((pair) => pair.left);
+  const currentMatchingChoices = getDisplayOptions(
+    currentQuestion.matching_choices ??
+      parseMatchingOptions(currentQuestion.options).map((pair) => pair.right),
+    Boolean(exam.shuffle_options),
+    `${sessionId}:${currentQuestion.id}:matching-right`
+  );
   const currentMatchingAnswer = (() => {
     try {
       return JSON.parse(answers[currentQuestion.id] ?? "{}") as Record<
@@ -395,8 +441,19 @@ export default function ExamTaker({
   // Хариулт хадгалах (debounced)
   const handleAnswer = useCallback(
     (questionId: string, answer: string, questionType: string) => {
-      setAnswers((prev) => ({ ...prev, [questionId]: answer }));
-      queueSave(questionId, answer, questionType);
+      const normalizedAnswer = normalizeDraftAnswer(questionType, answer);
+
+      setAnswers((prev) => {
+        const next = { ...prev };
+        if (normalizedAnswer === null) {
+          delete next[questionId];
+        } else {
+          next[questionId] = normalizedAnswer;
+        }
+        return next;
+      });
+
+      queueSave(questionId, normalizedAnswer ?? "", questionType);
     },
     [queueSave]
   );
@@ -408,10 +465,31 @@ export default function ExamTaker({
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  const answeredCount = Object.keys(answers).filter((id) =>
-    displayQuestions.some((q) => q.id === id)
+  const answeredCount = displayQuestions.filter((question) =>
+    isQuestionAnswered(question, answers[question.id])
   ).length;
   const isTimeWarning = timeLeft < 300; // 5 минутаас бага
+
+  if (displayQuestions.length === 0 || !currentQuestion) {
+    return (
+      <div className="mx-auto flex min-h-[60vh] max-w-2xl items-center justify-center p-6">
+        <Card className="w-full">
+          <CardHeader>
+            <CardTitle>Асуулт олдсонгүй</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Энэ шалгалтын асуултын багц бүрэн бэлдээгүй байна. Багшдаа мэдэгдээд
+              дараа дахин оролдоно уу.
+            </p>
+            <Button variant="outline" className="w-full" onClick={() => router.push("/student/exams")}>
+              Шалгалтын жагсаалт руу буцах
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -464,7 +542,7 @@ export default function ExamTaker({
             <div className="grid grid-cols-5 gap-1.5">
               {displayQuestions.map((q, i) => {
                 const qId = q.id as string;
-                const isAnswered = !!answers[qId];
+                const isAnswered = isQuestionAnswered(q, answers[qId]);
                 const isCurrent = i === currentIndex;
                 return (
                   <button
@@ -578,7 +656,10 @@ export default function ExamTaker({
                         >
                           {String.fromCharCode(65 + i)}
                         </span>
-                        <span>{optionValue}</span>
+                        <MathContent
+                          text={optionValue}
+                          className="prose prose-sm max-w-none text-foreground"
+                        />
                       </button>
                     );
                   })}
@@ -626,7 +707,10 @@ export default function ExamTaker({
                         >
                           {isSelected ? "✓" : ""}
                         </span>
-                        <span>{optionValue}</span>
+                        <MathContent
+                          text={optionValue}
+                          className="prose prose-sm max-w-none text-foreground"
+                        />
                       </button>
                     );
                   })}
@@ -668,26 +752,25 @@ export default function ExamTaker({
 
               {currentQuestion.type === "matching" && (
                 <div className="space-y-3">
-                  {currentMatchingOptions.map((pair, index) => {
-                    const rightOptions = currentMatchingOptions.map(
-                      (item) => item.right
-                    );
-
+                  {currentMatchingPrompts.map((leftPrompt, index) => {
                     return (
                       <div
-                        key={`${pair.left}-${index}`}
+                        key={`${leftPrompt}-${index}`}
                         className="grid gap-3 rounded-lg border p-4 md:grid-cols-2"
                       >
                         <div className="rounded-lg bg-muted/40 px-3 py-2 font-medium">
-                          {pair.left}
+                          <MathContent
+                            text={leftPrompt}
+                            className="prose prose-sm max-w-none text-foreground"
+                          />
                         </div>
                         <select
                           className="rounded-lg border bg-background px-3 py-2"
-                          value={currentMatchingAnswer[pair.left] ?? ""}
+                          value={currentMatchingAnswer[leftPrompt] ?? ""}
                           onChange={(event) => {
                             const nextAnswer = {
                               ...currentMatchingAnswer,
-                              [pair.left]: event.target.value,
+                              [leftPrompt]: event.target.value,
                             };
 
                             handleAnswer(
@@ -698,8 +781,8 @@ export default function ExamTaker({
                           }}
                         >
                           <option value="">Сонгоно уу</option>
-                          {rightOptions.map((option) => (
-                            <option key={`${pair.left}-${option}`} value={option}>
+                          {currentMatchingChoices.map((option) => (
+                            <option key={`${leftPrompt}-${option}`} value={option}>
                               {option}
                             </option>
                           ))}
