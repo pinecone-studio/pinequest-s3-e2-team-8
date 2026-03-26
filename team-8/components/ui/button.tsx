@@ -5,7 +5,7 @@ import { Slot } from "radix-ui"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap outline-none select-none transition-[transform,box-shadow,background-color,color,border-color,opacity] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -41,13 +41,43 @@ const buttonVariants = cva(
   }
 )
 
+function Spinner({ className }: { className?: string }) {
+  return (
+    <svg
+      className={cn("size-4 animate-spin", className)}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+        fill="none"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 0 1 8-8v3a5 5 0 0 0-5 5H4z"
+      />
+    </svg>
+  )
+}
+
 function Button({
   className,
   variant = "default",
   size = "default",
   asChild = false,
+  loading = false,
+  loadingText,
   ...props
-}: React.ComponentProps<"button"> &
+}: React.ComponentProps<"button"> & {
+  loading?: boolean
+  loadingText?: string
+} &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
   }) {
@@ -58,9 +88,26 @@ function Button({
       data-slot="button"
       data-variant={variant}
       data-size={size}
+      aria-busy={loading || undefined}
+      disabled={asChild ? props.disabled : props.disabled || loading}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
-    />
+    >
+      {asChild ? (
+        props.children
+      ) : (
+        <>
+          {loading ? (
+            <>
+              <Spinner className="mr-2" />
+              <span>{loadingText ?? "Ачаалж байна..."}</span>
+            </>
+          ) : (
+            props.children
+          )}
+        </>
+      )}
+    </Comp>
   )
 }
 

@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { logout } from "@/lib/auth/actions";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import PineconeLogo from "@/app/_icons/PineconeLogo";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Profile } from "@/types";
+import { LogOut } from "lucide-react";
 
 const roleLabels: Record<string, string> = {
   student: "Сурагч",
@@ -22,9 +23,9 @@ const roleLabels: Record<string, string> = {
 };
 
 const roleColors: Record<string, string> = {
-  student: "bg-blue-100 text-blue-700",
-  teacher: "bg-green-100 text-green-700",
-  admin: "bg-purple-100 text-purple-700",
+  student: "bg-blue-500/10 text-blue-700 dark:text-blue-300",
+  teacher: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  admin: "bg-purple-500/10 text-purple-700 dark:text-purple-300",
 };
 
 const profilePaths: Record<string, string> = {
@@ -34,7 +35,6 @@ const profilePaths: Record<string, string> = {
 };
 
 export function DashboardHeader({ profile }: { profile: Profile }) {
-  const router = useRouter();
   const initials = profile.full_name
     ? profile.full_name
         .split(" ")
@@ -45,12 +45,15 @@ export function DashboardHeader({ profile }: { profile: Profile }) {
     : profile.email[0].toUpperCase();
 
   return (
-    <header className="sticky top-0 z-50 flex h-16 items-center justify-between border-b bg-background px-6">
-      <div className="flex items-center gap-3">
-        <h1 className="text-lg font-bold">PineExam</h1>
+    <header className="sticky top-0 z-50 flex h-14 items-center justify-between border-b border-border/60 bg-background/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-6">
+      <div className="flex items-center gap-2">
+        <PineconeLogo className="h-5 w-5 text-foreground" />
+        <h1 className="text-lg font-bold tracking-tight text-foreground">
+          PineExam
+        </h1>
       </div>
       <div className="flex items-center gap-3">
-        <Badge variant="outline" className={roleColors[profile.role]}>
+        <Badge variant="secondary" className={roleColors[profile.role]}>
           {roleLabels[profile.role]}
         </Badge>
         <DropdownMenu>
@@ -58,7 +61,10 @@ export function DashboardHeader({ profile }: { profile: Profile }) {
             <Button variant="ghost" className="relative h-9 w-9 rounded-full">
               <Avatar className="h-9 w-9">
                 {profile.avatar_url ? (
-                  <AvatarImage src={profile.avatar_url} alt={profile.full_name || profile.email} />
+                  <AvatarImage
+                    src={profile.avatar_url}
+                    alt={profile.full_name || profile.email}
+                  />
                 ) : null}
                 <AvatarFallback>{initials}</AvatarFallback>
               </Avatar>
@@ -66,7 +72,9 @@ export function DashboardHeader({ profile }: { profile: Profile }) {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <div className="px-2 py-1.5">
-              <p className="text-sm font-medium">{profile.full_name || "Хэрэглэгч"}</p>
+              <p className="text-sm font-medium">
+                {profile.full_name || "Хэрэглэгч"}
+              </p>
               <p className="text-xs text-muted-foreground">{profile.email}</p>
             </div>
             <DropdownMenuSeparator />
@@ -75,15 +83,16 @@ export function DashboardHeader({ profile }: { profile: Profile }) {
                 Профайл
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem
-              className="cursor-pointer text-destructive"
-              onClick={async () => {
-                await logout();
-                router.push("/login");
-              }}
-            >
-              Гарах
-            </DropdownMenuItem>
+            <form action={logout}>
+              <DropdownMenuItem asChild className="cursor-pointer text-destructive">
+                <button type="submit" className="w-full text-left">
+                  <span className="flex items-center gap-2">
+                    <LogOut className="h-4 w-4" />
+                    Гарах
+                  </span>
+                </button>
+              </DropdownMenuItem>
+            </form>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

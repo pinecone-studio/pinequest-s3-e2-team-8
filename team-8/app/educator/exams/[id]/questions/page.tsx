@@ -1,19 +1,19 @@
-import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getExamById } from "@/lib/exam/actions";
+import { notFound } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
+import { getExamById, publishExam } from "@/lib/exam/actions";
 import { getExamReadiness } from "@/lib/exam-readiness";
 import {
   getQuestionPassagesByExam,
   getQuestionsByExam,
 } from "@/lib/question/actions";
-import { publishExam } from "@/lib/exam/actions";
-import ExamReadinessPanel from "@/components/exams/exam-readiness-panel";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import ExamReadinessPanel from "@/components/exams/exam-readiness-panel";
 import AddQuestionForm from "./_features/AddQuestionForm";
 import PassageManager from "./_features/PassageManager";
+import QuestionImportActions from "./_features/QuestionImportActions";
 import QuestionList from "./_features/QuestionList";
-import { ArrowLeft } from "lucide-react";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -53,10 +53,12 @@ export default async function ExamQuestionsPage({ params }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-start justify-between">
         <div className="space-y-1">
-          <Link href="/educator" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <Link
+            href="/educator"
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
             <ArrowLeft className="h-3 w-3" />
             Буцах
           </Link>
@@ -73,10 +75,12 @@ export default async function ExamQuestionsPage({ params }: Props) {
               <Badge variant="outline">Сонголт холих</Badge>
             )}
             <span className="text-sm text-muted-foreground">
-              {exam.duration_minutes} минут · {questions.length} асуулт · {passages.length} passage block
+              {exam.duration_minutes} минут · {questions.length} асуулт ·{" "}
+              {passages.length} passage block
             </span>
           </div>
         </div>
+
         {!exam.is_published && (
           <form action={handlePublish}>
             <Button
@@ -92,7 +96,6 @@ export default async function ExamQuestionsPage({ params }: Props) {
 
       {readiness && <ExamReadinessPanel readiness={readiness} examId={id} />}
 
-      {/* Content */}
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-4">
           <h3 className="font-semibold">Асуултууд</h3>
@@ -103,29 +106,14 @@ export default async function ExamQuestionsPage({ params }: Props) {
             isLocked={Boolean(exam.is_published)}
           />
         </div>
+
         <div className="space-y-4">
-          {!exam.is_published && (
-            <div className="rounded-lg border bg-muted/30 p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <h3 className="font-semibold">Асуултын сан ашиглах</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Өмнө үүсгэсэн асуултуудаа энэ шалгалт руу шууд импортлоно.
-                  </p>
-                </div>
-                <Button asChild variant="outline">
-                  <Link href={`/educator/question-bank?examId=${id}`}>
-                    Сангаас оруулах
-                  </Link>
-                </Button>
-              </div>
-            </div>
-          )}
+          {!exam.is_published && <QuestionImportActions examId={id} />}
 
           {exam.is_published ? (
             <div className="rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
-              Энэ шалгалт нийтлэгдсэн тул асуулт нэмэх, устгах, сангаас импортлох
-              боломжгүй.
+              Энэ шалгалт нийтлэгдсэн тул асуулт нэмэх, устгах, сангаас
+              импортлох боломжгүй.
             </div>
           ) : (
             <>

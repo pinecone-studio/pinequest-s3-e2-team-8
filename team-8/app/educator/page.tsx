@@ -98,7 +98,9 @@ export default async function EducatorDashboard() {
                       {exam.subject_name && (
                         <Badge variant="secondary">{exam.subject_name}</Badge>
                       )}
-                      <Badge variant={exam.is_published ? "outline" : "secondary"}>
+                      <Badge
+                        variant={exam.is_published ? "outline" : "secondary"}
+                      >
                         {exam.is_published ? "Нийтлэгдсэн" : "Ноорог"}
                       </Badge>
                     </div>
@@ -113,9 +115,7 @@ export default async function EducatorDashboard() {
           <CardHeader className="flex flex-row items-start justify-between gap-4">
             <div>
               <CardTitle className="text-lg">Одоо хийх зүйл</CardTitle>
-              <CardDescription>
-                Шалгах шаардлагатай дүнгүүд
-              </CardDescription>
+              <CardDescription>Шалгах шаардлагатай дүнгүүд</CardDescription>
             </div>
             <Link href="/educator/grading">
               <Button variant="outline" size="sm">
@@ -136,7 +136,9 @@ export default async function EducatorDashboard() {
                     className="flex items-start justify-between gap-4 rounded-lg border p-3"
                   >
                     <div className="space-y-1">
-                      <p className="text-sm font-medium">{item.student_label}</p>
+                      <p className="text-sm font-medium">
+                        {item.student_label}
+                      </p>
                       <p className="text-xs text-muted-foreground">
                         {item.exam_title}
                       </p>

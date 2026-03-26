@@ -4,12 +4,18 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getAllowedSubjectIds } from "@/lib/teacher/permissions";
 import {
+  buildQuestionImportDrafts,
+  draftToQuestionFormShape,
+  validateQuestionImportDraft,
+} from "@/lib/question/import";
+import {
   attachPassagesToQuestions,
   getQuestionPassagesByExam as loadQuestionPassagesByExam,
 } from "@/lib/question-passages";
 import type {
   Difficulty,
   QuestionBank,
+  QuestionImportDraft,
   QuestionBankSummary,
   QuestionBankVisibility,
 } from "@/types";
@@ -172,6 +178,16 @@ function normalizeQuestionBankRecord(
         : "private",
     last_used_at: question.last_used_at ?? null,
   } as QuestionBank;
+}
+
+function getQuestionTypeMigrationHint(error: { code?: string; message?: string } | null) {
+  if (!error) return null;
+  if (error.code !== "23514") return null;
+
+  return (
+    "Асуултын төрөл хадгалахад DB constraint алдаа гарлаа. " +
+    "Та хамгийн сүүлийн migration-уудаа (ялангуяа `013_expand_question_types.sql`) apply хийсэн эсэхээ шалгаарай."
+  );
 }
 
 function parseStringArray(rawValue: string) {
@@ -398,7 +414,9 @@ export async function addQuestion(examId: string, formData: FormData) {
 
   const { error } = await supabase.from("questions").insert(insertPayload);
 
-  if (error) return { error: error.message };
+  if (error) {
+    return { error: getQuestionTypeMigrationHint(error) ?? error.message };
+  }
 
   const { data: existingBankEntries } = await supabase
     .from("question_bank")
@@ -712,7 +730,9 @@ export async function updateQuestion(
     .eq("exam_id", examId)
     .eq("created_by", user.id);
 
-  if (error) return { error: error.message };
+  if (error) {
+    return { error: getQuestionTypeMigrationHint(error) ?? error.message };
+  }
 
   revalidatePath(`/educator/exams/${examId}/questions`);
   return { success: true };
@@ -1133,4 +1153,200 @@ export async function bulkUpdateQuestionBankItems(
 
   revalidatePath("/educator/question-bank");
   return { success: true, updatedCount: manageableRows.length };
+}
+
+export async function parseImportedQuestionFile(
+  examId: string,
+  formData: FormData
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const { exam } = await getOwnedExam(examId, user.id);
+  if (!exam) return { error: "Шалгалт олдсонгүй" };
+  if (exam.is_published) {
+    return { error: "Нийтлэгдсэн шалгалтад file import хийх боломжгүй" };
+  }
+
+  const file = formData.get("file");
+  if (!file || typeof file !== "object" || !("arrayBuffer" in file)) {
+    return { error: "Импортлох файл олдсонгүй." };
+  }
+
+  const uploadedFile = file as File;
+  const fileName = uploadedFile.name || "questions";
+
+  if (!/\.(xlsx|xls|csv)$/i.test(fileName)) {
+    return {
+      error:
+        "Одоогоор зөвхөн Excel (.xlsx, .xls) болон CSV файл дэмжинэ.",
+    };
+  }
+
+  try {
+    const fileBuffer = await uploadedFile.arrayBuffer();
+    const drafts = buildQuestionImportDrafts(fileBuffer, fileName);
+
+    return {
+      success: true,
+      fileName,
+      drafts,
+    };
+  } catch (error) {
+    return {
+      error:
+        error instanceof Error
+          ? error.message
+          : "Файлыг задлан унших үед алдаа гарлаа.",
+    };
+  }
+}
+
+export async function importParsedQuestions(
+  examId: string,
+  rawDrafts: string
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const { exam } = await getOwnedExam(examId, user.id);
+  if (!exam) return { error: "Шалгалт олдсонгүй" };
+  if (exam.is_published) {
+    return { error: "Нийтлэгдсэн шалгалтад file import хийх боломжгүй" };
+  }
+
+  function coerceDraft(rawDraft: unknown, index: number): QuestionImportDraft {
+    const draft = (rawDraft ?? {}) as Partial<QuestionImportDraft>;
+
+    return {
+      draftId: String(draft.draftId ?? `draft-${index + 1}`),
+      sourceRow: Number(draft.sourceRow) || index + 2,
+      type:
+        draft.type === "multiple_choice" ||
+        draft.type === "multiple_response" ||
+        draft.type === "fill_blank" ||
+        draft.type === "matching" ||
+        draft.type === "essay"
+          ? draft.type
+          : "essay",
+      content: String(draft.content ?? ""),
+      contentHtml: String(draft.contentHtml ?? ""),
+      imageUrl: String(draft.imageUrl ?? ""),
+      explanation: String(draft.explanation ?? ""),
+      points: Number(draft.points) || 1,
+      options: Array.isArray(draft.options)
+        ? draft.options.map((item) => String(item ?? ""))
+        : [],
+      correctAnswer: String(draft.correctAnswer ?? ""),
+      multipleCorrectAnswers: Array.isArray(draft.multipleCorrectAnswers)
+        ? draft.multipleCorrectAnswers.map((item) => String(item ?? ""))
+        : [],
+      matchingPairs: Array.isArray(draft.matchingPairs)
+        ? draft.matchingPairs.map((pair) => ({
+            left: String(pair?.left ?? ""),
+            right: String(pair?.right ?? ""),
+          }))
+        : [],
+      errors: [],
+    };
+  }
+
+  let parsedDrafts: QuestionImportDraft[];
+  try {
+    const parsed = JSON.parse(rawDrafts);
+    if (!Array.isArray(parsed)) {
+      return { error: "Импортлох draft өгөгдөл буруу байна." };
+    }
+
+    parsedDrafts = parsed.map((draft, index) => coerceDraft(draft, index));
+  } catch {
+    return { error: "Импортлох draft өгөгдлийг уншиж чадсангүй." };
+  }
+
+  if (parsedDrafts.length === 0) {
+    return { error: "Импортлох асуулт олдсонгүй." };
+  }
+
+  const validatedDrafts = parsedDrafts.map((draft) => ({
+    ...draft,
+    errors: validateQuestionImportDraft(draft),
+  }));
+
+  const invalidDrafts = validatedDrafts.filter(
+    (draft) => draft.errors.length > 0
+  );
+  if (invalidDrafts.length > 0) {
+    return {
+      error:
+        "Зарим асуултын бүтэц дутуу байна. Preview дээр засч дахин оролдоно уу.",
+      drafts: validatedDrafts,
+    };
+  }
+
+  const { data: existing } = await supabase
+    .from("questions")
+    .select("order_index")
+    .eq("exam_id", examId)
+    .order("order_index", { ascending: false })
+    .limit(1);
+
+  let nextOrderIndex =
+    existing && existing.length > 0 ? existing[0].order_index + 1 : 0;
+
+  const insertRows: Record<string, unknown>[] = [];
+  const revalidatedDrafts = validatedDrafts.map((draft) => ({
+    ...draft,
+    errors: [],
+  }));
+
+  for (const draft of validatedDrafts) {
+    const normalized = draftToQuestionFormShape(draft);
+    const payload = buildQuestionPayload(
+      normalized.type,
+      normalized.options,
+      normalized.correct_answer || null
+    );
+
+    if ("error" in payload) {
+      const nextDrafts = revalidatedDrafts.map((item) =>
+        item.draftId === draft.draftId
+          ? { ...item, errors: [payload.error] }
+          : item
+      );
+
+      return {
+        error:
+          "Асуултын төрлийг шалгаж, preview дээрх алдаануудыг засаад дахин оролдоно уу.",
+        drafts: nextDrafts,
+      };
+    }
+
+    insertRows.push({
+      exam_id: examId,
+      type: normalized.type,
+      content: normalized.content,
+      content_html: normalized.content_html || null,
+      image_url: normalized.image_url || null,
+      options: payload.options,
+      correct_answer: payload.correctAnswer,
+      points: parseFloat(normalized.points) || 1,
+      order_index: nextOrderIndex++,
+      explanation: normalized.explanation || null,
+      created_by: user.id,
+    });
+  }
+
+  const { error } = await supabase.from("questions").insert(insertRows);
+  if (error) {
+    return { error: error.message, drafts: revalidatedDrafts };
+  }
+
+  revalidatePath(`/educator/exams/${examId}/questions`);
+  return { success: true, count: insertRows.length };
 }

@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ClipboardEvent } from "react";
 import { addQuestion } from "@/lib/question/actions";
+import { parsePastedQuestionText } from "@/lib/question/paste";
 import type { QuestionPassage, QuestionType } from "@/types";
 import MathContent from "@/components/math/MathContent";
 import LatexShortcutPanel from "@/components/math/LatexShortcutPanel";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -16,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import { PlusCircle, Trash2 } from "lucide-react";
 
 const SCIENCE_SUBJECTS = ["Математик", "Физик", "Хими", "Мэдээлэл зүй"];
@@ -80,6 +81,8 @@ export default function AddQuestionForm({
   const [type, setType] = useState<QuestionType>("multiple_choice");
   const [difficulty, setDifficulty] = useState("medium");
   const [selectedPassageId, setSelectedPassageId] = useState("__none");
+  const [isFormulaToolOpen, setIsFormulaToolOpen] = useState(false);
+  const [content, setContent] = useState("");
   const [options, setOptions] = useState(["", ""]);
   const [correctAnswer, setCorrectAnswer] = useState("");
   const [multipleCorrectAnswers, setMultipleCorrectAnswers] = useState<
@@ -103,6 +106,55 @@ export default function AddQuestionForm({
     setCorrectAnswer("");
     setMultipleCorrectAnswers([]);
     setMatchingPairs([createEmptyMatchingPair(), createEmptyMatchingPair()]);
+  }
+
+  function applyParsedQuestion(rawText: string) {
+    const parsed = parsePastedQuestionText(rawText);
+    if (!parsed) return false;
+
+    setError(null);
+    setContent(parsed.content);
+    setType(parsed.type);
+
+    if (parsed.type === "multiple_choice") {
+      setOptions(parsed.options.length >= 2 ? parsed.options : ["", ""]);
+      setCorrectAnswer(parsed.correctAnswer);
+      setMultipleCorrectAnswers([]);
+      setMatchingPairs([createEmptyMatchingPair(), createEmptyMatchingPair()]);
+      return true;
+    }
+
+    if (parsed.type === "multiple_response") {
+      setOptions(parsed.options.length >= 2 ? parsed.options : ["", ""]);
+      setCorrectAnswer("");
+      setMultipleCorrectAnswers(parsed.multipleCorrectAnswers);
+      setMatchingPairs([createEmptyMatchingPair(), createEmptyMatchingPair()]);
+      return true;
+    }
+
+    if (parsed.type === "fill_blank") {
+      setOptions(["", ""]);
+      setCorrectAnswer(parsed.correctAnswer);
+      setMultipleCorrectAnswers([]);
+      setMatchingPairs([createEmptyMatchingPair(), createEmptyMatchingPair()]);
+      return true;
+    }
+
+    setOptions(["", ""]);
+    setCorrectAnswer("");
+    setMultipleCorrectAnswers([]);
+    setMatchingPairs([createEmptyMatchingPair(), createEmptyMatchingPair()]);
+    return true;
+  }
+
+  function handleContentPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const pastedText = event.clipboardData.getData("text");
+    if (!pastedText.trim()) return;
+
+    const didParse = applyParsedQuestion(pastedText);
+    if (!didParse) return;
+
+    event.preventDefault();
   }
 
   function addOption() {
@@ -262,6 +314,8 @@ export default function AddQuestionForm({
     resetTypeState("multiple_choice");
     setDifficulty("medium");
     setSelectedPassageId("__none");
+    setIsFormulaToolOpen(false);
+    setContent("");
     const form = document.getElementById("question-form") as HTMLFormElement | null;
     form?.reset();
     setLoading(false);
@@ -282,7 +336,25 @@ export default function AddQuestionForm({
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label>Асуултын төрөл</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label>Асуултын төрөл</Label>
+                {showLatexPanel && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    aria-controls="question-formula-tool"
+                    aria-expanded={isFormulaToolOpen}
+                    onClick={() => setIsFormulaToolOpen((prev) => !prev)}
+                  >
+                    Formula Tool
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {isFormulaToolOpen ? "Хаах" : "Нээх"}
+                    </span>
+                  </Button>
+                )}
+              </div>
               <Select
                 value={type}
                 onValueChange={(value) => resetTypeState(value as QuestionType)}
@@ -314,6 +386,16 @@ export default function AddQuestionForm({
               />
             </div>
           </div>
+
+          {showLatexPanel && isFormulaToolOpen && (
+            <div id="question-formula-tool">
+              <LatexShortcutPanel
+                targetId="content"
+                title="Formula Tool"
+                description="Асуулт доторх томьёо, язгуур, хими, физикийн тэмдэгтээ шууд оруулна."
+              />
+            </div>
+          )}
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -382,10 +464,17 @@ export default function AddQuestionForm({
             <Textarea
               id="content"
               name="content"
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              onPaste={handleContentPaste}
               placeholder="Асуултаа энд бичнэ үү..."
               rows={4}
               required
             />
+            <p className="text-xs text-muted-foreground">
+              Word, Docs эсвэл өөр газраас асуулт, сонголт, зөв хариулттай
+              текстээ paste хийвэл автоматаар таньж бөглөнө.
+            </p>
           </div>
 
           <div className="space-y-2">

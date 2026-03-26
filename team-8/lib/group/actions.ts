@@ -297,9 +297,11 @@ export async function assignExamToGroup(groupId: string, examId: string) {
   );
   if (conflictError) return { error: conflictError };
 
-  const { error } = await supabase
-    .from("exam_assignments")
-    .insert({ exam_id: examId, group_id: groupId, assigned_by: user.id });
+  const { error } = await supabase.rpc("assign_exam_to_group", {
+    p_exam_id: examId,
+    p_group_id: groupId,
+    p_assigned_by: user.id,
+  });
 
   if (error) {
     if (error.code === "23505") return { error: "Энэ шалгалт аль хэдийн оноогдсон" };

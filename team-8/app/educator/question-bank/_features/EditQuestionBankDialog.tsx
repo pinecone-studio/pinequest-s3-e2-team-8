@@ -488,6 +488,11 @@ export default function EditQuestionBankDialog({
 
           <div className="space-y-2">
             <Label htmlFor={`content-${question.id}`}>Агуулга</Label>
+            <LatexShortcutPanel
+              targetId={`content-${question.id}`}
+              title="Formula Tool"
+              description="Асуултын текст дотор формул, язгуур, хими, физикийн тэмдэгтээ шууд оруулна."
+            />
             <Textarea
               id={`content-${question.id}`}
               name="content"
@@ -508,7 +513,11 @@ export default function EditQuestionBankDialog({
               defaultValue={question.content_html ?? ""}
               placeholder="<p>Formula, унших эх, онцгой формат...</p>"
             />
-            <LatexShortcutPanel targetId={`content-html-${question.id}`} />
+            <LatexShortcutPanel
+              targetId={`content-html-${question.id}`}
+              title="LaTeX Helper"
+              description="HTML контент дотор формул эсвэл тусгай тэмдэгтээ нэмж болно."
+            />
           </div>
 
           <div className="space-y-2">

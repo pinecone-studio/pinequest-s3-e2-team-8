@@ -418,6 +418,11 @@ export default function EditQuestionDialog({
 
           <div className="space-y-2">
             <Label htmlFor={`content-${question.id}`}>Агуулга</Label>
+            <LatexShortcutPanel
+              targetId={`content-${question.id}`}
+              title="Formula Tool"
+              description="Асуултын текст дотор томьёо, язгуур, хими, физикийн тэмдэгтээ шууд оруулна."
+            />
             <Textarea
               id={`content-${question.id}`}
               name="content"
@@ -438,7 +443,11 @@ export default function EditQuestionDialog({
               defaultValue={question.content_html ?? ""}
               placeholder="<p>Formula, текстийн онцгой формат, HTML...</p>"
             />
-            <LatexShortcutPanel targetId={`content-html-${question.id}`} />
+            <LatexShortcutPanel
+              targetId={`content-html-${question.id}`}
+              title="LaTeX Helper"
+              description="HTML контент дотор формул эсвэл тусгай тэмдэгтээ нэмж болно."
+            />
           </div>
 
           {(type === "multiple_choice" || type === "multiple_response") && (

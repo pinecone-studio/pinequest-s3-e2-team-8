@@ -186,7 +186,9 @@ export default function QuestionBankBrowser({
 
   function handleImport(bankQuestionId: string) {
     if (!examId) {
-      setError(importUnavailableMessage ?? "Импорт хийх шалгалт сонгогдоогүй байна");
+      setError(
+        importUnavailableMessage ?? "Импорт хийх шалгалт сонгогдоогүй байна"
+      );
       return;
     }
 
@@ -278,7 +280,9 @@ export default function QuestionBankBrowser({
         </Card>
         <Card>
           <CardContent className="space-y-1 pt-4">
-            <p className="text-sm text-muted-foreground">Хуваалцсан / Curated</p>
+            <p className="text-sm text-muted-foreground">
+              Хуваалцсан / Curated
+            </p>
             <p className="text-2xl font-semibold">
               {summary.shared_subject_count + summary.admin_curated_count}
             </p>
@@ -287,13 +291,17 @@ export default function QuestionBankBrowser({
         <Card>
           <CardContent className="space-y-1 pt-4">
             <p className="text-sm text-muted-foreground">Сүүлийн 30 хоног</p>
-            <p className="text-2xl font-semibold">{summary.recently_used_count}</p>
+            <p className="text-2xl font-semibold">
+              {summary.recently_used_count}
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="space-y-1 pt-4">
             <p className="text-sm text-muted-foreground">Нийт ашиглалт</p>
-            <p className="text-2xl font-semibold">{summary.total_usage_count}</p>
+            <p className="text-2xl font-semibold">
+              {summary.total_usage_count}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -431,7 +439,11 @@ export default function QuestionBankBrowser({
               <Button
                 type="button"
                 variant="outline"
-                disabled={isPending || bulkVisibility === "__none" || selectedIds.length === 0}
+                disabled={
+                  isPending ||
+                  bulkVisibility === "__none" ||
+                  selectedIds.length === 0
+                }
                 onClick={() =>
                   applyBulkUpdate({
                     visibility: bulkVisibility as QuestionBankVisibility,
@@ -453,7 +465,11 @@ export default function QuestionBankBrowser({
               <Button
                 type="button"
                 variant="outline"
-                disabled={isPending || bulkDifficulty === "__none" || selectedIds.length === 0}
+                disabled={
+                  isPending ||
+                  bulkDifficulty === "__none" ||
+                  selectedIds.length === 0
+                }
                 onClick={() =>
                   applyBulkUpdate({
                     difficulty: bulkDifficulty as Difficulty,
@@ -475,12 +491,11 @@ export default function QuestionBankBrowser({
         <div className="space-y-3">
           {filteredQuestions.map((question, idx) => {
             const canManage = isManageable(question, viewerId, isAdmin);
-            const hasSubjectMismatch =
-              Boolean(
-                targetExamSubjectId &&
-                  question.subject_id &&
-                  question.subject_id !== targetExamSubjectId
-              );
+            const hasSubjectMismatch = Boolean(
+              targetExamSubjectId &&
+                question.subject_id &&
+                question.subject_id !== targetExamSubjectId
+            );
             const canImport =
               question.visibility !== "archived" && !hasSubjectMismatch;
 
@@ -595,9 +610,9 @@ export default function QuestionBankBrowser({
                           ? "Архивласан"
                           : hasSubjectMismatch
                             ? "Хичээл таарахгүй"
-                          : isPending
-                            ? "Импорт..."
-                            : "Шалгалт руу оруулах"}
+                            : isPending
+                              ? "Импорт..."
+                              : "Шалгалт руу оруулах"}
                       </Button>
                     ) : null}
                   </div>
