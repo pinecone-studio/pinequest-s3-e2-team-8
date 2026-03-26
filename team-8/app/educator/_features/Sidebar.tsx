@@ -6,7 +6,6 @@ import { useState } from "react";
 import {
   CheckSquare,
   CalendarDays,
-  Loader2,
   LucideIcon,
   ChevronLeft,
   HomeIcon,
@@ -39,9 +38,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { href: "/educator/schedule", label: "Хуваарь", icon: CalendarDays },
 ];
 
-const NAV_SECTIONS: Array<{ title: string; items: NavItem[] }> = [
-  { title: "MENU", items: MENU_NAV_ITEMS },
-];
+const MENU_NAV_ITEMS: NavItem[] = ALL_NAV_ITEMS;
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -58,7 +55,7 @@ export default function Sidebar() {
         <nav className="flex flex-col gap-3">
           {" "}
           {/* Tighter spacing between items */}
-          {ALL_NAV_ITEMS.map((item) => {
+          {MENU_NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             // Checks if current path matches the link
             const isActive = pathname === item.href;

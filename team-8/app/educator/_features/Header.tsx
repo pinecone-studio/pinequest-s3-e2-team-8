@@ -1,15 +1,7 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Bell, Search, X } from "lucide-react";
 
-export default function Header({
-  fullName,
-  email,
-  roleLabel,
-}: {
-  fullName: string | null;
-  email: string | null;
-  roleLabel: string | null;
-}) {
+export default function Header() {
   return (
     <header className="flex h-21.25 w-full shrink-0 items-center justify-between pl-19 pr-30">
       {/* Search Bar Container */}
