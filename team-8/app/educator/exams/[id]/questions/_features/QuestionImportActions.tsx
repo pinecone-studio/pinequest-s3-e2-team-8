@@ -572,13 +572,6 @@ export default function QuestionImportActions({
           </div>
         </div>
 
-        <p className="mt-3 text-xs text-muted-foreground">
-          Template header жишээ: `content`, `option_1`, `option_2`,
-          `correct_answer`, `match_left_1`, `match_right_1`, `points`,
-          `explanation`, `type` (optional). `type` хоосон байвал систем өөрөө
-          асуултын төрлийг тааж draft үүсгэнэ.
-        </p>
-
         {selectedFile && (
           <div className="mt-3 flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
             <div>

@@ -10,7 +10,6 @@ import {
   getQuestionsByExam,
 } from "@/lib/question/actions";
 import AddQuestionForm from "./_features/AddQuestionForm";
-import PassageManager from "./_features/PassageManager";
 import QuestionImportActions from "./_features/QuestionImportActions";
 import QuestionList from "./_features/QuestionList";
 
@@ -92,14 +91,7 @@ export default async function ExamQuestionsPage({ params }: Props) {
               боломжгүй.
             </div>
           ) : (
-            <>
-              <PassageManager examId={id} passages={passages} />
-              <AddQuestionForm
-                examId={id}
-                passages={passages}
-                subjectName={exam.subjects?.name ?? null}
-              />
-            </>
+            <AddQuestionForm examId={id} passages={passages} />
           )}
         </div>
       </div>
