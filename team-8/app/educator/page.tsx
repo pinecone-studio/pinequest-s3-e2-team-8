@@ -14,7 +14,8 @@ export default async function EducatorDashboard() {
   return (
     <div className="flex flex-col  mt-13.75">
       <div className="flex flex-col gap-5.25">
-        <div className="relative overflow-hidden h-87.75 rounded-3xl  bg-gradient-to-r from-[#fff6e4] via-[#FFF7EE] to-[#ced8e6] p-8">
+        {/* 1. Removed overflow-hidden so the image can spill out */}
+        <div className="relative h-87.75 rounded-3xl bg-gradient-to-r from-[#fff6e4] via-[#FFF7EE] to-[#ced8e6] p-11">
           <div className="relative z-10 max-w-2xl space-y-2">
             <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
               Тавтай морилно уу, Лосолмаа
@@ -23,7 +24,9 @@ export default async function EducatorDashboard() {
               Ready to start your Journey.
             </p>
           </div>
-          <div className="pointer-events-none absolute bottom-6 right-[10px] hidden h-full w-auto md:block">
+
+          {/* 2. Adjusted positioning to bottom-0 for a cleaner scale anchor */}
+          <div className="pointer-events-none absolute bottom-0 right-0 hidden h-full w-auto md:block scale-125 origin-bottom-right z-20">
             <DashboardImage />
           </div>
         </div>
@@ -32,10 +35,10 @@ export default async function EducatorDashboard() {
           <Card className="relative overflow-hidden border-0 rounded-[32px] bg-[#4F9DF7] text-white shadow-lg p-8 h-full">
             {/* Background Decorative Blobs */}
             {/* Curve: Top-Left */}
-            <div className="absolute top-[-30%] left-[-20%] w-[120%] h-[80%] bg-[#2F6BD7] rounded-[50%] opacity-60" />
+            <div className="absolute top-[-30%] left-[-20%] w-[40%] h-[80%] bg-[#2F6BD7] rounded-[60%] opacity-50" />
 
             {/* Curve: Bottom-Right */}
-            <div className="absolute bottom-[-30%] right-[-20%] w-[100%] h-[70%] bg-[#2F6BD7] rounded-[40%] opacity-70" />
+            <div className="absolute bottom-[-30%] right-[-20%] w-[60%] h-[70%] bg-[#2F6BD7] rounded-[40%] opacity-50" />
 
             {/* White Overlay to soften the center (creates the depth) */}
             <div className="absolute inset-0 bg-white/10 rounded-full blur-3xl opacity-30" />
@@ -85,110 +88,156 @@ export default async function EducatorDashboard() {
               </div>
             </div>
           </Card>
-          <Card className="overflow-hidden border-0 bg-gradient-to-br from-[#FFA34B] to-[#FF7D26] text-white shadow-lg">
-            <CardHeader className="pb-2">
-              <CardDescription className="text-white/80">
-                Асуултын сан
-              </CardDescription>
-              <CardTitle className="text-2xl">{stats.totalQuestions}</CardTitle>
-              <p className="text-xs text-white/70">35 lessons</p>
-            </CardHeader>
-            <CardContent className="pt-2">
-              <div className="flex items-center gap-3">
-                <div className="relative h-10 w-10">
-                  <svg viewBox="0 0 36 36" className="h-10 w-10">
-                    <path
-                      className="stroke-white/30"
-                      strokeWidth="4"
+          <Card className="relative h-full overflow-hidden rounded-[32px] border-0 bg-[#FFA34B] p-8 text-white shadow-lg">
+            <div className="absolute left-[-20%] top-[-30%] h-[80%] w-[40%] rounded-[60%] bg-[#FF7D26] opacity-50" />
+            <div className="absolute bottom-[-30%] right-[-20%] h-[70%] w-[60%] rounded-[40%] bg-[#FF7D26] opacity-50" />
+            <div className="absolute inset-0 rounded-full bg-white/10 blur-3xl opacity-30" />
+
+            <div className="relative z-10 flex h-full flex-col justify-between">
+              <div className="space-y-1">
+                <h3 className="text-2xl font-bold tracking-tight">
+                  {stats.totalQuestions}
+                </h3>
+                <p className="text-sm font-medium text-white/80">
+                  Асуултын сан
+                </p>
+                <p className="text-xs text-white/70">35 lessons</p>
+              </div>
+
+              <div className="mt-8 flex items-center gap-4">
+                <div className="relative h-20 w-20">
+                  <svg
+                    viewBox="0 0 36 36"
+                    className="h-20 w-20 -rotate-90 overflow-visible"
+                  >
+                    <circle
+                      cx="18"
+                      cy="18"
+                      r="16"
                       fill="none"
-                      d="M18 2 a 16 16 0 1 1 0 32 a 16 16 0 1 1 0 -32"
+                      className="stroke-white/20"
+                      strokeWidth="3.5"
                     />
-                    <path
-                      className="stroke-white"
-                      strokeWidth="4"
-                      strokeLinecap="round"
+                    <circle
+                      cx="18"
+                      cy="18"
+                      r="16"
                       fill="none"
+                      className="stroke-white"
+                      strokeWidth="3.5"
+                      strokeLinecap="round"
                       strokeDasharray="75, 100"
-                      d="M18 2 a 16 16 0 1 1 0 32 a 16 16 0 1 1 0 -32"
                     />
                   </svg>
-                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold">
+                  <span className="absolute inset-0 flex items-center justify-center text-lg font-bold">
                     75%
                   </span>
                 </div>
-                <p className="text-xs text-white/80">Нийт асуулт</p>
+                <p className="text-xs font-medium text-white/80">Нийт асуулт</p>
               </div>
-            </CardContent>
+            </div>
           </Card>
-          <Card className="overflow-hidden border-0 bg-gradient-to-br from-[#8BD448] to-[#6CC04A] text-white shadow-lg">
-            <CardHeader className="pb-2">
-              <CardDescription className="text-white/80">
-                Идэвхтэй шалгалт
-              </CardDescription>
-              <CardTitle className="text-2xl">{stats.activeExams}</CardTitle>
-              <p className="text-xs text-white/70">35 lessons</p>
-            </CardHeader>
-            <CardContent className="pt-2">
-              <div className="flex items-center gap-3">
-                <div className="relative h-10 w-10">
-                  <svg viewBox="0 0 36 36" className="h-10 w-10">
-                    <path
-                      className="stroke-white/30"
-                      strokeWidth="4"
+          <Card className="relative h-full overflow-hidden rounded-[32px] border-0 bg-[#8BD448] p-8 text-white shadow-lg">
+            <div className="absolute left-[-20%] top-[-30%] h-[80%] w-[40%] rounded-[60%] bg-[#6CC04A] opacity-50" />
+            <div className="absolute bottom-[-30%] right-[-20%] h-[70%] w-[60%] rounded-[40%] bg-[#6CC04A] opacity-50" />
+            <div className="absolute inset-0 rounded-full bg-white/10 blur-3xl opacity-30" />
+
+            <div className="relative z-10 flex h-full flex-col justify-between">
+              <div className="space-y-1">
+                <h3 className="text-2xl font-bold tracking-tight">
+                  {stats.activeExams}
+                </h3>
+                <p className="text-sm font-medium text-white/80">
+                  Идэвхтэй шалгалт
+                </p>
+                <p className="text-xs text-white/70">35 lessons</p>
+              </div>
+
+              <div className="mt-8 flex items-center gap-4">
+                <div className="relative h-20 w-20">
+                  <svg
+                    viewBox="0 0 36 36"
+                    className="h-20 w-20 -rotate-90 overflow-visible"
+                  >
+                    <circle
+                      cx="18"
+                      cy="18"
+                      r="16"
                       fill="none"
-                      d="M18 2 a 16 16 0 1 1 0 32 a 16 16 0 1 1 0 -32"
+                      className="stroke-white/20"
+                      strokeWidth="3.5"
                     />
-                    <path
-                      className="stroke-white"
-                      strokeWidth="4"
-                      strokeLinecap="round"
+                    <circle
+                      cx="18"
+                      cy="18"
+                      r="16"
                       fill="none"
+                      className="stroke-white"
+                      strokeWidth="3.5"
+                      strokeLinecap="round"
                       strokeDasharray="75, 100"
-                      d="M18 2 a 16 16 0 1 1 0 32 a 16 16 0 1 1 0 -32"
                     />
                   </svg>
-                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold">
+                  <span className="absolute inset-0 flex items-center justify-center text-lg font-bold">
                     75%
                   </span>
                 </div>
-                <p className="text-xs text-white/80">Одоо явагдаж байгаа</p>
+                <p className="text-xs font-medium text-white/80">
+                  Одоо явагдаж байгаа
+                </p>
               </div>
-            </CardContent>
+            </div>
           </Card>
-          <Card className="overflow-hidden border-0 bg-gradient-to-br from-[#FFD255] to-[#FFC129] text-white shadow-lg">
-            <CardHeader className="pb-2">
-              <CardDescription className="text-white/80">
-                Дүн гаргаагүй
-              </CardDescription>
-              <CardTitle className="text-2xl">{stats.pendingGrading}</CardTitle>
-              <p className="text-xs text-white/70">35 lessons</p>
-            </CardHeader>
-            <CardContent className="pt-2">
-              <div className="flex items-center gap-3">
-                <div className="relative h-10 w-10">
-                  <svg viewBox="0 0 36 36" className="h-10 w-10">
-                    <path
-                      className="stroke-white/30"
-                      strokeWidth="4"
+          <Card className="relative h-full overflow-hidden rounded-[32px] border-0 bg-[#FFD255] p-8 text-white shadow-lg">
+            <div className="absolute left-[-20%] top-[-30%] h-[80%] w-[40%] rounded-[60%] bg-[#FFC129] opacity-50" />
+            <div className="absolute bottom-[-30%] right-[-20%] h-[70%] w-[60%] rounded-[40%] bg-[#FFC129] opacity-50" />
+            <div className="absolute inset-0 rounded-full bg-white/10 blur-3xl opacity-30" />
+
+            <div className="relative z-10 flex h-full flex-col justify-between">
+              <div className="space-y-1">
+                <h3 className="text-2xl font-bold tracking-tight">
+                  {stats.pendingGrading}
+                </h3>
+                <p className="text-sm font-medium text-white/80">
+                  Дүн гаргаагүй
+                </p>
+                <p className="text-xs text-white/70">35 lessons</p>
+              </div>
+
+              <div className="mt-8 flex items-center gap-4">
+                <div className="relative h-20 w-20">
+                  <svg
+                    viewBox="0 0 36 36"
+                    className="h-20 w-20 -rotate-90 overflow-visible"
+                  >
+                    <circle
+                      cx="18"
+                      cy="18"
+                      r="16"
                       fill="none"
-                      d="M18 2 a 16 16 0 1 1 0 32 a 16 16 0 1 1 0 -32"
+                      className="stroke-white/20"
+                      strokeWidth="3.5"
                     />
-                    <path
-                      className="stroke-white"
-                      strokeWidth="4"
-                      strokeLinecap="round"
+                    <circle
+                      cx="18"
+                      cy="18"
+                      r="16"
                       fill="none"
+                      className="stroke-white"
+                      strokeWidth="3.5"
+                      strokeLinecap="round"
                       strokeDasharray="75, 100"
-                      d="M18 2 a 16 16 0 1 1 0 32 a 16 16 0 1 1 0 -32"
                     />
                   </svg>
-                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold">
+                  <span className="absolute inset-0 flex items-center justify-center text-lg font-bold">
                     75%
                   </span>
                 </div>
-                <p className="text-xs text-white/80">Шалгах хэрэгтэй</p>
+                <p className="text-xs font-medium text-white/80">
+                  Шалгах хэрэгтэй
+                </p>
               </div>
-            </CardContent>
+            </div>
           </Card>
         </div>
       </div>
