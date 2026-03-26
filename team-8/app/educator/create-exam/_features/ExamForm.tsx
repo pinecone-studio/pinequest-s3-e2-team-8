@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   ChevronLeft,
@@ -42,6 +42,16 @@ interface GroupOption {
   group_type: string;
   allowed_subject_ids: string[];
 }
+
+type FieldErrors = {
+  title?: string;
+  subject?: string;
+  startDate?: string;
+  startTime?: string;
+  endDate?: string;
+  endTime?: string;
+  duration?: string;
+};
 
 const weekDays = ["Ня", "Да", "Мя", "Лх", "Пү", "Ба", "Бя"];
 
@@ -160,6 +170,23 @@ function cycleValue(current: string, max: number, step: 1 | -1) {
   return String(next).padStart(2, "0");
 }
 
+function normalizeTimePart(value: string, max: number) {
+  const digitsOnly = value.replace(/\D/g, "").slice(0, 2);
+  if (!digitsOnly) return "00";
+  const safeNumber = Math.min(max, Number(digitsOnly));
+  return String(Number.isNaN(safeNumber) ? 0 : safeNumber).padStart(2, "0");
+}
+
+function sanitizeTypingTimePart(value: string, max: number) {
+  const digitsOnly = value.replace(/\D/g, "").slice(0, 2);
+  if (!digitsOnly) return "00";
+
+  const typedNumber = Number(digitsOnly);
+  if (Number.isNaN(typedNumber)) return "00";
+  if (typedNumber > max) return String(max);
+  return digitsOnly;
+}
+
 export default function ExamForm({
   subjects,
   groups,
@@ -169,6 +196,7 @@ export default function ExamForm({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [title, setTitle] = useState("");
   const [subjectId, setSubjectId] = useState("__none");
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [startDate, setStartDate] = useState("");
@@ -187,6 +215,11 @@ export default function ExamForm({
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   });
   const [durationMinutes, setDurationMinutes] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const startDatePickerRef = useRef<HTMLDivElement | null>(null);
+  const startTimePickerRef = useRef<HTMLDivElement | null>(null);
+  const endDatePickerRef = useRef<HTMLDivElement | null>(null);
+  const endTimePickerRef = useRef<HTMLDivElement | null>(null);
 
   const startTime = joinDateTime(startDate, startClock);
   const endTime = joinDateTime(endDate, endClock);
@@ -194,6 +227,46 @@ export default function ExamForm({
   const endTimeParts = splitTimeParts(endClock);
   const startCalendarDays = buildCalendarDays(startMonth);
   const endCalendarDays = buildCalendarDays(endMonth);
+
+  useEffect(() => {
+    setFieldErrors((prev) => ({
+      ...prev,
+      subject: subjectId !== "__none" ? undefined : prev.subject,
+      startDate: startDate ? undefined : prev.startDate,
+      startTime: startClock ? undefined : prev.startTime,
+      endDate: endDate ? undefined : prev.endDate,
+      endTime: endClock ? undefined : prev.endTime,
+      duration:
+        durationMinutes && Number(durationMinutes) > 0 ? undefined : prev.duration,
+      title: title.trim() ? undefined : prev.title,
+    }));
+  }, [durationMinutes, endClock, endDate, startClock, startDate, subjectId, title]);
+
+  useEffect(() => {
+    function onPointerDown(event: MouseEvent | TouchEvent) {
+      if (!openPicker) return;
+
+      const target = event.target as Node;
+      const activeRef =
+        openPicker === "start-date"
+          ? startDatePickerRef
+          : openPicker === "start-time"
+            ? startTimePickerRef
+            : openPicker === "end-date"
+              ? endDatePickerRef
+              : endTimePickerRef;
+      if (!activeRef.current?.contains(target)) {
+        setOpenPicker(null);
+      }
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+    };
+  }, [openPicker]);
   function getGroupsForSubject(nextSubjectId: string) {
     if (nextSubjectId === "__none") return [];
     return groups.filter(
@@ -290,9 +363,77 @@ export default function ExamForm({
     setEndClock(buildTimeValue(hour, minute));
   }
 
+  function handleStartTimeInput(part: "hour" | "minute", value: string) {
+    const hour =
+      part === "hour"
+        ? sanitizeTypingTimePart(value, 23)
+        : sanitizeTypingTimePart(startTimeParts.hour, 23);
+    const minute =
+      part === "minute"
+        ? sanitizeTypingTimePart(value, 59)
+        : sanitizeTypingTimePart(startTimeParts.minute, 59);
+    setStartClock(buildTimeValue(hour, minute));
+  }
+
+  function handleEndTimeInput(part: "hour" | "minute", value: string) {
+    const hour =
+      part === "hour"
+        ? sanitizeTypingTimePart(value, 23)
+        : sanitizeTypingTimePart(endTimeParts.hour, 23);
+    const minute =
+      part === "minute"
+        ? sanitizeTypingTimePart(value, 59)
+        : sanitizeTypingTimePart(endTimeParts.minute, 59);
+    setEndClock(buildTimeValue(hour, minute));
+  }
+
+  function finalizeStartTimePart(part: "hour" | "minute") {
+    const hour =
+      part === "hour"
+        ? normalizeTimePart(startTimeParts.hour, 23)
+        : normalizeTimePart(startTimeParts.hour, 23);
+    const minute =
+      part === "minute"
+        ? normalizeTimePart(startTimeParts.minute, 59)
+        : normalizeTimePart(startTimeParts.minute, 59);
+    setStartClock(buildTimeValue(hour, minute));
+  }
+
+  function finalizeEndTimePart(part: "hour" | "minute") {
+    const hour =
+      part === "hour"
+        ? normalizeTimePart(endTimeParts.hour, 23)
+        : normalizeTimePart(endTimeParts.hour, 23);
+    const minute =
+      part === "minute"
+        ? normalizeTimePart(endTimeParts.minute, 59)
+        : normalizeTimePart(endTimeParts.minute, 59);
+    setEndClock(buildTimeValue(hour, minute));
+  }
+
   async function handleSubmit(formData: FormData) {
+    const nextErrors: FieldErrors = {};
+    const nextTitle = String(formData.get("title") || "").trim();
+
+    if (!nextTitle) nextErrors.title = "Шалгалтын нэрээ бөглөнө үү.";
+    if (subjectId === "__none") nextErrors.subject = "Хичээлээ сонгоно уу.";
+    if (!startDate) nextErrors.startDate = "Эхлэх өдрөө сонгоно уу.";
+    if (!startClock) nextErrors.startTime = "Эхлэх цагаа оруулна уу.";
+    if (!endDate) nextErrors.endDate = "Дуусах өдрөө сонгоно уу.";
+    if (!endClock) nextErrors.endTime = "Дуусах цагаа оруулна уу.";
+    if (!durationMinutes || Number(durationMinutes) <= 0) {
+      nextErrors.duration = "Шалгалтын хугацааг зөв оруулна уу.";
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors);
+      setError("Дутуу бөглөсөн хэсгүүдийг улаанаар тэмдэглэлээ.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
+    setFieldErrors({});
 
     formData.set("start_time", startTime);
     formData.set("end_time", endTime);
@@ -341,15 +482,23 @@ export default function ExamForm({
               id="title"
               name="title"
               placeholder="Жишээ: Математик - 1-р улирал"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className={fieldErrors.title ? "border-destructive" : undefined}
               required
             />
+            {fieldErrors.title && (
+              <p className="text-sm text-destructive">{fieldErrors.title}</p>
+            )}
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Хичээл *</Label>
               <Select value={subjectId} onValueChange={handleSubjectChange}>
-                <SelectTrigger>
+                <SelectTrigger
+                  className={fieldErrors.subject ? "border-destructive" : undefined}
+                >
                   <SelectValue placeholder="Хичээл сонгох" />
                 </SelectTrigger>
                 <SelectContent>
@@ -366,6 +515,9 @@ export default function ExamForm({
                 name="subject_id"
                 value={subjectId === "__none" ? "" : subjectId}
               />
+              {fieldErrors.subject && (
+                <p className="text-sm text-destructive">{fieldErrors.subject}</p>
+              )}
             </div>
           </div>
 
@@ -472,7 +624,7 @@ export default function ExamForm({
                 <p className="text-sm font-medium">Эхлэх</p>
 
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="relative">
+                  <div className="relative" ref={startDatePickerRef}>
                     <button
                       type="button"
                       onClick={() =>
@@ -480,7 +632,11 @@ export default function ExamForm({
                           prev === "start-date" ? null : "start-date"
                         )
                       }
-                      className="flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className={`flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                        fieldErrors.startDate
+                          ? "border-destructive bg-destructive/5"
+                          : ""
+                      }`}
                     >
                       <span>{formatDateLabel(startDate)}</span>
                       <CalendarDays className="h-4 w-4 text-muted-foreground" />
@@ -545,7 +701,7 @@ export default function ExamForm({
                     )}
                   </div>
 
-                  <div className="relative">
+                  <div className="relative" ref={startTimePickerRef}>
                     <button
                       type="button"
                       onClick={() =>
@@ -553,7 +709,11 @@ export default function ExamForm({
                           prev === "start-time" ? null : "start-time"
                         )
                       }
-                      className="flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className={`flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                        fieldErrors.startTime
+                          ? "border-destructive bg-destructive/5"
+                          : ""
+                      }`}
                     >
                       <span>{startClock || "Цаг сонгох"}</span>
                       <Clock3 className="h-4 w-4 text-muted-foreground" />
@@ -571,9 +731,18 @@ export default function ExamForm({
                               >
                                 <ChevronRight className="h-4 w-4 -rotate-90" />
                               </button>
-                              <div className="rounded-xl bg-background py-2 text-2xl font-semibold shadow-sm">
-                                {startTimeParts.hour}
-                              </div>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={2}
+                                value={startTimeParts.hour}
+                                onFocus={(event) => event.currentTarget.select()}
+                                onBlur={() => finalizeStartTimePart("hour")}
+                                onChange={(event) =>
+                                  handleStartTimeInput("hour", event.target.value)
+                                }
+                                className="h-[52px] w-full rounded-xl border bg-background px-0 text-center text-2xl font-semibold shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              />
                               <button
                                 type="button"
                                 onClick={() => adjustStartTime("hour", -1)}
@@ -595,9 +764,18 @@ export default function ExamForm({
                               >
                                 <ChevronRight className="h-4 w-4 -rotate-90" />
                               </button>
-                              <div className="rounded-xl bg-background py-2 text-2xl font-semibold shadow-sm">
-                                {startTimeParts.minute}
-                              </div>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={2}
+                                value={startTimeParts.minute}
+                                onFocus={(event) => event.currentTarget.select()}
+                                onBlur={() => finalizeStartTimePart("minute")}
+                                onChange={(event) =>
+                                  handleStartTimeInput("minute", event.target.value)
+                                }
+                                className="h-[52px] w-full rounded-xl border bg-background px-0 text-center text-2xl font-semibold shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              />
                               <button
                                 type="button"
                                 onClick={() => adjustStartTime("minute", -1)}
@@ -612,6 +790,11 @@ export default function ExamForm({
                     )}
                   </div>
                 </div>
+                {(fieldErrors.startDate || fieldErrors.startTime) && (
+                  <p className="text-sm text-destructive">
+                    {fieldErrors.startDate ?? fieldErrors.startTime}
+                  </p>
+                )}
 
                 <p className="text-sm text-muted-foreground">
                   {formatDateTime(startTime)}
@@ -622,7 +805,7 @@ export default function ExamForm({
                 <p className="text-sm font-medium">Дуусах</p>
 
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="relative">
+                  <div className="relative" ref={endDatePickerRef}>
                     <button
                       type="button"
                       onClick={() =>
@@ -630,7 +813,9 @@ export default function ExamForm({
                           prev === "end-date" ? null : "end-date"
                         )
                       }
-                      className="flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className={`flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                        fieldErrors.endDate ? "border-destructive bg-destructive/5" : ""
+                      }`}
                     >
                       <span>{formatDateLabel(endDate)}</span>
                       <CalendarDays className="h-4 w-4 text-muted-foreground" />
@@ -695,7 +880,7 @@ export default function ExamForm({
                     )}
                   </div>
 
-                  <div className="relative">
+                  <div className="relative" ref={endTimePickerRef}>
                     <button
                       type="button"
                       onClick={() =>
@@ -703,7 +888,9 @@ export default function ExamForm({
                           prev === "end-time" ? null : "end-time"
                         )
                       }
-                      className="flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className={`flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                        fieldErrors.endTime ? "border-destructive bg-destructive/5" : ""
+                      }`}
                     >
                       <span>{endClock || "Цаг сонгох"}</span>
                       <Clock3 className="h-4 w-4 text-muted-foreground" />
@@ -721,9 +908,18 @@ export default function ExamForm({
                               >
                                 <ChevronRight className="h-4 w-4 -rotate-90" />
                               </button>
-                              <div className="rounded-xl bg-background py-2 text-2xl font-semibold shadow-sm">
-                                {endTimeParts.hour}
-                              </div>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={2}
+                                value={endTimeParts.hour}
+                                onFocus={(event) => event.currentTarget.select()}
+                                onBlur={() => finalizeEndTimePart("hour")}
+                                onChange={(event) =>
+                                  handleEndTimeInput("hour", event.target.value)
+                                }
+                                className="h-[52px] w-full rounded-xl border bg-background px-0 text-center text-2xl font-semibold shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              />
                               <button
                                 type="button"
                                 onClick={() => adjustEndTime("hour", -1)}
@@ -745,9 +941,18 @@ export default function ExamForm({
                               >
                                 <ChevronRight className="h-4 w-4 -rotate-90" />
                               </button>
-                              <div className="rounded-xl bg-background py-2 text-2xl font-semibold shadow-sm">
-                                {endTimeParts.minute}
-                              </div>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={2}
+                                value={endTimeParts.minute}
+                                onFocus={(event) => event.currentTarget.select()}
+                                onBlur={() => finalizeEndTimePart("minute")}
+                                onChange={(event) =>
+                                  handleEndTimeInput("minute", event.target.value)
+                                }
+                                className="h-[52px] w-full rounded-xl border bg-background px-0 text-center text-2xl font-semibold shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              />
                               <button
                                 type="button"
                                 onClick={() => adjustEndTime("minute", -1)}
@@ -762,6 +967,11 @@ export default function ExamForm({
                     )}
                   </div>
                 </div>
+                {(fieldErrors.endDate || fieldErrors.endTime) && (
+                  <p className="text-sm text-destructive">
+                    {fieldErrors.endDate ?? fieldErrors.endTime}
+                  </p>
+                )}
 
                 <p className="text-sm text-muted-foreground">
                   {formatDateTime(endTime)}
@@ -784,8 +994,12 @@ export default function ExamForm({
                   placeholder="Жишээ: 45"
                   value={durationMinutes}
                   onChange={(e) => setDurationMinutes(e.target.value)}
+                  className={fieldErrors.duration ? "border-destructive" : undefined}
                   required
                 />
+                {fieldErrors.duration && (
+                  <p className="text-sm text-destructive">{fieldErrors.duration}</p>
+                )}
                 {durationMinutes && durationSummary.minutes && Number(durationMinutes) > Number(durationSummary.minutes) && (
                   <p className="text-sm text-destructive">
                     Шалгалтын хугацаа нь нээлттэй цонхноос ({durationSummary.text}) урт байж болохгүй.

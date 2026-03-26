@@ -95,29 +95,29 @@ export default async function ExamQuestionsPage({ params }: Props) {
 
       {readiness && <ExamReadinessPanel readiness={readiness} examId={id} />}
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="space-y-4">
-          <h3 className="font-semibold">Асуултууд</h3>
-          <QuestionList
-            questions={questions}
-            examId={id}
-            passages={passages}
-            isLocked={Boolean(exam.is_published)}
-          />
-        </div>
+      <div className="space-y-6">
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="space-y-4">
+            <h3 className="font-semibold">Асуултууд</h3>
+            <QuestionList
+              questions={questions}
+              examId={id}
+              passages={passages}
+              isLocked={Boolean(exam.is_published)}
+            />
+          </div>
 
-        <div className="space-y-4">
           {!exam.is_published && <QuestionImportActions examId={id} />}
-
-          {exam.is_published ? (
-            <div className="rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
-              Энэ шалгалт нийтлэгдсэн тул асуулт нэмэх, устгах, сангаас
-              импортлох боломжгүй.
-            </div>
-          ) : (
-            <AddQuestionForm examId={id} passages={passages} />
-          )}
         </div>
+
+        {exam.is_published ? (
+          <div className="rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
+            Энэ шалгалт нийтлэгдсэн тул асуулт нэмэх, устгах, сангаас импортлох
+            боломжгүй.
+          </div>
+        ) : (
+          <AddQuestionForm examId={id} passages={passages} />
+        )}
       </div>
     </div>
   );
