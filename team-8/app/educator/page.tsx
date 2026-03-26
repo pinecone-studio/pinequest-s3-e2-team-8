@@ -14,7 +14,8 @@ export default async function EducatorDashboard() {
   return (
     <div className="flex flex-col  mt-13.75">
       <div className="flex flex-col gap-5.25">
-        <div className="relative overflow-hidden h-87.75 rounded-3xl  bg-gradient-to-r from-[#fff6e4] via-[#FFF7EE] to-[#ced8e6] p-8">
+        {/* 1. Removed overflow-hidden so the image can spill out */}
+        <div className="relative h-87.75 rounded-3xl bg-gradient-to-r from-[#fff6e4] via-[#FFF7EE] to-[#ced8e6] p-8">
           <div className="relative z-10 max-w-2xl space-y-2">
             <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
               Тавтай морилно уу, Лосолмаа
@@ -23,7 +24,9 @@ export default async function EducatorDashboard() {
               Ready to start your Journey.
             </p>
           </div>
-          <div className="pointer-events-none absolute bottom-6 right-[10px] hidden h-full w-auto md:block">
+
+          {/* 2. Adjusted positioning to bottom-0 for a cleaner scale anchor */}
+          <div className="pointer-events-none absolute bottom-0 right-0 hidden h-full w-auto md:block scale-150 origin-bottom-right z-20">
             <DashboardImage />
           </div>
         </div>
@@ -95,7 +98,9 @@ export default async function EducatorDashboard() {
                 <h3 className="text-2xl font-bold tracking-tight">
                   {stats.totalQuestions}
                 </h3>
-                <p className="text-sm font-medium text-white/80">Асуултын сан</p>
+                <p className="text-sm font-medium text-white/80">
+                  Асуултын сан
+                </p>
                 <p className="text-xs text-white/70">35 lessons</p>
               </div>
 
@@ -193,7 +198,9 @@ export default async function EducatorDashboard() {
                 <h3 className="text-2xl font-bold tracking-tight">
                   {stats.pendingGrading}
                 </h3>
-                <p className="text-sm font-medium text-white/80">Дүн гаргаагүй</p>
+                <p className="text-sm font-medium text-white/80">
+                  Дүн гаргаагүй
+                </p>
                 <p className="text-xs text-white/70">35 lessons</p>
               </div>
 
@@ -226,7 +233,9 @@ export default async function EducatorDashboard() {
                     75%
                   </span>
                 </div>
-                <p className="text-xs font-medium text-white/80">Шалгах хэрэгтэй</p>
+                <p className="text-xs font-medium text-white/80">
+                  Шалгах хэрэгтэй
+                </p>
               </div>
             </div>
           </Card>

@@ -76,7 +76,7 @@ const questionTypes: QuestionType[] = [
 
 export default async function NewQuestionPage() {
   return (
-    <div className="w-full mx-auto p-8 space-y-8  min-h-screen">
+    <div className="w-full mx-auto  space-y-8  min-h-screen">
       <div>
         <h2 className="text-2xl font-bold tracking-tight text-slate-900">
           Шинэ асуулт үүсгэх
