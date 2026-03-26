@@ -422,6 +422,8 @@ export async function getStudentExams() {
   } = await supabase.auth.getUser();
   if (!user) return [];
 
+  await finalizeExpiredSessionsForStudent(supabase, user.id);
+
   const rows = await getAssignedPublishedExamRows(supabase, user.id);
   const rawExams = rows
     .map((row) => getRelationObject(row.exams))
@@ -1237,18 +1239,15 @@ export async function getExamResult(examId: string) {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  await finalizeExpiredSessionsForStudent(supabase, user.id, examId);
-
-  const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
-  const snapshotQuestionMap = getSnapshotQuestionMap(snapshot);
-
-  const { data: session, error: sessionError } = await supabase
+  const { data: initialSession, error: sessionError } = await supabase
     .from("exam_sessions")
-    .select("id, status, total_score, max_score, submitted_at, attempt_number, exam_id, exams(title, passing_score)")
+    .select(
+      "id, status, started_at, total_score, max_score, submitted_at, attempt_number, exam_id, exams(title, passing_score)"
+    )
     .eq("exam_id", examId)
     .eq("user_id", user.id)
-    .in("status", ["submitted", "graded", "timed_out"])
-    .order("submitted_at", { ascending: false })
+    .in("status", ["in_progress", "submitted", "graded", "timed_out"])
+    .order("attempt_number", { ascending: false })
     .limit(1)
     .maybeSingle();
 
@@ -1257,7 +1256,56 @@ export async function getExamResult(examId: string) {
     return null;
   }
 
+  let session = initialSession;
   if (!session) return null;
+
+  if (session.status === "in_progress") {
+    const exam = await getEffectiveExamAccessForStudent(supabase, user.id, examId);
+    if (!exam) return null;
+
+    if (!isSessionExpiredForExam(session.started_at ?? null, exam)) {
+      return null;
+    }
+
+    const finalized = await finalizeSessionAttempt(supabase, {
+      sessionId: session.id,
+      examId,
+      userId: user.id,
+      reason: "timeout",
+    });
+
+    if ("error" in finalized) {
+      console.error("[getExamResult] finalize timeout error:", finalized.error);
+      return null;
+    }
+
+    const { data: refreshedSession, error: refreshedSessionError } = await supabase
+      .from("exam_sessions")
+      .select(
+        "id, status, started_at, total_score, max_score, submitted_at, attempt_number, exam_id, exams(title, passing_score)"
+      )
+      .eq("id", session.id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (refreshedSessionError) {
+      console.error(
+        "[getExamResult] refreshed session query error:",
+        refreshedSessionError.message
+      );
+      return null;
+    }
+
+    if (!refreshedSession) return null;
+    session = refreshedSession;
+  }
+
+  if (!["submitted", "graded", "timed_out"].includes(String(session.status))) {
+    return null;
+  }
+
+  const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
+  const snapshotQuestionMap = getSnapshotQuestionMap(snapshot);
 
   // Per-question breakdown: хариулт + асуулт мэдээлэл
   const { data: answers } = await supabase
@@ -1290,6 +1338,8 @@ export async function getStudentResults() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return [];
+
+  await finalizeExpiredSessionsForStudent(supabase, user.id);
 
   const { data } = await supabase
     .from("exam_sessions")
