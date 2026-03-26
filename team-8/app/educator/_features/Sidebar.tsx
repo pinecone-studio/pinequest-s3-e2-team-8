@@ -110,12 +110,12 @@ export default function Sidebar() {
         </nav>
       </div>
 
-      <div className="mt-auto flex items-center justify-between pb-4">
+      <div className="mt-auto flex items-center justify-between ">
         <form action={logout}>
           <button
             type="submit"
             className={`group flex items-center gap-3 rounded-md transition-colors hover:text-[#4078C1] ${
-              isCollapsed ? "justify-center pl-0" : "pl-1"
+              isCollapsed ? "justify-center pl-4 pb-4" : "pl-3"
             }`}
             aria-label="Гарах"
           >
