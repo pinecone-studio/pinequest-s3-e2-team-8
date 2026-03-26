@@ -204,6 +204,11 @@ export default function ExamList({ exams }: Props) {
                       Нийтлэх
                     </DropdownMenuItem>
                   )}
+                  {!exam.is_published && qCount === 0 && (
+                    <DropdownMenuItem disabled className="text-muted-foreground">
+                      Нийтлэх (асуулт нэмнэ үү)
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="text-destructive"

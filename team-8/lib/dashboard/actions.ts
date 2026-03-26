@@ -47,6 +47,8 @@ export async function getEducatorStats() {
 
   // Teaching-scope exam IDs (for pendingGrading — includes admin-created exams assigned to teacher's groups)
   const teachingScopeExamIds = new Set<string>(ownExamIds);
+  const ownExamIdSet = new Set(ownExamIds);
+  const scopedExamGroups = new Map<string, Set<string>>();
 
   const { data: teachingRows, error: teachingRowsError } = await supabase
     .from("teaching_assignments")
@@ -66,15 +68,24 @@ export async function getEducatorStats() {
         ? ae.exams[0]?.subject_id
         : (ae.exams as { subject_id: string } | null)?.subject_id;
       // Must match both subject AND group (not just subject)
-      if (teachingRows.find((ta) => ta.subject_id === subjectId && ta.group_id === ae.group_id)) {
+      if (
+        teachingRows.find(
+          (ta) => ta.subject_id === subjectId && ta.group_id === ae.group_id
+        )
+      ) {
         teachingScopeExamIds.add(ae.exam_id);
+        if (!ownExamIdSet.has(ae.exam_id)) {
+          const groups = scopedExamGroups.get(ae.exam_id) ?? new Set<string>();
+          groups.add(ae.group_id);
+          scopedExamGroups.set(ae.exam_id, groups);
+        }
       }
     }
   }
 
   const scopeExamIds = [...teachingScopeExamIds];
 
-  const [questionsRes, activeRes, pendingRes, upcomingRes, pendingItemsRes] = await Promise.all([
+  const [questionsRes, activeRes, upcomingRes, submittedSessionsRes] = await Promise.all([
     ownExamIds.length > 0
       ? supabase
           .from("questions")
@@ -92,13 +103,6 @@ export async function getEducatorStats() {
       : Promise.resolve({ count: 0 }),
     scopeExamIds.length > 0
       ? supabase
-          .from("exam_sessions")
-          .select("id", { count: "exact", head: true })
-          .eq("status", "submitted")
-          .in("exam_id", scopeExamIds)
-      : Promise.resolve({ count: 0 }),
-    scopeExamIds.length > 0
-      ? supabase
           .from("exams")
           .select("id, title, start_time, end_time, is_published, subjects(name)")
           .in("id", scopeExamIds)
@@ -110,14 +114,58 @@ export async function getEducatorStats() {
       ? supabase
           .from("exam_sessions")
           .select(
-            "id, submitted_at, exam_id, exams(title), profiles!exam_sessions_user_id_fkey(full_name, email)"
+            "id, user_id, submitted_at, exam_id, exams(title), profiles!exam_sessions_user_id_fkey(full_name, email)"
           )
           .eq("status", "submitted")
           .in("exam_id", scopeExamIds)
           .order("submitted_at", { ascending: true })
-          .limit(5)
       : Promise.resolve({ data: [] }),
   ]);
+
+  const submittedSessions = submittedSessionsRes.data ?? [];
+  let filteredSubmittedSessions = submittedSessions;
+
+  if (scopedExamGroups.size > 0) {
+    const scopedStudentIds = Array.from(
+      new Set(
+        submittedSessions
+          .filter((session) => !ownExamIdSet.has(session.exam_id))
+          .map((session) => session.user_id as string)
+      )
+    );
+
+    if (scopedStudentIds.length > 0) {
+      const scopedGroupIds = Array.from(
+        new Set(
+          Array.from(scopedExamGroups.values()).flatMap((groupIds) =>
+            Array.from(groupIds)
+          )
+        )
+      );
+      const { data: memberRows } = await supabase
+        .from("student_group_members")
+        .select("student_id, group_id")
+        .in("student_id", scopedStudentIds)
+        .in("group_id", scopedGroupIds);
+
+      const studentGroups = new Map<string, Set<string>>();
+      for (const row of memberRows ?? []) {
+        const groups = studentGroups.get(row.student_id) ?? new Set<string>();
+        groups.add(row.group_id);
+        studentGroups.set(row.student_id, groups);
+      }
+
+      filteredSubmittedSessions = submittedSessions.filter((session) => {
+        if (ownExamIdSet.has(session.exam_id)) return true;
+        const allowedGroups = scopedExamGroups.get(session.exam_id);
+        const currentGroups = studentGroups.get(session.user_id as string);
+        if (!allowedGroups || !currentGroups) return false;
+        return Array.from(currentGroups).some((groupId) =>
+          allowedGroups.has(groupId)
+        );
+      });
+    }
+  }
 
   const upcomingExams = (upcomingRes.data ?? []).map((exam) => ({
     id: exam.id,
@@ -128,7 +176,7 @@ export async function getEducatorStats() {
     subject_name: getRelationObject(exam.subjects)?.name ?? null,
   }));
 
-  const pendingItems = (pendingItemsRes.data ?? []).map((session) => {
+  const pendingItems = filteredSubmittedSessions.slice(0, 5).map((session) => {
     const exam = getRelationObject(session.exams);
     const profile = getRelationObject(session.profiles);
 
@@ -144,7 +192,7 @@ export async function getEducatorStats() {
     totalExams: ownExamIds.length,
     totalQuestions: "error" in questionsRes ? 0 : (questionsRes.count ?? 0),
     activeExams: "error" in activeRes ? 0 : (activeRes.count ?? 0),
-    pendingGrading: "error" in pendingRes ? 0 : (pendingRes.count ?? 0),
+    pendingGrading: filteredSubmittedSessions.length,
     upcomingExams,
     pendingItems,
   };
@@ -186,7 +234,7 @@ export async function getStudentStats() {
     supabase
       .from("exam_sessions")
       .select(
-        "exam_id, status, submitted_at, total_score, max_score, attempt_number, exams(title, passing_score)"
+        "exam_id, status, started_at, submitted_at, total_score, max_score, attempt_number, exams(title, passing_score)"
       )
       .eq("user_id", user.id)
       .in("status", ["in_progress", "submitted", "graded", "timed_out"]),
@@ -221,13 +269,14 @@ export async function getStudentStats() {
 
   const latestSessionByExam = new Map<
     string,
-    { status: string; attemptNumber: number }
+    { status: string; attemptNumber: number; startedAt: string | null }
   >();
   for (const session of sessions) {
     if (!latestSessionByExam.has(session.exam_id as string)) {
       latestSessionByExam.set(session.exam_id as string, {
         status: String(session.status),
         attemptNumber: Number(session.attempt_number ?? 0),
+        startedAt: (session.started_at as string | null) ?? null,
       });
     }
   }
@@ -244,6 +293,7 @@ export async function getStudentStats() {
       {
         start_time: exam.start_time,
         end_time: exam.end_time,
+        duration_minutes: exam.duration_minutes,
         max_attempts: exam.max_attempts,
       },
       row
@@ -252,6 +302,7 @@ export async function getStudentStats() {
       exam: {
         start_time: exam.start_time,
         end_time: exam.end_time,
+        duration_minutes: exam.duration_minutes,
         max_attempts: exam.max_attempts,
       },
       recipient: row,
@@ -259,6 +310,8 @@ export async function getStudentStats() {
         latestSessionByExam.get(exam.id)?.status ?? null,
       latestAttemptNumber:
         latestSessionByExam.get(exam.id)?.attemptNumber ?? 0,
+      latestSessionStartedAt:
+        latestSessionByExam.get(exam.id)?.startedAt ?? null,
       nowMs,
     });
 

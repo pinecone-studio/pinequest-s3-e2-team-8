@@ -285,7 +285,9 @@ async function buildExamReadinessForOwner(
       description:
         assignmentConsistency.error ??
         "Оноосон бүлгүүд одоогийн хичээл, багшийн teaching assignment-тай нийцэж байна.",
-      status: assignmentConsistency.error ? "blocked" : "complete",
+      // Зөвхөн анхааруулга — exam creator нь RLS-ийн ачаар баталгаажсан тул
+      // teaching_assignment дутуу байсан ч publish-ийг блокдохгүй.
+      status: assignmentConsistency.error ? "warning" : "complete",
     },
     {
       key: "students",
@@ -294,9 +296,10 @@ async function buildExamReadinessForOwner(
         assignedStudentCount > 0
           ? `${assignedStudentCount} сурагч шалгалт өгөхөөр хамрагдаж байна.`
           : assignmentCount > 0
-          ? "Оноосон бүлгүүдэд одоогоор сурагч байхгүй байна."
+          ? "Оноосон бүлгүүдэд одоогоор сурагч байхгүй байна. Сурагчид нэмэгдсэний дараа дахин нийтлэх боломжтой."
           : "Бүлэг оноосны дараа хамрагдах сурагчид тооцогдоно.",
-      status: assignedStudentCount > 0 ? "complete" : "blocked",
+      // Анхааруулга — сурагч байхгүй бол exam_recipients хоосон үлдэх боловч publish нь blocked болохгүй.
+      status: assignedStudentCount > 0 ? "complete" : "warning",
     },
     {
       key: "conflicts",

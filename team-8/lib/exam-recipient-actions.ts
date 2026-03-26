@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { canManageExam } from "@/lib/exam-scope";
+import { canManageExamStudent } from "@/lib/exam-scope";
 
 function addHours(date: Date, hours: number) {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
@@ -29,8 +29,31 @@ export async function setRecipientExcused(
 
   if (!user) return { error: "Нэвтрээгүй байна" };
 
-  const canManage = await canManageExam(supabase, examId, user.id);
+  const canManage = await canManageExamStudent(
+    supabase,
+    examId,
+    user.id,
+    studentId
+  );
   if (!canManage) return { error: "Энэ шалгалтын оролцогчийг удирдах эрх алга" };
+
+  if (shouldExcuse) {
+    const { data: existingSession } = await supabase
+      .from("exam_sessions")
+      .select("id")
+      .eq("exam_id", examId)
+      .eq("user_id", studentId)
+      .in("status", ["in_progress", "submitted", "graded", "timed_out"])
+      .limit(1)
+      .maybeSingle();
+
+    if (existingSession) {
+      return {
+        error:
+          "Аль хэдийн оролдлого үүссэн сурагчийг чөлөөлөх боломжгүй. Нөхөн эрх олгох эсвэл дүнг нь удирдана уу.",
+      };
+    }
+  }
 
   const updatePayload = shouldExcuse
     ? {
@@ -70,7 +93,12 @@ export async function grantRecipientRetake(
 
   if (!user) return { error: "Нэвтрээгүй байна" };
 
-  const canManage = await canManageExam(supabase, examId, user.id);
+  const canManage = await canManageExamStudent(
+    supabase,
+    examId,
+    user.id,
+    studentId
+  );
   if (!canManage) return { error: "Энэ шалгалтын оролцогчийг удирдах эрх алга" };
 
   const [{ data: exam }, { data: sessions }] = await Promise.all([
@@ -129,7 +157,12 @@ export async function clearRecipientRetake(
 
   if (!user) return { error: "Нэвтрээгүй байна" };
 
-  const canManage = await canManageExam(supabase, examId, user.id);
+  const canManage = await canManageExamStudent(
+    supabase,
+    examId,
+    user.id,
+    studentId
+  );
   if (!canManage) return { error: "Энэ шалгалтын оролцогчийг удирдах эрх алга" };
 
   const { error } = await supabase

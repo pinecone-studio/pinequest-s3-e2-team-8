@@ -186,6 +186,7 @@ export default function ExamForm({
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   });
+  const [durationMinutes, setDurationMinutes] = useState("");
 
   const startTime = joinDateTime(startDate, startClock);
   const endTime = joinDateTime(endDate, endClock);
@@ -295,7 +296,7 @@ export default function ExamForm({
 
     formData.set("start_time", startTime);
     formData.set("end_time", endTime);
-    formData.set("duration_minutes", durationSummary.minutes);
+    formData.set("duration_minutes", durationMinutes);
 
     const result = await createExam(formData);
     if (result?.error) {
@@ -303,6 +304,12 @@ export default function ExamForm({
       setLoading(false);
     }
   }
+
+  const isDurationValid =
+    durationMinutes !== "" &&
+    Number(durationMinutes) > 0 &&
+    (durationSummary.minutes === "" ||
+      Number(durationMinutes) <= Number(durationSummary.minutes));
 
   return (
     <Card className="max-w-4xl">
@@ -325,7 +332,7 @@ export default function ExamForm({
           <input
             type="hidden"
             name="duration_minutes"
-            value={durationSummary.minutes}
+            value={durationMinutes}
           />
 
           <div className="space-y-2">
@@ -762,19 +769,37 @@ export default function ExamForm({
               </div>
             </div>
 
-            <div className="mt-4 rounded-xl border bg-muted/20 p-4">
+            <div className="mt-4 rounded-xl border bg-muted/20 p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <Clock3 className="h-4 w-4 text-muted-foreground" />
-                <p className="text-sm font-medium">Хугацаа</p>
+                <p className="text-sm font-medium">Шалгалтын хугацаа</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="duration_input">Шалгалтын хугацаа (минут) *</Label>
+                <Input
+                  id="duration_input"
+                  type="number"
+                  min="5"
+                  max="300"
+                  placeholder="Жишээ: 45"
+                  value={durationMinutes}
+                  onChange={(e) => setDurationMinutes(e.target.value)}
+                  required
+                />
+                {durationMinutes && durationSummary.minutes && Number(durationMinutes) > Number(durationSummary.minutes) && (
+                  <p className="text-sm text-destructive">
+                    Шалгалтын хугацаа нь нээлттэй цонхноос ({durationSummary.text}) урт байж болохгүй.
+                  </p>
+                )}
               </div>
               <p
-                className={`mt-2 text-sm ${
+                className={`text-sm ${
                   durationSummary.invalid
                     ? "text-destructive"
                     : "text-muted-foreground"
                 }`}
               >
-                {durationSummary.text}
+                Нээлттэй цонх: {durationSummary.text}
               </p>
             </div>
           </div>
@@ -805,10 +830,41 @@ export default function ExamForm({
             </div>
           </div>
 
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="shuffle_questions"
+                name="shuffle_questions"
+                className="h-4 w-4 rounded border"
+              />
+              <Label
+                htmlFor="shuffle_questions"
+                className="cursor-pointer font-normal"
+              >
+                Асуултыг санамсаргүй дарааллаар гаргах
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="shuffle_options"
+                name="shuffle_options"
+                className="h-4 w-4 rounded border"
+              />
+              <Label
+                htmlFor="shuffle_options"
+                className="cursor-pointer font-normal"
+              >
+                Сонголтуудын дарааллыг холих
+              </Label>
+            </div>
+          </div>
+
           <Button
             type="submit"
             loading={loading}
-            disabled={durationSummary.invalid || !durationSummary.minutes}
+            disabled={durationSummary.invalid || !durationSummary.minutes || !isDurationValid}
             loadingText="Үүсгэж байна..."
             className="w-full"
           >

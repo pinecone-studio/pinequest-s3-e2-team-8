@@ -58,7 +58,10 @@ export default async function TakeExamPage({
   );
 
   if (initialTimeLeftSeconds <= 0) {
-    await submitExam(session.id);
+    // Session аль хэдийн submit хийгдсэн бол дахин submit хийхгүй
+    if (session.status === "in_progress") {
+      await submitExam(session.id);
+    }
     redirect(`/student/exams/${examId}/result`);
   }
 

@@ -36,7 +36,14 @@ export default async function StudentResultsPage() {
                 : 0;
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const exam = r.exams as any;
+            const isFinal = r.status === "graded" || r.status === "timed_out";
             const passed = pct >= (exam?.passing_score ?? 60);
+            const statusLabel =
+              r.status === "graded"
+                ? "Дүн гарсан"
+                : r.status === "timed_out"
+                  ? "Хугацаа дууссан"
+                  : "Шалгагдаж байна";
 
             return (
               <Card key={r.id}>
@@ -46,14 +53,16 @@ export default async function StudentResultsPage() {
                       {exam?.title ?? "Шалгалт"}
                     </CardTitle>
                     <Badge
-                      variant={passed ? "default" : "destructive"}
+                      variant={isFinal ? (passed ? "default" : "destructive") : "secondary"}
                       className={
-                        passed
+                        !isFinal
+                          ? "bg-muted text-foreground"
+                          : passed
                           ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                           : ""
                       }
                     >
-                      {passed ? "Тэнцсэн" : "Тэнцээгүй"}
+                      {isFinal ? (passed ? "Тэнцсэн" : "Тэнцээгүй") : "Урьдчилсан дүн"}
                     </Badge>
                   </div>
                   <CardDescription>
@@ -61,7 +70,7 @@ export default async function StudentResultsPage() {
                       ? formatDateTimeUB(r.submitted_at)
                       : ""}
                     {" | "}
-                    {r.status === "submitted" ? "Шалгагдаж байна" : "Дүн гарсан"}
+                    {statusLabel}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -73,12 +82,24 @@ export default async function StudentResultsPage() {
                     <div className="flex-1">
                       <div className="h-2 overflow-hidden rounded-full bg-muted">
                         <div
-                          className={`h-full rounded-full ${passed ? "bg-green-500" : "bg-red-500"}`}
+                          className={`h-full rounded-full ${
+                            !isFinal
+                              ? "bg-slate-400"
+                              : passed
+                                ? "bg-green-500"
+                                : "bg-red-500"
+                          }`}
                           style={{ width: `${Math.min(pct, 100)}%` }}
                         />
                       </div>
                     </div>
                   </div>
+                  {!isFinal && (
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Энэ дүн эцсийн биш байж болно. Багш задгай асуултуудыг
+                      шалгасны дараа шинэчлэгдэнэ.
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             );

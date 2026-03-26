@@ -9,6 +9,7 @@ export type RecipientAccessOverride = {
 type BaseExamAccess = {
   start_time: string;
   end_time: string;
+  duration_minutes: number;
   max_attempts: number | null;
 };
 
@@ -17,6 +18,7 @@ type StudentLifecycleInput = {
   recipient: RecipientAccessOverride;
   latestSessionStatus?: string | null;
   latestAttemptNumber?: number | null;
+  latestSessionStartedAt?: string | null;
   nowMs?: number;
 };
 
@@ -49,9 +51,9 @@ export function getEffectiveExamAccess(
   const effectiveMaxAttempts =
     recipient.max_attempts_override ?? Number(exam.max_attempts ?? 1);
   const hasRetakeOverride =
-    recipient.access_start_time !== null && recipient.access_start_time !== undefined ||
-    recipient.access_end_time !== null && recipient.access_end_time !== undefined ||
-    recipient.max_attempts_override !== null && recipient.max_attempts_override !== undefined;
+    (recipient.access_start_time !== null && recipient.access_start_time !== undefined) ||
+    (recipient.access_end_time !== null && recipient.access_end_time !== undefined) ||
+    (recipient.max_attempts_override !== null && recipient.max_attempts_override !== undefined);
 
   return {
     effectiveStartTime,
@@ -60,6 +62,28 @@ export function getEffectiveExamAccess(
     hasRetakeOverride,
     isExcused: Boolean(recipient.excused_at),
   };
+}
+
+export function getSessionDeadlineMs(
+  startedAt: string | null | undefined,
+  exam: Pick<BaseExamAccess, "end_time" | "duration_minutes">
+) {
+  if (!startedAt) return null;
+
+  const startedAtMs = new Date(startedAt).getTime();
+  const examEndMs = new Date(exam.end_time).getTime();
+  const durationMs = Number(exam.duration_minutes ?? 0) * 60 * 1000;
+
+  if (
+    Number.isNaN(startedAtMs) ||
+    Number.isNaN(examEndMs) ||
+    !Number.isFinite(durationMs) ||
+    durationMs <= 0
+  ) {
+    return null;
+  }
+
+  return Math.min(startedAtMs + durationMs, examEndMs);
 }
 
 export function deriveStudentExamLifecycle(
@@ -78,6 +102,14 @@ export function deriveStudentExamLifecycle(
   const endMs = new Date(effectiveEndTime).getTime();
   const attemptsUsed = Number(input.latestAttemptNumber ?? 0);
   const hasRemainingAttempts = attemptsUsed < effectiveMaxAttempts;
+  const sessionDeadlineMs = getSessionDeadlineMs(
+    input.latestSessionStartedAt,
+    input.exam
+  );
+  const isExpiredInProgress =
+    status === "in_progress" &&
+    sessionDeadlineMs !== null &&
+    nowMs >= sessionDeadlineMs;
 
   if (isExcused) {
     return {
@@ -89,12 +121,22 @@ export function deriveStudentExamLifecycle(
     };
   }
 
-  if (status === "in_progress") {
+  if (status === "in_progress" && !isExpiredInProgress) {
     return {
       key: "in_progress",
       label: "Үргэлжилж байна",
       isAvailable: true,
       isCompleted: false,
+      isRetake: hasRetakeOverride,
+    };
+  }
+
+  if (isExpiredInProgress) {
+    return {
+      key: "timed_out",
+      label: "Хугацаа дууссан",
+      isAvailable: false,
+      isCompleted: true,
       isRetake: hasRetakeOverride,
     };
   }

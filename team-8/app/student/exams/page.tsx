@@ -67,38 +67,44 @@ export default async function StudentExamsPage({
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {exams.map((exam) => {
             const lifecycle = String(exam.myLifecycleStatus ?? "");
-            const isSubmitted =
-              lifecycle === "submitted" || lifecycle === "graded";
+            const isResultAvailable =
+              lifecycle === "submitted" ||
+              lifecycle === "graded" ||
+              lifecycle === "timed_out";
             const isInProgress = lifecycle === "in_progress";
             const isAvailable =
               lifecycle === "available" || lifecycle === "retake_available";
             const isUpcoming =
               lifecycle === "scheduled" || lifecycle === "retake_scheduled";
             const isExcused = lifecycle === "excused";
-            const isAbsent = lifecycle === "absent" || lifecycle === "timed_out";
+            const isAbsent = lifecycle === "absent";
+            const isTimedOut = lifecycle === "timed_out";
 
             return (
               <Card key={exam.id} className="flex flex-col">
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg">{exam.title}</CardTitle>
-                    {isSubmitted && (
+                    {isResultAvailable && (
                       <Badge variant="secondary">Өгсөн</Badge>
                     )}
-                    {!isSubmitted && isAvailable && (
+                    {!isResultAvailable && isAvailable && (
                       <Badge variant="secondary">
                         {lifecycle === "retake_available"
                           ? "Нөхөн шалгалт"
                           : "Одоо эхэлнэ"}
                       </Badge>
                     )}
-                    {!isSubmitted && isUpcoming && (
+                    {!isResultAvailable && isUpcoming && (
                       <Badge variant="outline">
                         {lifecycle === "retake_scheduled" ? "Нөхөн товлогдсон" : "Удахгүй"}
                       </Badge>
                     )}
                     {isExcused && (
                       <Badge variant="outline">Чөлөөлөгдсөн</Badge>
+                    )}
+                    {isTimedOut && (
+                      <Badge variant="outline">Хугацаа дууссан</Badge>
                     )}
                     {isAbsent && (
                       <Badge variant="outline">Өгөөгүй</Badge>
@@ -131,7 +137,7 @@ export default async function StudentExamsPage({
                   </div>
 
                   {/* Аль хэдийн өгсөн → үр дүн */}
-                  {isSubmitted && (
+                  {isResultAvailable && (
                     <Link href={`/student/exams/${exam.id}/result`}>
                       <Button variant="outline" className="w-full">
                         Үр дүн харах
@@ -140,7 +146,7 @@ export default async function StudentExamsPage({
                   )}
 
                   {/* Үргэлжлүүлэх (in_progress + цаг дуусаагүй) */}
-                  {!isSubmitted && isInProgress && (
+                  {!isResultAvailable && isInProgress && (
                     <Link href={`/student/exams/${exam.id}/take`}>
                       <Button variant="outline" className="w-full">
                         Үргэлжлүүлэх
@@ -149,7 +155,7 @@ export default async function StudentExamsPage({
                   )}
 
                   {/* Шалгалт өгөх (active, session байхгүй) */}
-                  {!isSubmitted && !isInProgress && isAvailable && (
+                  {!isResultAvailable && !isInProgress && isAvailable && (
                     <Link href={`/student/exams/${exam.id}/take`}>
                       <Button className="w-full">
                         {lifecycle === "retake_available"
@@ -159,21 +165,21 @@ export default async function StudentExamsPage({
                     </Link>
                   )}
 
-                  {!isSubmitted && isUpcoming && (
+                  {!isResultAvailable && isUpcoming && (
                     <Button disabled variant="outline" className="w-full">
                       Эхлээгүй байна
                     </Button>
                   )}
 
-                  {!isSubmitted && isExcused && (
+                  {!isResultAvailable && isExcused && (
                     <Button disabled variant="outline" className="w-full">
                       Чөлөөлөгдсөн
                     </Button>
                   )}
 
-                  {!isSubmitted && !isInProgress && isAbsent && (
+                  {!isResultAvailable && !isInProgress && (isAbsent || isTimedOut) && (
                     <Button disabled variant="outline" className="w-full">
-                      Өгөөгүй
+                      {isTimedOut ? "Хугацаа дууссан" : "Өгөөгүй"}
                     </Button>
                   )}
                 </CardContent>

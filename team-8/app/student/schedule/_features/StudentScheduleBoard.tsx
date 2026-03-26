@@ -78,10 +78,11 @@ function getExamState(exam: StudentExamRow) {
 
   if (lifecycle === "absent" || lifecycle === "timed_out") {
     return {
-      label: "Өгөөгүй",
+      label: lifecycle === "timed_out" ? "Хугацаа дууссан" : "Өгөөгүй",
       badge: "outline" as const,
-      actionLabel: null,
-      actionHref: null,
+      actionLabel: lifecycle === "timed_out" ? "Үр дүн" : null,
+      actionHref:
+        lifecycle === "timed_out" ? `/student/exams/${exam.id}/result` : null,
     };
   }
 

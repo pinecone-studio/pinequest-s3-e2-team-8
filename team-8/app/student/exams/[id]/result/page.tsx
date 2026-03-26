@@ -190,9 +190,15 @@ export default async function ExamResultPage({
     maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
   const passingScore = examMeta?.passing_score ?? 60;
   const passed = percentage >= passingScore;
-  const isGraded = data.status === "graded";
-
   const answers = data.answers ?? [];
+  const hasEssayAnswers = answers.some((answer) => {
+    const question = Array.isArray(answer.questions)
+      ? answer.questions[0]
+      : answer.questions;
+    return question?.type === "essay";
+  });
+  const isFinalized = data.status === "graded" || (data.status === "timed_out" && !hasEssayAnswers);
+
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-4">
@@ -207,7 +213,9 @@ export default async function ExamResultPage({
         <CardContent className="space-y-4">
           <div
             className={`mx-auto flex h-32 w-32 items-center justify-center rounded-full text-4xl font-bold ${
-              passed
+              !isFinalized
+                ? "bg-slate-100 text-slate-700"
+                : passed
                 ? "bg-green-100 text-green-700"
                 : "bg-red-100 text-red-700"
             }`}
@@ -221,20 +229,24 @@ export default async function ExamResultPage({
             </p>
             <p
               className={`text-lg font-semibold ${
-                passed ? "text-green-600" : "text-red-600"
+                !isFinalized
+                  ? "text-slate-600"
+                  : passed
+                    ? "text-green-600"
+                    : "text-red-600"
               }`}
             >
-              {passed ? "Тэнцсэн" : "Тэнцээгүй"}
+              {isFinalized ? (passed ? "Тэнцсэн" : "Тэнцээгүй") : "Урьдчилсан дүн"}
             </p>
           </div>
 
-          {!isGraded && (
+          {!isFinalized && (
             <p className="text-sm text-muted-foreground">
               Нээлттэй хариулт (essay) асуултуудыг багш шалгасны дараа эцсийн
               оноо өөрчлөгдөж болно.
             </p>
           )}
-          {isGraded && (
+          {isFinalized && (
             <p className="text-sm font-medium text-green-600">
               ✓ Багш шалгаж дүн баталгаажсан
             </p>
@@ -327,7 +339,7 @@ export default async function ExamResultPage({
                     </div>
                   )}
 
-                  {isEssay && !isGraded && (
+                  {isEssay && !isFinalized && (
                     <Badge variant="outline" className="text-xs text-blue-600">
                       Багш шалгах хүлээгдэж байна
                     </Badge>

@@ -46,6 +46,7 @@ function buildStats(rows: ResultRow[]) {
     submitted: rows.filter((row) => row.status === "submitted").length,
     graded: rows.filter((row) => row.status === "graded").length,
     absent: rows.filter((row) => row.status === "absent").length,
+    timedOut: rows.filter((row) => row.status === "timed_out").length,
     excused: rows.filter((row) => row.status === "excused").length,
     avgScore:
       attemptedRows.length > 0
@@ -77,8 +78,9 @@ function getStatusBadge(status: string, label: string) {
       return <Badge variant="secondary">{label}</Badge>;
     case "excused":
       return <Badge variant="outline">Чөлөөлөгдсөн</Badge>;
-    case "absent":
     case "timed_out":
+      return <Badge variant="outline">Хугацаа дууссан</Badge>;
+    case "absent":
       return <Badge variant="outline">Өгөөгүй</Badge>;
     default:
       return <Badge variant="outline">{label}</Badge>;
@@ -190,6 +192,11 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold">{displayStats.absent}</p>
+            {displayStats.timedOut > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Хугацаа дууссан: {displayStats.timedOut}
+              </p>
+            )}
           </CardContent>
         </Card>
 

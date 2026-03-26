@@ -15,6 +15,7 @@ import {
 import {
   deriveStudentExamLifecycle,
   getEffectiveExamAccess,
+  getSessionDeadlineMs,
   type RecipientAccessOverride,
 } from "@/lib/exam-session-lifecycle";
 import { attachPassagesToQuestions } from "@/lib/question-passages";
@@ -76,6 +77,7 @@ type AssignedExamRow = {
 type StudentExamAttemptSummary = {
   status: string | null;
   attemptNumber: number;
+  startedAt: string | null;
 };
 
 type StudentExamRecord = Record<string, unknown>;
@@ -212,6 +214,7 @@ function mergeAssignedExamAccess(
     {
       start_time: String(examRecord.start_time),
       end_time: String(examRecord.end_time),
+      duration_minutes: Number(examRecord.duration_minutes ?? 0),
       max_attempts: Number(examRecord.max_attempts ?? 1),
     },
     row as RecipientAccessOverride
@@ -220,11 +223,13 @@ function mergeAssignedExamAccess(
     exam: {
       start_time: String(examRecord.start_time),
       end_time: String(examRecord.end_time),
+      duration_minutes: Number(examRecord.duration_minutes ?? 0),
       max_attempts: Number(examRecord.max_attempts ?? 1),
     },
     recipient: row,
     latestSessionStatus: latestSession?.status ?? null,
     latestAttemptNumber: latestSession?.attemptNumber ?? 0,
+    latestSessionStartedAt: latestSession?.startedAt ?? null,
   });
 
   return {
@@ -254,6 +259,68 @@ async function getAssignedPublishedExamRecord(
     row,
     exam: mergeAssignedExamAccess(row),
   };
+}
+
+async function getEffectiveExamAccessForStudent(
+  supabase: SupabaseServerClient,
+  userId: string,
+  examId: string
+) {
+  const assignedExam = await getAssignedPublishedExamRecord(
+    supabase,
+    userId,
+    examId
+  );
+  if (assignedExam?.exam) {
+    return assignedExam.exam;
+  }
+
+  const { data: exam } = await supabase
+    .from("exams")
+    .select(STUDENT_EXAM_SELECT)
+    .eq("id", examId)
+    .maybeSingle();
+
+  if (!exam) return null;
+
+  const { data: recipient } = await supabase
+    .from("exam_recipients")
+    .select(
+      "access_start_time, access_end_time, max_attempts_override, excused_at, status_note"
+    )
+    .eq("exam_id", examId)
+    .eq("student_id", userId)
+    .maybeSingle();
+
+  const access = getEffectiveExamAccess(
+    {
+      start_time: String(exam.start_time),
+      end_time: String(exam.end_time),
+      duration_minutes: Number(exam.duration_minutes ?? 0),
+      max_attempts: Number(exam.max_attempts ?? 1),
+    },
+    (recipient ?? {}) as RecipientAccessOverride
+  );
+
+  return {
+    ...(exam as StudentExamBase),
+    start_time: access.effectiveStartTime,
+    end_time: access.effectiveEndTime,
+    max_attempts: access.effectiveMaxAttempts,
+  };
+}
+
+function isSessionExpiredForExam(
+  startedAt: string | null | undefined,
+  exam: Pick<StudentAssignedExam, "end_time" | "duration_minutes">,
+  nowMs = Date.now()
+) {
+  const deadlineMs = getSessionDeadlineMs(startedAt, {
+    end_time: exam.end_time,
+    duration_minutes: exam.duration_minutes,
+  });
+
+  return deadlineMs !== null && nowMs >= deadlineMs;
 }
 
 function getPercentage(totalScore: number, maxScore: number) {
@@ -287,13 +354,30 @@ function parseMatchingPairs(options: unknown) {
 
   return options
     .map((option) => {
-      const [left, right] = String(option).split("|||");
+      const [left, ...rightParts] = String(option).split("|||");
+      const right = rightParts.join("|||");
       if (!left || !right) return null;
 
       return {
         left,
         right: normalizeTextAnswer(right),
       };
+    })
+    .filter(
+      (item): item is { left: string; right: string } => Boolean(item)
+    );
+}
+
+function parseMatchingDisplayPairs(options: unknown) {
+  if (!Array.isArray(options)) return [];
+
+  return options
+    .map((option) => {
+      const [left, ...rightParts] = String(option).split("|||");
+      const right = rightParts.join("|||");
+      if (!left || !right) return null;
+
+      return { left, right };
     })
     .filter(
       (item): item is { left: string; right: string } => Boolean(item)
@@ -317,9 +401,10 @@ function getStudentSafeQuestions<
     delete safeQuestion.explanation;
 
     if (safeQuestion.type === "matching") {
-      const matchingPairs = parseMatchingPairs(safeQuestion.options);
+      const matchingPairs = parseMatchingDisplayPairs(safeQuestion.options);
       safeQuestion.matching_prompts = matchingPairs.map((pair) => pair.left);
       safeQuestion.matching_choices = matchingPairs.map((pair) => pair.right);
+      safeQuestion.options = null;
     }
 
     return safeQuestion;
@@ -351,7 +436,7 @@ export async function getStudentExams() {
   // Хамгийн сүүлийн session status-г нэмэх
   const { data: sessions } = await supabase
     .from("exam_sessions")
-    .select("exam_id, status, attempt_number")
+    .select("exam_id, status, attempt_number, started_at")
     .eq("user_id", user.id)
     .in("exam_id", uniqueExams.map((e) => e.id as string))
     .order("attempt_number", { ascending: false });
@@ -362,6 +447,7 @@ export async function getStudentExams() {
       sessionMap.set(s.exam_id as string, {
         status: s.status as string,
         attemptNumber: Number(s.attempt_number ?? 0),
+        startedAt: (s.started_at as string | null) ?? null,
       });
     }
   }
@@ -477,6 +563,324 @@ export async function getExamForStudent(examId: string) {
   return result;
 }
 
+type FinalizeSessionReason = "submit" | "timeout";
+
+async function finalizeSessionAttempt(
+  supabase: SupabaseServerClient,
+  {
+    sessionId,
+    examId,
+    userId,
+    reason,
+  }: {
+    sessionId: string;
+    examId: string;
+    userId: string;
+    reason: FinalizeSessionReason;
+  }
+) {
+  const lockKey = getSubmitSessionLockKey(sessionId);
+  const lockAcquired = await redis.set(lockKey, "1", {
+    ex: 30,
+    nx: true,
+  });
+
+  if (!lockAcquired) {
+    const { data: lockedSession } = await supabase
+      .from("exam_sessions")
+      .select("status, total_score, max_score")
+      .eq("id", sessionId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (lockedSession && lockedSession.status !== "in_progress") {
+      await cacheSessionMeta(sessionId, userId, lockedSession.status);
+      const totalScore = Number(lockedSession.total_score ?? 0);
+      const maxScore = Number(lockedSession.max_score ?? 0);
+
+      return {
+        success: true as const,
+        finalStatus: lockedSession.status,
+        totalScore,
+        maxScore,
+        percentage: getPercentage(totalScore, maxScore),
+      };
+    }
+
+    return {
+      error:
+        reason === "timeout"
+          ? "Өмнөх шалгалтын төлөвийг шинэчилж байна. Түр хүлээгээд дахин оролдоно уу."
+          : "Шалгалтыг илгээж байна. Түр хүлээгээд дахин оролдоно уу.",
+    };
+  }
+
+  try {
+    const { data: currentSession } = await supabase
+      .from("exam_sessions")
+      .select("status, total_score, max_score")
+      .eq("id", sessionId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (!currentSession) return { error: "Session олдсонгүй" };
+
+    if (currentSession.status !== "in_progress") {
+      await cacheSessionMeta(sessionId, userId, currentSession.status);
+      const totalScore = Number(currentSession.total_score ?? 0);
+      const maxScore = Number(currentSession.max_score ?? 0);
+
+      return {
+        success: true as const,
+        finalStatus: currentSession.status,
+        totalScore,
+        maxScore,
+        percentage: getPercentage(totalScore, maxScore),
+      };
+    }
+
+    const redisKey = getSessionAnswersCacheKey(sessionId, userId);
+    const redisAnswers = await redis.hgetall(redisKey);
+    if (redisAnswers && Object.keys(redisAnswers).length > 0) {
+      const rows = Object.entries(redisAnswers).map(([questionId, answer]) => ({
+        session_id: sessionId,
+        question_id: questionId,
+        user_id: userId,
+        answer: String(answer),
+      }));
+
+      const { error: flushError } = await supabase.from("answers").upsert(rows, {
+        onConflict: "session_id,question_id",
+      });
+
+      if (flushError) return { error: flushError.message };
+    }
+
+    const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
+    const snapshotQuestionMap = getSnapshotQuestionMap(snapshot);
+
+    const [{ data: answers }, { data: questions }] = await Promise.all([
+      supabase
+        .from("answers")
+        .select("id, question_id, answer, score")
+        .eq("session_id", sessionId),
+      snapshot
+        ? Promise.resolve({
+            data: snapshot.questions.map((question) => ({
+              id: question.id,
+              type: question.type,
+              points: question.points,
+              correct_answer: question.correct_answer,
+              options: question.options,
+            })),
+          })
+        : supabase
+            .from("questions")
+            .select("id, type, points, correct_answer, options")
+            .eq("exam_id", examId),
+    ]);
+
+    let totalScore = 0;
+    const maxScore =
+      snapshot?.stats.total_points ??
+      (questions ?? []).reduce(
+        (sum, question) => sum + Number(question.points ?? 0),
+        0
+      );
+
+    const gradedAnswers: Array<{
+      id: string;
+      is_correct: boolean;
+      score: number;
+    }> = [];
+
+    for (const ans of answers ?? []) {
+      const question =
+        snapshotQuestionMap.get(ans.question_id) ??
+        (questions ?? []).find((item) => item.id === ans.question_id);
+      if (!question) continue;
+
+      if (
+        question.type === "multiple_choice" ||
+        question.type === "fill_blank"
+      ) {
+        const isCorrect =
+          normalizeTextAnswer(ans.answer) ===
+          normalizeTextAnswer(question.correct_answer);
+        const score = isCorrect ? Number(question.points ?? 0) : 0;
+        totalScore += score;
+        gradedAnswers.push({ id: ans.id, is_correct: isCorrect, score });
+      } else if (question.type === "multiple_response") {
+        const isCorrect = areArraysEqual(
+          parseAnswerArray(ans.answer),
+          parseAnswerArray(question.correct_answer)
+        );
+        const score = isCorrect ? Number(question.points ?? 0) : 0;
+        totalScore += score;
+        gradedAnswers.push({ id: ans.id, is_correct: isCorrect, score });
+      } else if (question.type === "matching") {
+        let submittedAnswer: Record<string, string> = {};
+
+        try {
+          submittedAnswer = JSON.parse(String(ans.answer ?? "{}")) as Record<
+            string,
+            string
+          >;
+        } catch {
+          submittedAnswer = {};
+        }
+
+        const expectedPairs = parseMatchingPairs(question.options);
+        const isCorrect =
+          expectedPairs.length > 0 &&
+          expectedPairs.every(
+            (pair) =>
+              normalizeTextAnswer(submittedAnswer[pair.left]) === pair.right
+          );
+        const score = isCorrect ? Number(question.points ?? 0) : 0;
+        totalScore += score;
+        gradedAnswers.push({ id: ans.id, is_correct: isCorrect, score });
+      } else {
+        totalScore += Number(ans.score ?? 0);
+      }
+    }
+
+    if (gradedAnswers.length > 0) {
+      const BATCH_SIZE = 50;
+      for (let i = 0; i < gradedAnswers.length; i += BATCH_SIZE) {
+        const batch = gradedAnswers.slice(i, i + BATCH_SIZE);
+        const results = await Promise.all(
+          batch.map((gradedAnswer) =>
+            supabase
+              .from("answers")
+              .update({
+                is_correct: gradedAnswer.is_correct,
+                score: gradedAnswer.score,
+              })
+              .eq("id", gradedAnswer.id)
+          )
+        );
+        const failedUpdate = results.find((result) => result.error);
+        if (failedUpdate?.error) {
+          return {
+            error: `Хариултын оноо хадгалахад алдаа: ${failedUpdate.error.message}`,
+          };
+        }
+      }
+    }
+
+    const hasEssayQuestions =
+      snapshot?.stats.has_essay_questions ??
+      (questions ?? []).some((question) => question.type === "essay");
+    const finalStatus =
+      reason === "timeout"
+        ? hasEssayQuestions
+          ? "submitted"
+          : "timed_out"
+        : hasEssayQuestions
+          ? "submitted"
+          : "graded";
+
+    const { data: updatedRows, error: updateError } = await supabase
+      .from("exam_sessions")
+      .update({
+        status: finalStatus,
+        submitted_at: new Date().toISOString(),
+        total_score: totalScore,
+        max_score: maxScore,
+      })
+      .eq("id", sessionId)
+      .eq("status", "in_progress")
+      .select("id, status, total_score, max_score");
+
+    if (updateError) return { error: updateError.message };
+
+    if (!updatedRows || updatedRows.length === 0) {
+      const { data: existingSession } = await supabase
+        .from("exam_sessions")
+        .select("status, total_score, max_score")
+        .eq("id", sessionId)
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (existingSession && existingSession.status !== "in_progress") {
+        await cacheSessionMeta(sessionId, userId, existingSession.status);
+        const totalScore = Number(existingSession.total_score ?? 0);
+        const maxScore = Number(existingSession.max_score ?? 0);
+
+        return {
+          success: true as const,
+          finalStatus: existingSession.status,
+          totalScore,
+          maxScore,
+          percentage: getPercentage(totalScore, maxScore),
+        };
+      }
+
+      return { error: "Шалгалтын session шинэчлэгдсэнгүй. Дахин оролдоно уу." };
+    }
+
+    await redis.del(redisKey);
+    await cacheSessionMeta(sessionId, userId, finalStatus);
+
+    revalidatePath("/student");
+    revalidatePath("/student/exams");
+    revalidatePath("/student/results");
+    revalidatePath("/student/schedule");
+    revalidatePath(`/student/exams/${examId}/result`);
+
+    return {
+      success: true as const,
+      finalStatus,
+      totalScore,
+      maxScore,
+      percentage: getPercentage(totalScore, maxScore),
+    };
+  } finally {
+    await redis.del(lockKey);
+  }
+}
+
+async function finalizeExpiredSessionsForStudent(
+  supabase: SupabaseServerClient,
+  userId: string,
+  examId?: string
+) {
+  let query = supabase
+    .from("exam_sessions")
+    .select("id, exam_id, started_at")
+    .eq("user_id", userId)
+    .eq("status", "in_progress")
+    .order("started_at", { ascending: false });
+
+  if (examId) {
+    query = query.eq("exam_id", examId);
+  }
+
+  const { data: sessions } = await query;
+  if (!sessions || sessions.length === 0) return;
+
+  for (const session of sessions) {
+    const exam = await getEffectiveExamAccessForStudent(
+      supabase,
+      userId,
+      session.exam_id
+    );
+
+    if (
+      exam &&
+      isSessionExpiredForExam(session.started_at ?? null, exam)
+    ) {
+      await finalizeSessionAttempt(supabase, {
+        sessionId: session.id,
+        examId: session.exam_id,
+        userId,
+        reason: "timeout",
+      });
+    }
+  }
+}
+
 /**
  * Шалгалт эхлэх — exam_session үүсгэх
  */
@@ -524,8 +928,27 @@ export async function startExamSession(examId: string) {
   );
 
   if (existingInProgress) {
-    await cacheSessionMeta(existingInProgress.id, user.id, "in_progress");
-    return { session: existingInProgress };
+    if (
+      isSessionExpiredForExam(
+        existingInProgress.started_at ?? null,
+        exam,
+        now
+      )
+    ) {
+      const finalized = await finalizeSessionAttempt(supabase, {
+        sessionId: existingInProgress.id,
+        examId,
+        userId: user.id,
+        reason: "timeout",
+      });
+
+      if ("error" in finalized) {
+        return { error: finalized.error };
+      }
+    } else {
+      await cacheSessionMeta(existingInProgress.id, user.id, "in_progress");
+      return { session: existingInProgress };
+    }
   }
 
   const lockKey = getStartSessionLockKey(examId, user.id);
@@ -557,14 +980,33 @@ export async function startExamSession(examId: string) {
     );
 
     if (concurrentInProgress) {
-      await cacheSessionMeta(concurrentInProgress.id, user.id, "in_progress");
-      return { session: concurrentInProgress };
+      if (
+        isSessionExpiredForExam(
+          concurrentInProgress.started_at ?? null,
+          exam,
+          Date.now()
+        )
+      ) {
+        const finalized = await finalizeSessionAttempt(supabase, {
+          sessionId: concurrentInProgress.id,
+          examId,
+          userId: user.id,
+          reason: "timeout",
+        });
+
+        if ("error" in finalized) {
+          return { error: finalized.error };
+        }
+      } else {
+        await cacheSessionMeta(concurrentInProgress.id, user.id, "in_progress");
+        return { session: concurrentInProgress };
+      }
     }
 
     // Сурагч өөр шалгалт өгч байгаа эсэх шалгах (нэг зэрэг хоёр шалгалт өгч болохгүй)
     const { data: otherActiveSession } = await supabase
       .from("exam_sessions")
-      .select("id")
+      .select("id, exam_id, started_at")
       .eq("user_id", user.id)
       .eq("status", "in_progress")
       .neq("exam_id", examId)
@@ -572,7 +1014,36 @@ export async function startExamSession(examId: string) {
       .maybeSingle();
 
     if (otherActiveSession) {
-      return { error: "Та одоо өөр шалгалт өгч байна. Эхлээд тэр шалгалтаа дуусгана уу." };
+      const otherExam = await getEffectiveExamAccessForStudent(
+        supabase,
+        user.id,
+        otherActiveSession.exam_id
+      );
+
+      if (
+        otherExam &&
+        isSessionExpiredForExam(
+          otherActiveSession.started_at ?? null,
+          otherExam,
+          Date.now()
+        )
+      ) {
+        const finalized = await finalizeSessionAttempt(supabase, {
+          sessionId: otherActiveSession.id,
+          examId: otherActiveSession.exam_id,
+          userId: user.id,
+          reason: "timeout",
+        });
+
+        if ("error" in finalized) {
+          return { error: finalized.error };
+        }
+      } else {
+        return {
+          error:
+            "Та одоо өөр шалгалт өгч байна. Эхлээд тэр шалгалтаа дуусгана уу.",
+        };
+      }
     }
 
     const nextAttemptNumber =
@@ -700,191 +1171,12 @@ export async function submitExam(sessionId: string) {
     };
   }
 
-  const lockKey = getSubmitSessionLockKey(sessionId);
-  const lockAcquired = await redis.set(lockKey, "1", {
-    ex: 30,
-    nx: true,
+  return finalizeSessionAttempt(supabase, {
+    sessionId,
+    examId: session.exam_id,
+    userId: user.id,
+    reason: "submit",
   });
-
-  if (!lockAcquired) {
-    const { data: lockedSession } = await supabase
-      .from("exam_sessions")
-      .select("status, total_score, max_score")
-      .eq("id", sessionId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (lockedSession && lockedSession.status !== "in_progress") {
-      await cacheSessionMeta(sessionId, user.id, lockedSession.status);
-      const totalScore = Number(lockedSession.total_score ?? 0);
-      const maxScore = Number(lockedSession.max_score ?? 0);
-      return {
-        success: true,
-        totalScore,
-        maxScore,
-        percentage: getPercentage(totalScore, maxScore),
-      };
-    }
-
-    return { error: "Шалгалтыг илгээж байна. Түр хүлээгээд дахин оролдоно уу." };
-  }
-
-  try {
-    // Redis-д хадгалсан хариултуудыг DB руу flush хийх
-    const redisKey = getSessionAnswersCacheKey(sessionId, user.id);
-    const redisAnswers = await redis.hgetall(redisKey);
-    if (redisAnswers && Object.keys(redisAnswers).length > 0) {
-      const rows = Object.entries(redisAnswers).map(([questionId, answer]) => ({
-        session_id: sessionId,
-        question_id: questionId,
-        user_id: user.id,
-        answer: String(answer),
-      }));
-
-      const { error: flushError } = await supabase.from("answers").upsert(rows, {
-        onConflict: "session_id,question_id",
-      });
-
-      if (flushError) return { error: flushError.message };
-    }
-
-    const snapshot = await getStoredPublishedExamSnapshot(
-      supabase,
-      session.exam_id
-    );
-    const snapshotQuestionMap = getSnapshotQuestionMap(snapshot);
-
-    const [{ data: answers }, { data: questions }] = await Promise.all([
-      supabase
-        .from("answers")
-        .select("id, question_id, answer, score")
-        .eq("session_id", sessionId),
-      snapshot
-        ? Promise.resolve({
-            data: snapshot.questions.map((question) => ({
-              id: question.id,
-              type: question.type,
-              points: question.points,
-              correct_answer: question.correct_answer,
-              options: question.options,
-            })),
-          })
-        : supabase
-            .from("questions")
-            .select("id, type, points, correct_answer, options")
-            .eq("exam_id", session.exam_id),
-    ]);
-
-    let totalScore = 0;
-    const maxScore = snapshot?.stats.total_points ?? (questions ?? []).reduce(
-      (sum, question) => sum + Number(question.points ?? 0),
-      0
-    );
-
-    for (const ans of answers ?? []) {
-      const question =
-        snapshotQuestionMap.get(ans.question_id) ??
-        (questions ?? []).find((item) => item.id === ans.question_id);
-      if (!question) continue;
-
-      if (
-        question.type === "multiple_choice" ||
-        question.type === "fill_blank"
-      ) {
-        const isCorrect =
-          normalizeTextAnswer(ans.answer) ===
-          normalizeTextAnswer(question.correct_answer);
-        const score = isCorrect ? Number(question.points ?? 0) : 0;
-        totalScore += score;
-
-        await supabase
-          .from("answers")
-          .update({
-            is_correct: isCorrect,
-            score,
-          })
-          .eq("id", ans.id);
-      } else if (question.type === "multiple_response") {
-        const isCorrect = areArraysEqual(
-          parseAnswerArray(ans.answer),
-          parseAnswerArray(question.correct_answer)
-        );
-        const score = isCorrect ? Number(question.points ?? 0) : 0;
-        totalScore += score;
-
-        await supabase
-          .from("answers")
-          .update({
-            is_correct: isCorrect,
-            score,
-          })
-          .eq("id", ans.id);
-      } else if (question.type === "matching") {
-        let submittedAnswer: Record<string, string> = {};
-
-        try {
-          submittedAnswer = JSON.parse(String(ans.answer ?? "{}")) as Record<
-            string,
-            string
-          >;
-        } catch {
-          submittedAnswer = {};
-        }
-
-        const expectedPairs = parseMatchingPairs(question.options);
-        const isCorrect =
-          expectedPairs.length > 0 &&
-          expectedPairs.every(
-            (pair) =>
-              normalizeTextAnswer(submittedAnswer[pair.left]) === pair.right
-          );
-        const score = isCorrect ? Number(question.points ?? 0) : 0;
-        totalScore += score;
-
-        await supabase
-          .from("answers")
-          .update({
-            is_correct: isCorrect,
-            score,
-          })
-          .eq("id", ans.id);
-      } else {
-        totalScore += Number(ans.score ?? 0);
-      }
-    }
-
-    // Essay асуулт байхгүй бол автоматаар "graded" болгоно
-    const hasEssayQuestions = snapshot?.stats.has_essay_questions ?? (questions ?? []).some((q) => q.type === "essay");
-    const finalStatus = hasEssayQuestions ? "submitted" : "graded";
-
-    const { error: updateError } = await supabase
-      .from("exam_sessions")
-      .update({
-        status: finalStatus,
-        submitted_at: new Date().toISOString(),
-        total_score: totalScore,
-        max_score: maxScore,
-      })
-      .eq("id", sessionId)
-      .eq("status", "in_progress");
-
-    if (updateError) return { error: updateError.message };
-
-    await redis.del(redisKey);
-    await cacheSessionMeta(sessionId, user.id, finalStatus);
-
-    revalidatePath("/student");
-    revalidatePath("/student/exams");
-
-    return {
-      success: true,
-      totalScore,
-      maxScore,
-      percentage: getPercentage(totalScore, maxScore),
-    };
-  } finally {
-    await redis.del(lockKey);
-  }
 }
 
 /**
@@ -945,6 +1237,8 @@ export async function getExamResult(examId: string) {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
+  await finalizeExpiredSessionsForStudent(supabase, user.id, examId);
+
   const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
   const snapshotQuestionMap = getSnapshotQuestionMap(snapshot);
 
@@ -953,7 +1247,7 @@ export async function getExamResult(examId: string) {
     .select("id, status, total_score, max_score, submitted_at, attempt_number, exam_id, exams(title, passing_score)")
     .eq("exam_id", examId)
     .eq("user_id", user.id)
-    .in("status", ["submitted", "graded"])
+    .in("status", ["submitted", "graded", "timed_out"])
     .order("submitted_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -1001,7 +1295,7 @@ export async function getStudentResults() {
     .from("exam_sessions")
     .select("*, exams(title, passing_score)")
     .eq("user_id", user.id)
-    .in("status", ["submitted", "graded"])
+    .in("status", ["submitted", "graded", "timed_out"])
     .order("submitted_at", { ascending: false });
 
   return data ?? [];

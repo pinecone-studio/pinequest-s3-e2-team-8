@@ -1,15 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation"; // Added to handle the black background active state
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { logout } from "@/lib/auth/actions";
 import {
-  LucideIcon,
+  CalendarDays,
   ChevronLeft,
+  FileText,
   HomeIcon,
   ListCheck,
   LogOut,
+  LucideIcon,
+  UserCircle2,
 } from "lucide-react";
 import Logo from "@/app/_icons/Logo";
 import Tsunh from "@/app/_icons/Tsunh";
@@ -22,10 +25,11 @@ interface NavItem {
 
 const ALL_NAV_ITEMS: NavItem[] = [
   { href: "/student", label: "Нүүр хуудас", icon: HomeIcon },
+  { href: "/student/exams", label: "Шалгалтууд", icon: FileText },
+  { href: "/student/schedule", label: "Миний хуваарь", icon: CalendarDays },
   { href: "/student/results", label: "Миний дүн", icon: ListCheck },
+  { href: "/student/profile", label: "Профайл", icon: UserCircle2 },
 ];
-
-const MENU_NAV_ITEMS: NavItem[] = ALL_NAV_ITEMS;
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -47,7 +51,7 @@ export default function Sidebar() {
               type="button"
               aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               onClick={() => setIsCollapsed((prev) => !prev)}
-              className="rounded-lg p-1 text-gray-600 transition-colors hover:border-[#4078C1] hover:text-[#4078C1]"
+              className="rounded-lg p-1 text-gray-600 transition-colors hover:text-[#4078C1]"
             >
               <ChevronLeft
                 size={28}
@@ -57,29 +61,32 @@ export default function Sidebar() {
               />
             </button>
           </div>
-          <nav className="flex flex-col gap-1">
-            {MENU_NAV_ITEMS.map((item) => {
+
+          <nav className="flex flex-col gap-1.5">
+            {ALL_NAV_ITEMS.map((item) => {
               const Icon = item.icon;
-              const isActive = pathname === item.href;
+              const isActive =
+                pathname === item.href ||
+                (item.href !== "/student" && pathname.startsWith(item.href));
 
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`group flex items-center rounded-[12px] px-4 py-3 text-[15px] font-semibold transition-all duration-200 ${
+                  className={`group flex items-center rounded-[12px] px-4 py-2 text-[15px] font-semibold transition-all duration-200 ${
                     isActive
-                      ? "border-2 border-[#d1b0fd] bg-[#eee1fe] text-[#7f32f5] shadow-sm"
-                      : "text-[#7F7F7F] hover:bg-[#F4F6FA] hover:text-[#7f32f5]"
+                      ? "border-2 border-[#4078C1] bg-[#ECF1F9] text-[#4078C1] shadow-sm"
+                      : "text-[#7F7F7F] hover:bg-[#F4F6FA] hover:text-[#4078C1]"
                   } ${isCollapsed ? "justify-center gap-0 px-3" : "gap-4"}`}
                 >
                   <Icon
                     size={20}
                     strokeWidth={isActive ? 2.5 : 2}
-                    className={`${
+                    className={
                       isActive
-                        ? "text-[#7f32f5]"
-                        : "text-[#575555] group-hover:text-[#7f32f5]"
-                    }`}
+                        ? "text-[#4078C1]"
+                        : "text-[#575555] group-hover:text-[#4078C1]"
+                    }
                   />
                   {!isCollapsed && <span>{item.label}</span>}
                 </Link>

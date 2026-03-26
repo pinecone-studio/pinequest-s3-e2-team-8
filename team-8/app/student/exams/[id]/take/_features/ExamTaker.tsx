@@ -175,6 +175,7 @@ export default function ExamTaker({
   const [timeLeft, setTimeLeft] = useState(initialTimeLeftSeconds);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const saveTimersRef = useRef<Record<string, number>>({});
   const dirtyAnswersRef = useRef<Record<string, string>>({});
   const activeSavePromisesRef = useRef<Record<string, Promise<unknown>>>({});
@@ -317,7 +318,7 @@ export default function ExamTaker({
 
     await flushPendingAnswers();
     const result = await submitExam(sessionId);
-    if (result.success) {
+    if ("success" in result && result.success) {
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(draftStorageKey);
       }
@@ -325,7 +326,7 @@ export default function ExamTaker({
     } else {
       isSubmittingRef.current = false;
       setIsSubmitting(false);
-      alert(result.error || "Алдаа гарлаа");
+      alert(("error" in result && result.error) || "Алдаа гарлаа");
     }
   }, [
     draftStorageKey,
@@ -418,6 +419,12 @@ export default function ExamTaker({
     };
 
     const handlePaste = (event: ClipboardEvent) => {
+      // Essay болон fill_blank асуултад paste зөвшөөрнө (логлоно)
+      const currentType = currentQuestionRef.current?.type;
+      if (currentType === "essay" || currentType === "fill_blank") {
+        emitProctorEvent("paste_attempt", {}, 1000);
+        return;
+      }
       event.preventDefault();
       emitProctorEvent("paste_attempt", {}, 1000);
     };
@@ -493,6 +500,45 @@ export default function ExamTaker({
 
   return (
     <div className="flex min-h-screen flex-col">
+      {/* Submit confirmation dialog */}
+      {showSubmitConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
+          <div className="mx-4 w-full max-w-md rounded-xl border bg-background p-6 shadow-xl">
+            <h3 className="text-lg font-semibold">Шалгалт дуусгах уу?</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {answeredCount}/{displayQuestions.length} асуултад хариулсан байна.
+              {answeredCount < displayQuestions.length && (
+                <span className="font-medium text-destructive">
+                  {" "}{displayQuestions.length - answeredCount} асуулт хариулаагүй байна!
+                </span>
+              )}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Дуусгасны дараа хариултаа өөрчлөх боломжгүй.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setShowSubmitConfirm(false)}
+              >
+                Буцах
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1"
+                onClick={() => {
+                  setShowSubmitConfirm(false);
+                  void handleSubmit();
+                }}
+              >
+                Дуусгах
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header: Timer + Progress */}
       <div className="sticky top-0 z-50 border-b bg-background px-4 py-3">
         <div className="mx-auto flex max-w-4xl items-center justify-between">
@@ -521,7 +567,7 @@ export default function ExamTaker({
               {formatTime(timeLeft)}
             </div>
             <Button
-              onClick={handleSubmit}
+              onClick={() => setShowSubmitConfirm(true)}
               loading={isSubmitting}
               loadingText="Илгээж байна..."
               variant="destructive"

@@ -15,7 +15,7 @@ import {
   buildExamLifecycleMap,
   getExamSubjectAssignmentConsistency,
 } from "@/lib/exam-lifecycle";
-import { canManageExam } from "@/lib/exam-scope";
+import { getExamManagementScope } from "@/lib/exam-scope";
 import {
   buildPublishedExamSnapshot,
   isSnapshotColumnMissingError,
@@ -337,6 +337,19 @@ export async function deleteExam(examId: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
 
+  const { data: exam } = await supabase
+    .from("exams")
+    .select("id, is_published")
+    .eq("id", examId)
+    .eq("created_by", user.id)
+    .maybeSingle();
+
+  if (!exam) return { error: "Шалгалт олдсонгүй" };
+
+  if (exam.is_published) {
+    return { error: "Нийтлэгдсэн шалгалтыг устгах боломжгүй. Эхлээд нийтлэлтийг цуцлах шаардлагатай." };
+  }
+
   const { error } = await supabase
     .from("exams")
     .delete()
@@ -398,13 +411,14 @@ export async function getExamResults(examId: string) {
   const { data: exam } = await supabase
     .from("exams")
     .select(
-      "id, title, passing_score, subject_id, created_by, start_time, end_time, max_attempts, subjects(name)"
+      "id, title, passing_score, subject_id, created_by, start_time, end_time, duration_minutes, max_attempts, subjects(name)"
     )
     .eq("id", examId)
     .maybeSingle();
 
   if (!exam) return null;
-  if (!(await canManageExam(supabase, examId, user.id))) return null;
+  const managementScope = await getExamManagementScope(supabase, examId, user.id);
+  if (!managementScope.canManage) return null;
 
   // Энэ шалгалтад хамаарах бүлгүүд
   const { data: assignmentRows } = await supabase
@@ -416,15 +430,19 @@ export async function getExamResults(examId: string) {
     const g = Array.isArray(r.student_groups) ? r.student_groups[0] : r.student_groups;
     return g ? [g as { id: string; name: string }] : [];
   });
+  const visibleGroups = managementScope.manageAll
+    ? groups
+    : groups.filter((group) => managementScope.managedGroupIds.includes(group.id));
 
   // Сурагч бүрийн харьяалах group-ийг олох
-  const groupIds = groups.map((g) => g.id);
+  const groupIds = visibleGroups.map((g) => g.id);
   const memberRows = groupIds.length > 0
     ? (await supabase
         .from("student_group_members")
         .select("student_id, group_id")
         .in("group_id", groupIds)).data ?? []
     : [];
+  const visibleStudentIds = new Set(memberRows.map((member) => member.student_id));
 
   const studentGroupMap = new Map<string, string[]>();
   for (const m of memberRows) {
@@ -450,8 +468,13 @@ export async function getExamResults(examId: string) {
       .order("attempt_number", { ascending: false }),
   ]);
 
-  const recipients = recipientsResult.data ?? [];
-  const sessions = sessionsResult.data ?? [];
+  const recipients = (recipientsResult.data ?? []).filter(
+    (recipient) =>
+      managementScope.manageAll || visibleStudentIds.has(recipient.student_id)
+  );
+  const sessions = (sessionsResult.data ?? []).filter(
+    (session) => managementScope.manageAll || visibleStudentIds.has(session.user_id)
+  );
   const latestSessionByStudent = new Map<string, (typeof sessions)[number]>();
 
   for (const session of sessions) {
@@ -474,11 +497,14 @@ export async function getExamResults(examId: string) {
         : latestSession.profiles
       : null;
     const studentGroupIds = studentGroupMap.get(recipient.student_id) ?? [];
-    const studentGroups = groups.filter((g) => studentGroupIds.includes(g.id));
+    const studentGroups = visibleGroups.filter((g) =>
+      studentGroupIds.includes(g.id)
+    );
     const access = getEffectiveExamAccess(
       {
         start_time: exam.start_time,
         end_time: exam.end_time,
+        duration_minutes: exam.duration_minutes,
         max_attempts: exam.max_attempts,
       },
       recipient
@@ -488,10 +514,12 @@ export async function getExamResults(examId: string) {
         start_time: exam.start_time,
         end_time: exam.end_time,
         max_attempts: exam.max_attempts,
+        duration_minutes: exam.duration_minutes,
       },
       recipient,
       latestSessionStatus: latestSession?.status ?? null,
       latestAttemptNumber: latestSession?.attempt_number ?? 0,
+      latestSessionStartedAt: latestSession?.started_at ?? null,
       nowMs,
     });
     const isAttempted = ["submitted", "graded", "timed_out"].includes(
@@ -554,6 +582,7 @@ export async function getExamResults(examId: string) {
       submitted: sessionResults.filter((s) => s.status === "submitted").length,
       graded: sessionResults.filter((s) => s.status === "graded").length,
       absent: sessionResults.filter((s) => s.status === "absent").length,
+      timedOut: sessionResults.filter((s) => s.status === "timed_out").length,
       excused: sessionResults.filter((s) => s.status === "excused").length,
       avgScore,
       passCount,
@@ -562,6 +591,6 @@ export async function getExamResults(examId: string) {
           ? Math.round((passCount / attemptedRows.length) * 100)
           : 0,
     },
-    groups,
+    groups: visibleGroups,
   };
 }
