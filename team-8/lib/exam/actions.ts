@@ -24,14 +24,25 @@ import {
   getAllowedSubjectIds,
 } from "@/lib/teacher/permissions";
 
+function toUlaanbaatarTimestamp(rawValue: FormDataEntryValue | null) {
+  const value = String(rawValue ?? "").trim();
+  if (!value) return null;
+  return `${value}+08:00`;
+}
+
+function parsePositiveInteger(rawValue: FormDataEntryValue | null) {
+  const value = Number.parseInt(String(rawValue ?? "").trim(), 10);
+  return Number.isFinite(value) ? value : null;
+}
+
 export async function createExam(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
 
-  const title = formData.get("title") as string;
-  const description = formData.get("description") as string;
-  const duration_minutes = parseInt(formData.get("duration_minutes") as string);
+  const title = String(formData.get("title") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim();
+  const duration_minutes = parsePositiveInteger(formData.get("duration_minutes"));
   const subject_id = ((formData.get("subject_id") as string) || "").trim() || null;
   const selectedGroupIds = Array.from(
     new Set(
@@ -48,9 +59,8 @@ export async function createExam(formData: FormData) {
       : legacyGroupId
         ? [legacyGroupId]
         : [];
-  // datetime-local input өгөгдлийг UB цагаар хадгалах (+08:00)
-  const start_time = (formData.get("start_time") as string) + "+08:00";
-  const end_time = (formData.get("end_time") as string) + "+08:00";
+  const start_time = toUlaanbaatarTimestamp(formData.get("start_time"));
+  const end_time = toUlaanbaatarTimestamp(formData.get("end_time"));
   const passing_score = parseFloat(formData.get("passing_score") as string) || 60;
   const max_attempts = parseInt(formData.get("max_attempts") as string) || 1;
   const shuffle_questions = formData.get("shuffle_questions") === "on";
@@ -60,7 +70,13 @@ export async function createExam(formData: FormData) {
     return { error: "Бүх талбарыг бөглөнө үү" };
   }
 
-  if (new Date(start_time).getTime() >= new Date(end_time).getTime()) {
+  const startTimeMs = new Date(start_time).getTime();
+  const endTimeMs = new Date(end_time).getTime();
+  if (Number.isNaN(startTimeMs) || Number.isNaN(endTimeMs)) {
+    return { error: "Нээгдэх эсвэл хаагдах хугацаа буруу байна" };
+  }
+
+  if (startTimeMs >= endTimeMs) {
     return { error: "Хаагдах хугацаа нь нээгдэх хугацаанаас хойш байх ёстой" };
   }
   if (duration_minutes <= 0) {
@@ -186,8 +202,8 @@ export async function updateExam(examId: string, formData: FormData) {
     return { error: "Нийтлэгдсэн шалгалтыг өөрчлөх боломжгүй" };
   }
 
-  const start_time = (formData.get("start_time") as string) + "+08:00";
-  const end_time = (formData.get("end_time") as string) + "+08:00";
+  const start_time = toUlaanbaatarTimestamp(formData.get("start_time"));
+  const end_time = toUlaanbaatarTimestamp(formData.get("end_time"));
   const subject_id = ((formData.get("subject_id") as string) || "").trim() || null;
   const selectedGroupIds = Array.from(
     new Set(
@@ -205,12 +221,22 @@ export async function updateExam(examId: string, formData: FormData) {
         ? [legacyGroupId]
         : [];
 
-  if (new Date(start_time).getTime() >= new Date(end_time).getTime()) {
+  if (!start_time || !end_time) {
+    return { error: "Нээгдэх болон хаагдах хугацааг бүрэн оруулна уу" };
+  }
+
+  const startTimeMs = new Date(start_time).getTime();
+  const endTimeMs = new Date(end_time).getTime();
+  if (Number.isNaN(startTimeMs) || Number.isNaN(endTimeMs)) {
+    return { error: "Нээгдэх эсвэл хаагдах хугацаа буруу байна" };
+  }
+
+  if (startTimeMs >= endTimeMs) {
     return { error: "Хаагдах хугацаа нь нээгдэх хугацаанаас хойш байх ёстой" };
   }
 
-  const durationMinutes = parseInt(formData.get("duration_minutes") as string);
-  if (durationMinutes <= 0) {
+  const durationMinutes = parsePositiveInteger(formData.get("duration_minutes"));
+  if (!durationMinutes || durationMinutes <= 0) {
     return { error: "Шалгалтын үргэлжлэх хугацаа 0-ээс их байх ёстой" };
   }
 
@@ -256,6 +282,9 @@ export async function updateExam(examId: string, formData: FormData) {
   }
 
   const title = String(formData.get("title") || "").trim();
+  if (!title) {
+    return { error: "Шалгалтын нэрээ бөглөнө үү" };
+  }
   for (const groupId of groupIds) {
     const conflictError = await getGroupAssignmentConflictError(
       supabase,
