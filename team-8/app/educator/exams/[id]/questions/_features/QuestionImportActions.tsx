@@ -516,9 +516,9 @@ export default function QuestionImportActions({
 
   return (
     <>
-      <div className="rounded-lg border bg-muted/30 p-4">
+      <div className="mt-10 rounded-lg border bg-muted/30 p-4">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1">
+          <div className="space-y-1 sm:max-w-[60%]">
             <h3 className="font-semibold">Асуултын сан ашиглах</h3>
             <p className="text-sm text-muted-foreground">
               Өмнө үүсгэсэн асуултуудаа сангаас эсвэл file-аар энэ шалгалт руу
@@ -526,8 +526,8 @@ export default function QuestionImportActions({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button asChild variant="outline">
+          <div className="flex items-center gap-2 sm:flex-nowrap">
+            <Button asChild variant="outline" size="sm" className="shrink-0">
               <Link href={`/educator/question-bank?examId=${examId}`}>
                 Сангаас оруулах
               </Link>
@@ -535,7 +535,12 @@ export default function QuestionImportActions({
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" disabled={isParsing || isImporting}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  disabled={isParsing || isImporting}
+                >
                   {isParsing ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
