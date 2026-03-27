@@ -28,6 +28,13 @@ export default async function ExamQuestionsPage({ params }: Props) {
 
   if (!exam) notFound();
 
+  const backHref = exam.is_published
+    ? "/educator/exams"
+    : `/educator/exams/${id}/edit`;
+  const backLabel = exam.is_published
+    ? "Шалгалтын жагсаалт руу буцах"
+    : "Шалгалтын мэдээлэл рүү буцах";
+
   const readiness = await getExamReadiness(id, {
     exam: {
       id: exam.id,
@@ -55,11 +62,11 @@ export default async function ExamQuestionsPage({ params }: Props) {
       <div className="flex items-start justify-between">
         <div className="space-y-1">
           <Link
-            href="/educator"
+            href={backHref}
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-3 w-3" />
-            Буцах
+            {backLabel}
           </Link>
           <h2 className="text-2xl font-bold tracking-tight">{exam.title}</h2>
           <div className="flex items-center gap-2">

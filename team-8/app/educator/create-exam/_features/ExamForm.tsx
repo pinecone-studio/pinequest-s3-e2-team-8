@@ -51,9 +51,108 @@ type FieldErrors = {
   endDate?: string;
   endTime?: string;
   duration?: string;
+  activeDays?: string;
 };
 
 const weekDays = ["Ня", "Да", "Мя", "Лх", "Пү", "Ба", "Бя"];
+
+type ExamDraft = {
+  title: string;
+  subjectId: string;
+  selectedGroupIds: string[];
+  startDate: string;
+  startClock: string;
+  endDate: string;
+  endClock: string;
+  durationMinutes: string;
+  activeDays: string;
+  description: string;
+  passingScore: string;
+  maxAttempts: string;
+  shuffleQuestions: boolean;
+  shuffleOptions: boolean;
+};
+
+const CREATE_EXAM_DRAFT_STORAGE_KEY = "educator:create-exam:draft:v2";
+
+function parseExamDraft(rawValue: string | null): ExamDraft | null {
+  if (!rawValue) return null;
+
+  try {
+    const parsed = JSON.parse(rawValue) as Partial<ExamDraft>;
+
+    return {
+      title: typeof parsed.title === "string" ? parsed.title : "",
+      subjectId:
+        typeof parsed.subjectId === "string" ? parsed.subjectId : "__none",
+      selectedGroupIds: Array.isArray(parsed.selectedGroupIds)
+        ? parsed.selectedGroupIds.filter(
+            (groupId): groupId is string => typeof groupId === "string"
+          )
+        : [],
+      startDate: typeof parsed.startDate === "string" ? parsed.startDate : "",
+      startClock:
+        typeof parsed.startClock === "string" ? parsed.startClock : "",
+      endDate: typeof parsed.endDate === "string" ? parsed.endDate : "",
+      endClock: typeof parsed.endClock === "string" ? parsed.endClock : "",
+      durationMinutes:
+        typeof parsed.durationMinutes === "string" ? parsed.durationMinutes : "",
+      activeDays:
+        typeof parsed.activeDays === "string" && parsed.activeDays
+          ? parsed.activeDays
+          : "1",
+      description:
+        typeof parsed.description === "string" ? parsed.description : "",
+      passingScore:
+        typeof parsed.passingScore === "string" ? parsed.passingScore : "",
+      maxAttempts:
+        typeof parsed.maxAttempts === "string" && parsed.maxAttempts
+          ? parsed.maxAttempts
+          : "1",
+      shuffleQuestions: Boolean(parsed.shuffleQuestions),
+      shuffleOptions: Boolean(parsed.shuffleOptions),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getAutoEndDateTime(
+  startDate: string,
+  startClock: string,
+  activeDays: string
+) {
+  const safeActiveDays = Number(activeDays);
+  if (!startDate || !startClock || !Number.isInteger(safeActiveDays) || safeActiveDays <= 0) {
+    return null;
+  }
+
+  const start = new Date(`${startDate}T${startClock}`);
+  if (Number.isNaN(start.getTime())) return null;
+
+  const end = new Date(start);
+  end.setDate(end.getDate() + safeActiveDays);
+
+  return {
+    date: `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`,
+    time: `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`,
+  };
+}
+
+function formatMinutesLabel(totalMinutes: number) {
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) {
+    return "Оруулаагүй";
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const parts = [
+    hours > 0 ? `${hours} цаг` : null,
+    minutes > 0 ? `${minutes} минут` : null,
+  ].filter(Boolean);
+
+  return parts.join(" ");
+}
 
 function joinDateTime(date: string, time: string) {
   if (!date || !time) return "";
@@ -199,6 +298,7 @@ export default function ExamForm({
   const [title, setTitle] = useState("");
   const [subjectId, setSubjectId] = useState("__none");
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+  const [description, setDescription] = useState("");
   const [startDate, setStartDate] = useState("");
   const [startClock, setStartClock] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -215,14 +315,27 @@ export default function ExamForm({
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   });
   const [durationMinutes, setDurationMinutes] = useState("");
+  const [activeDays, setActiveDays] = useState("1");
+  const [passingScore, setPassingScore] = useState("");
+  const [maxAttempts, setMaxAttempts] = useState("1");
+  const [shuffleQuestions, setShuffleQuestions] = useState(false);
+  const [shuffleOptions, setShuffleOptions] = useState(false);
+  const [isDraftReady, setIsDraftReady] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const startDatePickerRef = useRef<HTMLDivElement | null>(null);
   const startTimePickerRef = useRef<HTMLDivElement | null>(null);
   const endDatePickerRef = useRef<HTMLDivElement | null>(null);
   const endTimePickerRef = useRef<HTMLDivElement | null>(null);
+  const hasRestoredDraftRef = useRef(false);
 
   const startTime = joinDateTime(startDate, startClock);
-  const endTime = joinDateTime(endDate, endClock);
+  const autoEnd = useMemo(
+    () => getAutoEndDateTime(startDate, startClock, activeDays),
+    [activeDays, startClock, startDate]
+  );
+  const calculatedEndDate = autoEnd?.date ?? "";
+  const calculatedEndClock = autoEnd?.time ?? "";
+  const endTime = joinDateTime(calculatedEndDate, calculatedEndClock);
   const startTimeParts = splitTimeParts(startClock);
   const endTimeParts = splitTimeParts(endClock);
   const startCalendarDays = buildCalendarDays(startMonth);
@@ -254,6 +367,109 @@ export default function ExamForm({
     };
   }, [openPicker]);
 
+  useEffect(() => {
+    if (hasRestoredDraftRef.current) return;
+
+    const storedDraft = parseExamDraft(
+      window.sessionStorage.getItem(CREATE_EXAM_DRAFT_STORAGE_KEY)
+    );
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) return;
+
+      if (storedDraft) {
+        const restoredSubjectId = storedDraft.subjectId || "__none";
+        const allowedGroupIds = new Set(
+          groups
+            .filter(
+              (group) =>
+                restoredSubjectId !== "__none" &&
+                (group.allowed_subject_ids.length === 0 ||
+                  group.allowed_subject_ids.includes(restoredSubjectId))
+            )
+            .map((group) => group.id)
+        );
+
+        setTitle(storedDraft.title);
+        setSubjectId(restoredSubjectId);
+        setSelectedGroupIds(
+          storedDraft.selectedGroupIds.filter((groupId) =>
+            allowedGroupIds.has(groupId)
+          )
+        );
+        setDescription(storedDraft.description);
+        setStartDate(storedDraft.startDate);
+        setStartClock(storedDraft.startClock);
+        setEndDate(storedDraft.endDate);
+        setEndClock(storedDraft.endClock);
+        setDurationMinutes(storedDraft.durationMinutes);
+        setActiveDays(storedDraft.activeDays);
+        setPassingScore(storedDraft.passingScore);
+        setMaxAttempts(storedDraft.maxAttempts);
+        setShuffleQuestions(storedDraft.shuffleQuestions);
+        setShuffleOptions(storedDraft.shuffleOptions);
+
+        if (storedDraft.startDate) {
+          setStartMonth(storedDraft.startDate.slice(0, 7));
+        }
+
+        if (storedDraft.endDate) {
+          setEndMonth(storedDraft.endDate.slice(0, 7));
+        }
+      }
+
+      hasRestoredDraftRef.current = true;
+      setIsDraftReady(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [groups]);
+
+  useEffect(() => {
+    if (!isDraftReady) return;
+
+    const draft: ExamDraft = {
+      title,
+      subjectId,
+      selectedGroupIds,
+      startDate,
+      startClock,
+      endDate,
+      endClock,
+      durationMinutes,
+      activeDays,
+      description,
+      passingScore,
+      maxAttempts,
+      shuffleQuestions,
+      shuffleOptions,
+    };
+
+    window.sessionStorage.setItem(
+      CREATE_EXAM_DRAFT_STORAGE_KEY,
+      JSON.stringify(draft)
+    );
+  }, [
+    title,
+    subjectId,
+    selectedGroupIds,
+    startDate,
+    startClock,
+    endDate,
+    endClock,
+    durationMinutes,
+    activeDays,
+    description,
+    passingScore,
+    maxAttempts,
+    shuffleQuestions,
+    shuffleOptions,
+    isDraftReady,
+  ]);
+
   function clearFieldError(field: keyof FieldErrors) {
     setFieldErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
   }
@@ -266,6 +482,11 @@ export default function ExamForm({
   function updateDurationMinutes(value: string) {
     setDurationMinutes(value);
     if (value && Number(value) > 0) clearFieldError("duration");
+  }
+
+  function updateActiveDays(value: string) {
+    setActiveDays(value);
+    if (value && Number(value) > 0) clearFieldError("activeDays");
   }
 
   function updateStartDate(value: string) {
@@ -294,7 +515,7 @@ export default function ExamForm({
     if (!startTime || !endTime) {
       return {
         minutes: "",
-        text: "Өдөр, цагаа бүрэн сонгоно уу.",
+        text: "Эхлэх өдөр, цаг болон идэвхтэй өдрөө бүрэн оруулна уу.",
         invalid: false,
       };
     }
@@ -319,9 +540,11 @@ export default function ExamForm({
       };
     }
 
-    const hours = Math.floor(diff / 60);
+    const days = Math.floor(diff / (24 * 60));
+    const hours = Math.floor((diff % (24 * 60)) / 60);
     const minutes = diff % 60;
     const parts = [
+      days > 0 ? `${days} өдөр` : null,
       hours > 0 ? `${hours} цаг` : null,
       minutes > 0 ? `${minutes} минут` : null,
     ].filter(Boolean);
@@ -431,15 +654,20 @@ export default function ExamForm({
   async function handleSubmit(formData: FormData) {
     const nextErrors: FieldErrors = {};
     const nextTitle = String(formData.get("title") || "").trim();
+    const derivedEnd = getAutoEndDateTime(startDate, startClock, activeDays);
 
     if (!nextTitle) nextErrors.title = "Шалгалтын нэрээ бөглөнө үү.";
     if (subjectId === "__none") nextErrors.subject = "Хичээлээ сонгоно уу.";
     if (!startDate) nextErrors.startDate = "Эхлэх өдрөө сонгоно уу.";
     if (!startClock) nextErrors.startTime = "Эхлэх цагаа оруулна уу.";
-    if (!endDate) nextErrors.endDate = "Дуусах өдрөө сонгоно уу.";
-    if (!endClock) nextErrors.endTime = "Дуусах цагаа оруулна уу.";
     if (!durationMinutes || Number(durationMinutes) <= 0) {
       nextErrors.duration = "Шалгалтын хугацааг зөв оруулна уу.";
+    }
+    if (!activeDays || Number(activeDays) <= 0) {
+      nextErrors.activeDays = "Идэвхтэй байх өдрийн тоог оруулна уу.";
+    }
+    if (!derivedEnd && startDate && startClock && activeDays) {
+      nextErrors.activeDays = "Идэвхтэй өдрийн утга буруу байна.";
     }
 
     if (Object.keys(nextErrors).length > 0) {
@@ -453,7 +681,10 @@ export default function ExamForm({
     setFieldErrors({});
 
     formData.set("start_time", startTime);
-    formData.set("end_time", endTime);
+    formData.set(
+      "end_time",
+      derivedEnd ? joinDateTime(derivedEnd.date, derivedEnd.time) : ""
+    );
     formData.set("duration_minutes", durationMinutes);
 
     const result = await createExam(formData);
@@ -468,6 +699,10 @@ export default function ExamForm({
     Number(durationMinutes) > 0 &&
     (durationSummary.minutes === "" ||
       Number(durationMinutes) <= Number(durationSummary.minutes));
+  const examDurationLabel =
+    durationMinutes && Number(durationMinutes) > 0
+      ? formatMinutesLabel(Number(durationMinutes))
+      : "Оруулаагүй";
 
   return (
     <Card className="max-w-4xl">
@@ -627,6 +862,8 @@ export default function ExamForm({
               name="description"
               placeholder="Шалгалтын тухай товч мэдээлэл..."
               rows={3}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
             />
           </div>
 
@@ -819,22 +1056,23 @@ export default function ExamForm({
               </div>
 
               <div className="space-y-3 rounded-xl border bg-background p-4">
-                <p className="text-sm font-medium">Дуусах</p>
+                <p className="text-sm font-medium">Дуусах (автоматаар)</p>
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="relative" ref={endDatePickerRef}>
                     <button
                       type="button"
+                      disabled
                       onClick={() =>
                         setOpenPicker((prev) =>
                           prev === "end-date" ? null : "end-date"
                         )
                       }
-                      className={`flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      className={`flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out disabled:cursor-not-allowed disabled:opacity-70 ${
                         fieldErrors.endDate ? "border-destructive bg-destructive/5" : ""
                       }`}
                     >
-                      <span>{formatDateLabel(endDate)}</span>
+                      <span>{formatDateLabel(calculatedEndDate)}</span>
                       <CalendarDays className="h-4 w-4 text-muted-foreground" />
                     </button>
 
@@ -900,16 +1138,17 @@ export default function ExamForm({
                   <div className="relative" ref={endTimePickerRef}>
                     <button
                       type="button"
+                      disabled
                       onClick={() =>
                         setOpenPicker((prev) =>
                           prev === "end-time" ? null : "end-time"
                         )
                       }
-                      className={`flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out hover:-translate-y-px hover:shadow-sm active:translate-y-0 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      className={`flex h-11 w-full items-center justify-between rounded-lg border px-3 text-left text-sm transition-[transform,box-shadow,background-color,color,border-color] duration-150 ease-out disabled:cursor-not-allowed disabled:opacity-70 ${
                         fieldErrors.endTime ? "border-destructive bg-destructive/5" : ""
                       }`}
                     >
-                      <span>{endClock || "Цаг сонгох"}</span>
+                      <span>{calculatedEndClock || "Цаг автоматаар гарна"}</span>
                       <Clock3 className="h-4 w-4 text-muted-foreground" />
                     </button>
 
@@ -993,6 +1232,9 @@ export default function ExamForm({
                 <p className="text-sm text-muted-foreground">
                   {formatDateTime(endTime)}
                 </p>
+                <p className="text-xs text-muted-foreground">
+                  Эхлэх цаг болон идэвхтэй өдрийн тооноос автоматаар бодогдоно.
+                </p>
               </div>
             </div>
 
@@ -1001,28 +1243,56 @@ export default function ExamForm({
                 <Clock3 className="h-4 w-4 text-muted-foreground" />
                 <p className="text-sm font-medium">Шалгалтын хугацаа</p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="duration_input">Шалгалтын хугацаа (минут) *</Label>
-                <Input
-                  id="duration_input"
-                  type="number"
-                  min="5"
-                  max="300"
-                  placeholder="Жишээ: 45"
-                  value={durationMinutes}
-                  onChange={(e) => updateDurationMinutes(e.target.value)}
-                  className={fieldErrors.duration ? "border-destructive" : undefined}
-                  required
-                />
-                {fieldErrors.duration && (
-                  <p className="text-sm text-destructive">{fieldErrors.duration}</p>
-                )}
-                {durationMinutes && durationSummary.minutes && Number(durationMinutes) > Number(durationSummary.minutes) && (
-                  <p className="text-sm text-destructive">
-                    Шалгалтын хугацаа нь нээлттэй цонхноос ({durationSummary.text}) урт байж болохгүй.
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="duration_input">Шалгалтын хугацаа (минут) *</Label>
+                  <Input
+                    id="duration_input"
+                    type="number"
+                    min="5"
+                    max="300"
+                    placeholder="Жишээ: 45"
+                    value={durationMinutes}
+                    onChange={(e) => updateDurationMinutes(e.target.value)}
+                    className={fieldErrors.duration ? "border-destructive" : undefined}
+                    required
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Автоматаар тооцоолсон хугацаа: {examDurationLabel}
                   </p>
-                )}
+                  {fieldErrors.duration && (
+                    <p className="text-sm text-destructive">{fieldErrors.duration}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="active_days">Идэвхтэй байх өдөр *</Label>
+                  <Input
+                    id="active_days"
+                    name="active_days"
+                    type="number"
+                    min="1"
+                    step="1"
+                    max="30"
+                    placeholder="Жишээ: 3"
+                    value={activeDays}
+                    onChange={(e) => updateActiveDays(e.target.value)}
+                    className={fieldErrors.activeDays ? "border-destructive" : undefined}
+                    required
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Эхлэх цагаас хойш хэд хоног нээлттэй байхыг заана.
+                  </p>
+                  {fieldErrors.activeDays && (
+                    <p className="text-sm text-destructive">{fieldErrors.activeDays}</p>
+                  )}
+                </div>
               </div>
+              {durationMinutes && durationSummary.minutes && Number(durationMinutes) > Number(durationSummary.minutes) && (
+                <p className="text-sm text-destructive">
+                  Шалгалтын хугацаа нь нээлттэй цонхноос ({durationSummary.text}) урт байж болохгүй.
+                </p>
+              )}
               <p
                 className={`text-sm ${
                   durationSummary.invalid
@@ -1045,6 +1315,8 @@ export default function ExamForm({
                 min="0"
                 max="100"
                 placeholder="60"
+                value={passingScore}
+                onChange={(e) => setPassingScore(e.target.value)}
               />
             </div>
             <div className="space-y-2">
@@ -1056,7 +1328,8 @@ export default function ExamForm({
                 min="1"
                 max="10"
                 placeholder="1"
-                defaultValue="1"
+                value={maxAttempts}
+                onChange={(e) => setMaxAttempts(e.target.value)}
               />
             </div>
           </div>
@@ -1068,6 +1341,8 @@ export default function ExamForm({
                 id="shuffle_questions"
                 name="shuffle_questions"
                 className="h-4 w-4 rounded border"
+                checked={shuffleQuestions}
+                onChange={(e) => setShuffleQuestions(e.target.checked)}
               />
               <Label
                 htmlFor="shuffle_questions"
@@ -1082,6 +1357,8 @@ export default function ExamForm({
                 id="shuffle_options"
                 name="shuffle_options"
                 className="h-4 w-4 rounded border"
+                checked={shuffleOptions}
+                onChange={(e) => setShuffleOptions(e.target.checked)}
               />
               <Label
                 htmlFor="shuffle_options"
