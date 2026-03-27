@@ -39,6 +39,22 @@ function getGroupTypeLabel(groupType: string) {
   return groupType;
 }
 
+function getCheckAction(checkKey: string, examId: string) {
+  if (["subject", "schedule", "duration"].includes(checkKey)) {
+    return { href: `/educator/exams/${examId}/edit`, label: "Тохиргоо засах" };
+  }
+  if (["questions", "grading"].includes(checkKey)) {
+    return { href: `/educator/exams/${examId}/questions`, label: "Асуулт нэмэх" };
+  }
+  if (["assignments", "assignment_scope", "students"].includes(checkKey)) {
+    return { href: "/educator/groups", label: "Бүлэг оноох" };
+  }
+  if (checkKey === "conflicts") {
+    return { href: `/educator/exams/${examId}/edit`, label: "Хуваарь өөрчлөх" };
+  }
+  return null;
+}
+
 export default function ExamReadinessPanel({
   readiness,
   examId,
@@ -52,6 +68,8 @@ export default function ExamReadinessPanel({
   const actionableChecks = readiness.checks.filter(
     (check) => check.status !== "complete"
   );
+  const blockedChecks = actionableChecks.filter((check) => check.status === "blocked");
+  const warningChecks = actionableChecks.filter((check) => check.status === "warning");
 
   return (
     <Card className={cn("border-border/80", className)}>
@@ -71,6 +89,20 @@ export default function ExamReadinessPanel({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
+        {actionableChecks.length > 0 && (
+          <div className="rounded-lg border border-amber-300/70 bg-amber-50/30 p-3">
+            <p className="text-sm font-medium">Нийтлэхийн тулд эхлээд эдгээрийг засна уу</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {blockedChecks.length > 0
+                ? `${blockedChecks.length} заавал засах асуудал`
+                : "Заавал засах асуудалгүй"}
+              {warningChecks.length > 0
+                ? ` · ${warningChecks.length} шалгахад илүүдэхгүй анхааруулга`
+                : ""}
+            </p>
+          </div>
+        )}
+
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-lg border bg-muted/20 p-3">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -132,6 +164,14 @@ export default function ExamReadinessPanel({
                 <div className="space-y-0.5">
                   <p className="text-sm font-medium">{check.label}</p>
                   <p className="text-sm text-muted-foreground">{check.description}</p>
+                  {getCheckAction(check.key, examId) && (
+                    <Link
+                      href={getCheckAction(check.key, examId)!.href}
+                      className="inline-flex pt-1 text-sm text-foreground underline-offset-4 hover:underline"
+                    >
+                      {getCheckAction(check.key, examId)!.label}
+                    </Link>
+                  )}
                 </div>
               </div>
             ))}

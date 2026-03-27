@@ -65,16 +65,24 @@ export default async function NewQuestionEditor({
 
   return (
     <div className="w-full max-w-5xl mx-auto p-6 space-y-6 bg-gray-50/30">
+      {/* Back button
+      <button
+        onClick={() => window.history.back()}
+        className="flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-[#4F9DF7] transition-colors group"
+      >
+        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+        Буцах
+      </button> */}
       <div className="space-y-1">
         <div className="flex gap-1">
           {" "}
-          <p className="text-xl font-bold text-slate-900">
+          <p className="text-2xl font-bold text-slate-900">
             {selectedType.title}
           </p>
-          <h1 className="text-xl font-bold text-slate-900"> асуулт үүсгэх</h1>
+          <h1 className="text-2xl font-bold text-slate-900">үүсгэх</h1>
         </div>
 
-        <p className="text-sm text-slate-500">Асуултын мэдээлэл бөглөнө үү.</p>
+        <p className="text-sm text-slate-500">Дараах талбаруудыг бөглөнө үү.</p>
       </div>
 
       <div className="bg-white p-6 rounded-3xl border-2 border-[#E5E7EB]/50 shadow-sm">
