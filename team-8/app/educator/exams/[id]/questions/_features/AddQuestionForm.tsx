@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, type ClipboardEvent } from "react";
+import { Check, ChevronDown, Plus, PlusCircle, Trash2 } from "lucide-react";
 import { addQuestion } from "@/lib/question/actions";
 import { parsePastedQuestionText } from "@/lib/question/paste";
 import MathContent from "@/components/math/MathContent";
 import LatexShortcutPanel from "@/components/math/LatexShortcutPanel";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { PlusCircle, Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { QuestionPassage, QuestionType } from "@/types";
 
 interface Props {
@@ -30,36 +30,24 @@ interface MatchingPair {
   right: string;
 }
 
-const questionTypes: { value: QuestionType; label: string; hint: string }[] = [
-  {
-    value: "multiple_choice",
-    label: "Сонгох",
-    hint: "Нэг зөв хариулттай тест",
-  },
-  {
-    value: "multiple_response",
-    label: "Олон сонголттой",
-    hint: "Хэд хэдэн зөв хариулттай тест",
-  },
-  {
-    value: "fill_blank",
-    label: "Нөхөх",
-    hint: "Хоосон зайг бөглөх",
-  },
-  {
-    value: "essay",
-    label: "Задгай асуулт / Эссэ",
-    hint: "Багш гараар шалгана",
-  },
-  {
-    value: "matching",
-    label: "Холбох",
-    hint: "2 баганын харгалзуулах асуулт",
-  },
+const defaultSelectionOptions = ["", "", "", ""];
+
+const questionTypes: { value: QuestionType; label: string }[] = [
+  { value: "multiple_choice", label: "Нэг сонголттой" },
+  { value: "multiple_response", label: "Олон сонголттой" },
+  { value: "fill_blank", label: "Нөхөх" },
+  { value: "essay", label: "Эссэ" },
+  { value: "matching", label: "Холбох" },
 ];
 
 function createEmptyMatchingPair(): MatchingPair {
   return { left: "", right: "" };
+}
+
+function buildSelectionOptions(options: string[]) {
+  return options.length >= 4
+    ? options
+    : [...options, ...Array.from({ length: 4 - options.length }, () => "")];
 }
 
 export default function AddQuestionForm({ examId, passages }: Props) {
@@ -71,7 +59,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
   });
   const [selectedPassageId, setSelectedPassageId] = useState("__none");
   const [content, setContent] = useState("");
-  const [options, setOptions] = useState(["", ""]);
+  const [options, setOptions] = useState(defaultSelectionOptions);
   const [correctAnswer, setCorrectAnswer] = useState("");
   const [multipleCorrectAnswers, setMultipleCorrectAnswers] = useState<string[]>([]);
   const [matchingPairs, setMatchingPairs] = useState<MatchingPair[]>([
@@ -83,18 +71,21 @@ export default function AddQuestionForm({ examId, passages }: Props) {
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  function resetTypeState(nextType: QuestionType) {
-    setType(nextType);
-    setOptions(["", ""]);
-    setCorrectAnswer("");
-    setMultipleCorrectAnswers([]);
-    setMatchingPairs([createEmptyMatchingPair(), createEmptyMatchingPair()]);
-  }
-
   const selectedPassage =
     selectedPassageId === "__none"
       ? null
       : passages.find((passage) => passage.id === selectedPassageId) ?? null;
+
+  const isSelectionType =
+    type === "multiple_choice" || type === "multiple_response";
+
+  function resetTypeState(nextType: QuestionType) {
+    setType(nextType);
+    setOptions(defaultSelectionOptions);
+    setCorrectAnswer("");
+    setMultipleCorrectAnswers([]);
+    setMatchingPairs([createEmptyMatchingPair(), createEmptyMatchingPair()]);
+  }
 
   function getActiveTargetValue() {
     if (activeFormulaTarget.id === "content") {
@@ -132,7 +123,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
     setType(parsed.type);
 
     if (parsed.type === "multiple_choice") {
-      setOptions(parsed.options.length >= 2 ? parsed.options : ["", ""]);
+      setOptions(buildSelectionOptions(parsed.options));
       setCorrectAnswer(parsed.correctAnswer);
       setMultipleCorrectAnswers([]);
       setMatchingPairs([createEmptyMatchingPair(), createEmptyMatchingPair()]);
@@ -140,7 +131,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
     }
 
     if (parsed.type === "multiple_response") {
-      setOptions(parsed.options.length >= 2 ? parsed.options : ["", ""]);
+      setOptions(buildSelectionOptions(parsed.options));
       setCorrectAnswer("");
       setMultipleCorrectAnswers(parsed.multipleCorrectAnswers);
       setMatchingPairs([createEmptyMatchingPair(), createEmptyMatchingPair()]);
@@ -148,14 +139,14 @@ export default function AddQuestionForm({ examId, passages }: Props) {
     }
 
     if (parsed.type === "fill_blank") {
-      setOptions(["", ""]);
+      setOptions(defaultSelectionOptions);
       setCorrectAnswer(parsed.correctAnswer);
       setMultipleCorrectAnswers([]);
       setMatchingPairs([createEmptyMatchingPair(), createEmptyMatchingPair()]);
       return true;
     }
 
-    setOptions(["", ""]);
+    setOptions(defaultSelectionOptions);
     setCorrectAnswer("");
     setMultipleCorrectAnswers([]);
     setMatchingPairs([createEmptyMatchingPair(), createEmptyMatchingPair()]);
@@ -180,7 +171,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
     const removedValue = options[index];
     const nextOptions = options.filter((_, optionIndex) => optionIndex !== index);
 
-    setOptions(nextOptions);
+    setOptions(nextOptions.length >= 2 ? nextOptions : [...nextOptions, ""]);
 
     if (correctAnswer === removedValue) {
       setCorrectAnswer("");
@@ -346,324 +337,378 @@ export default function AddQuestionForm({ examId, passages }: Props) {
   const activeTargetValue = getActiveTargetValue().trim();
 
   return (
-      <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Асуулт нэмэх</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form id="question-form" action={handleSubmit} className="space-y-4">
-          {error && (
-            <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-              {error}
-            </div>
-          )}
+    <div className="rounded-[28px] border border-zinc-200 bg-white p-6 shadow-[0_12px_40px_-18px_rgba(15,23,42,0.16)] md:p-8">
+      <form id="question-form" action={handleSubmit} className="space-y-6">
+        <div className="flex items-center gap-3 text-zinc-950">
+          <Plus className="h-5 w-5" />
+          <h2 className="text-2xl font-semibold tracking-tight">Шинэ асуулт</h2>
+        </div>
 
-          {success && (
-            <div className="rounded-md bg-green-500/10 p-3 text-sm text-green-700">
-              Асуулт амжилттай нэмэгдлээ!
-            </div>
-          )}
+        {error ? (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        ) : null}
 
-          <div className="grid gap-3 sm:grid-cols-[1fr_80px]">
-            <div className="space-y-1.5">
-              <Label>Төрөл</Label>
-              <Select
-                value={type}
-                onValueChange={(value) => resetTypeState(value as QuestionType)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {questionTypes.map((questionType) => (
-                    <SelectItem key={questionType.value} value={questionType.value}>
-                      {questionType.label}
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        — {questionType.hint}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+        {success ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            Асуулт амжилттай нэмэгдлээ.
+          </div>
+        ) : null}
 
-            <div className="space-y-1.5">
-              <Label htmlFor="question-points">Оноо</Label>
-              <Input
-                id="question-points"
-                type="number"
-                min={1}
-                max={100}
-                value={points}
-                onChange={(event) => setPoints(Math.max(1, Number(event.target.value) || 1))}
-                className="text-center"
-              />
-            </div>
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_120px]">
+          <div className="space-y-2.5">
+            <Label className="text-sm font-medium text-zinc-700">Төрөл</Label>
+            <Select
+              value={type}
+              onValueChange={(value) => resetTypeState(value as QuestionType)}
+            >
+              <SelectTrigger className="h-12 rounded-2xl border-zinc-200 bg-white px-4 text-sm shadow-none focus-visible:ring-zinc-200">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="rounded-2xl border-zinc-200 bg-white">
+                {questionTypes.map((questionType) => (
+                  <SelectItem key={questionType.value} value={questionType.value}>
+                    {questionType.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          {passages.length > 0 && (
-            <div className="space-y-2">
-              <Label>Нийтлэг өгөгдөл / эх материал</Label>
-              <Select value={selectedPassageId} onValueChange={setSelectedPassageId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Эх материал холбохгүй" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">Холбохгүй</SelectItem>
-                  {passages.map((passage, index) => (
-                    <SelectItem key={passage.id} value={passage.id}>
-                      {passage.title || `Материал ${index + 1}`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Зураг, хүснэгт, текст эсвэл нэг өгөгдлөөс олон асуулт асуух үед энд холбоно.
+          <div className="space-y-2.5">
+            <Label
+              htmlFor="question-points"
+              className="text-sm font-medium text-zinc-700"
+            >
+              Оноо
+            </Label>
+            <Input
+              id="question-points"
+              type="number"
+              min={1}
+              max={100}
+              value={points}
+              onChange={(event) =>
+                setPoints(Math.max(1, Number(event.target.value) || 1))
+              }
+              className="h-12 rounded-2xl border-zinc-200 bg-white px-4 text-center text-sm shadow-none focus-visible:ring-zinc-200"
+            />
+          </div>
+        </div>
+
+        {passages.length > 0 ? (
+          <div className="space-y-2.5">
+            <Label className="text-sm font-medium text-zinc-700">
+              Нийтлэг өгөгдөл / эх материал
+            </Label>
+            <Select value={selectedPassageId} onValueChange={setSelectedPassageId}>
+              <SelectTrigger className="h-12 rounded-2xl border-zinc-200 bg-white px-4 text-sm shadow-none focus-visible:ring-zinc-200">
+                <SelectValue placeholder="Эх материал холбохгүй" />
+              </SelectTrigger>
+              <SelectContent className="rounded-2xl border-zinc-200 bg-white">
+                <SelectItem value="__none">Холбохгүй</SelectItem>
+                {passages.map((passage, index) => (
+                  <SelectItem key={passage.id} value={passage.id}>
+                    {passage.title || `Материал ${index + 1}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
+
+        {selectedPassage ? (
+          <div className="space-y-3 rounded-[24px] border border-dashed border-zinc-200 bg-zinc-50 p-4">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-zinc-950">
+                Сонгосон эх материал
+              </p>
+              {selectedPassage.title ? (
+                <p className="text-sm text-zinc-500">{selectedPassage.title}</p>
+              ) : null}
+            </div>
+            <MathContent
+              html={selectedPassage.content_html}
+              text={selectedPassage.content}
+              className="prose prose-sm max-w-none text-zinc-900"
+            />
+            {selectedPassage.image_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={selectedPassage.image_url}
+                alt="Сонгосон эх материалын зураг"
+                className="max-h-56 rounded-2xl border border-zinc-200"
+              />
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="space-y-3 rounded-[24px] border border-zinc-200 bg-zinc-50/80 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-zinc-950">Томьёоны хэрэгсэл</p>
+              <p className="text-sm text-zinc-500">
+                Хуучин shortcut panel-аар томьёогоо сонгож, идэвхтэй талбартаа
+                шууд оруулна.
               </p>
             </div>
-          )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-10 rounded-full border-zinc-300 px-4 text-sm"
+              onClick={() => setIsFormulaToolOpen((prev) => !prev)}
+            >
+              {isFormulaToolOpen ? "Томьёо хаах" : "𝑓(x) Томьёо"}
+            </Button>
+          </div>
 
-          {selectedPassage && (
-            <div className="space-y-2 rounded-xl border border-dashed bg-muted/20 p-4">
-              <p className="text-sm font-medium">Сонгосон эх материал</p>
-              {selectedPassage.title && (
-                <p className="text-sm text-muted-foreground">{selectedPassage.title}</p>
-              )}
-              <MathContent
-                html={selectedPassage.content_html}
-                text={selectedPassage.content}
-                className="prose max-w-none text-sm leading-6 text-foreground"
-              />
-              {selectedPassage.image_url && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={selectedPassage.image_url}
-                  alt="Сонгосон эх материалын зураг"
-                  className="max-h-56 rounded-lg border"
-                />
-              )}
-            </div>
-          )}
-
-          {isFormulaToolOpen && (
-            <div id="question-formula-tool" className="space-y-3">
+          {isFormulaToolOpen ? (
+            <div className="space-y-4">
               <LatexShortcutPanel
                 targetId={activeFormulaTarget.id}
                 targetLabel={activeFormulaTarget.label}
                 title="Томьёоны самбар"
-                description="Асуулт, сонголт, зөв хариулт эсвэл холбох мөр дээр дарж байгаад томьёогоо шууд оруулна."
+                description="Асуулт, хариулт эсвэл холбох мөр дээр дарж байгаад томьёогоо шууд оруулна."
               />
-              {activeTargetValue && (
-                <div className="rounded-xl border bg-muted/10 p-4">
+
+              {activeTargetValue ? (
+                <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium">
-                      Идэвхтэй талбарын урьдчилан харах
+                    <p className="text-sm font-semibold text-zinc-950">
+                      Идэвхтэй талбарын preview
                     </p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-zinc-500">
                       {activeFormulaTarget.label}
                     </p>
                   </div>
-                  <div className="mt-3">
+                  <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">
                     <MathContent
                       text={activeTargetValue}
-                      className="prose max-w-none text-sm leading-6 text-foreground"
+                      className="prose prose-sm max-w-none text-zinc-900"
                     />
                   </div>
                 </div>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
+        </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="content">Асуулт</Label>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 text-xs text-muted-foreground"
-                onClick={() => setIsFormulaToolOpen((prev) => !prev)}
-              >
-                {isFormulaToolOpen ? "Томьёо ✕" : "𝑓(x) Томьёо"}
-              </Button>
+        <div className="space-y-2.5">
+          <Label htmlFor="content" className="text-sm font-medium text-zinc-700">
+            Асуулт
+          </Label>
+          <Textarea
+            id="content"
+            name="content"
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            onPaste={handleContentPaste}
+            onFocus={() =>
+              setActiveFormulaTarget({
+                id: "content",
+                label: "Асуулт",
+              })
+            }
+            placeholder="Асуултаа энд бичнэ үү..."
+            rows={4}
+            required
+            className="min-h-[180px] rounded-[24px] border-zinc-200 bg-white px-4 py-3 text-base leading-7 shadow-none focus-visible:ring-zinc-200"
+          />
+        </div>
+
+        {isSelectionType ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Label className="text-sm font-medium text-zinc-700">
+                Хариултууд
+              </Label>
+              <span className="text-sm text-zinc-400">
+                (Зөв хариултыг сонгоно уу)
+              </span>
             </div>
-            <Textarea
-              id="content"
-              name="content"
-              value={content}
-              onChange={(event) => setContent(event.target.value)}
-              onPaste={handleContentPaste}
-              onFocus={() =>
-                setActiveFormulaTarget({
-                  id: "content",
-                  label: "Асуулт",
-                })
-              }
-              placeholder="Асуултаа энд бичнэ үү... (paste хийвэл автомат таних)"
-              rows={3}
-              required
-            />
-          </div>
 
-          {content.trim() && (
-            <div className="rounded-lg border bg-muted/10 p-3">
-              <p className="mb-1 text-xs font-medium text-muted-foreground">Урьдчилсан харагдах байдал</p>
-              <MathContent
-                text={content}
-                className="prose max-w-none text-sm leading-6 text-foreground"
-              />
-            </div>
-          )}
+            {options.map((option, index) => {
+              const isSelected =
+                type === "multiple_choice"
+                  ? correctAnswer === option && option.trim() !== ""
+                  : multipleCorrectAnswers.includes(option) &&
+                    option.trim() !== "";
 
-          {(type === "multiple_choice" || type === "multiple_response") && (
-            <div className="space-y-3">
-              <Label>Хариултууд</Label>
-              {options.map((option, index) => {
-                const isChecked =
-                  type === "multiple_choice"
-                    ? correctAnswer === option && option.trim() !== ""
-                    : multipleCorrectAnswers.includes(option) && option.trim() !== "";
-
-                return (
-                  <div key={index} className="flex items-center gap-2">
-                    <input
-                      type={type === "multiple_choice" ? "radio" : "checkbox"}
-                      name={
-                        type === "multiple_choice"
-                          ? "correct_option"
-                          : `correct_option_${index}`
-                      }
-                      checked={isChecked}
-                      onChange={() =>
-                        type === "multiple_choice"
-                          ? setCorrectAnswer(option)
-                          : toggleMultipleAnswer(option)
-                      }
-                      className="h-4 w-4 shrink-0"
-                      disabled={!option.trim()}
-                    />
-                    <Input
-                      id={`option-${index}`}
-                      value={option}
-                      onChange={(event) => updateOption(index, event.target.value)}
-                      onFocus={() =>
-                        setActiveFormulaTarget({
-                          id: `option-${index}`,
-                          label: `Хариулт ${index + 1}`,
-                        })
-                      }
-                      placeholder={`Хариулт ${index + 1}`}
-                    />
-                    {options.length > 2 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeOption(index)}
-                      >
-                        <Trash2 className="h-4 w-4 text-muted-foreground" />
-                      </Button>
-                    )}
-                  </div>
-                );
-              })}
-              <Button type="button" variant="outline" size="sm" onClick={addOption}>
-                <PlusCircle className="mr-2 h-4 w-4" />
-                Хариулт нэмэх
-              </Button>
-            </div>
-          )}
-
-          {type === "fill_blank" && (
-            <div className="space-y-2">
-              <Label htmlFor="fill_blank_answer">Зөв хариулт</Label>
-              <Input
-                id="fill_blank_answer"
-                value={correctAnswer}
-                onChange={(event) => setCorrectAnswer(event.target.value)}
-                onFocus={() =>
-                  setActiveFormulaTarget({
-                    id: "fill_blank_answer",
-                    label: "Нөхөх зөв хариулт",
-                  })
-                }
-                placeholder="Зөв хариултаа бичнэ үү"
-              />
-            </div>
-          )}
-
-          {type === "essay" && (
-            <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
-              Энэ төрлийн асуултыг багш дараа нь гараар шалгана.
-            </div>
-          )}
-
-          {type === "matching" && (
-            <div className="space-y-3">
-              <Label>Холбох мөрүүд</Label>
-              {matchingPairs.map((pair, index) => (
+              return (
                 <div
                   key={index}
-                  className="grid gap-2 md:grid-cols-[1fr_auto_1fr_auto] md:items-center"
+                  className={cn(
+                    "flex items-center gap-3 rounded-2xl border px-3 py-2 transition-colors",
+                    isSelected
+                      ? "border-emerald-300 bg-emerald-50"
+                      : "border-zinc-200 bg-white"
+                  )}
                 >
-                  <Input
-                    id={`matching-left-${index}`}
-                    value={pair.left}
-                    onChange={(event) =>
-                      updateMatchingPair(index, "left", event.target.value)
+                  <button
+                    type="button"
+                    onClick={() =>
+                      type === "multiple_choice"
+                        ? setCorrectAnswer(option)
+                        : toggleMultipleAnswer(option)
                     }
+                    disabled={!option.trim()}
+                    className={cn(
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-colors",
+                      isSelected
+                        ? "border-emerald-500 bg-emerald-500 text-white"
+                        : "border-zinc-300 bg-white text-transparent",
+                      !option.trim() && "cursor-not-allowed opacity-60"
+                    )}
+                  >
+                    <Check className="h-4 w-4" />
+                  </button>
+
+                  <Input
+                    id={`option-${index}`}
+                    value={option}
+                    onChange={(event) => updateOption(index, event.target.value)}
                     onFocus={() =>
                       setActiveFormulaTarget({
-                        id: `matching-left-${index}`,
-                        label: `Холбох мөр ${index + 1} · Зүүн тал`,
+                        id: `option-${index}`,
+                        label: `Хариулт ${index + 1}`,
                       })
                     }
-                    placeholder={`Зүүн тал ${index + 1}`}
+                    placeholder={`Хариулт ${index + 1}`}
+                    className="h-10 border-none bg-transparent px-0 text-base shadow-none focus-visible:ring-0"
                   />
-                  <span className="text-center text-sm text-muted-foreground">→</span>
-                  <Input
-                    id={`matching-right-${index}`}
-                    value={pair.right}
-                    onChange={(event) =>
-                      updateMatchingPair(index, "right", event.target.value)
-                    }
-                    onFocus={() =>
-                      setActiveFormulaTarget({
-                        id: `matching-right-${index}`,
-                        label: `Холбох мөр ${index + 1} · Баруун тал`,
-                      })
-                    }
-                    placeholder={`Баруун тал ${index + 1}`}
-                  />
-                  {matchingPairs.length > 2 && (
+
+                  {options.length > 2 ? (
                     <Button
                       type="button"
                       variant="ghost"
-                      size="icon"
-                      onClick={() => removeMatchingPair(index)}
+                      size="icon-sm"
+                      className="shrink-0 text-zinc-400 hover:text-zinc-950"
+                      onClick={() => removeOption(index)}
                     >
-                      <Trash2 className="h-4 w-4 text-muted-foreground" />
+                      <Trash2 className="h-4 w-4" />
                     </Button>
-                  )}
+                  ) : null}
                 </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={addMatchingPair}
-              >
-                <PlusCircle className="mr-2 h-4 w-4" />
-                Мөр нэмэх
-              </Button>
-            </div>
-          )}
+              );
+            })}
 
-          <Button type="submit" disabled={loading} className="w-full">
-            {loading ? "Нэмж байна..." : "Асуулт нэмэх"}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+            <button
+              type="button"
+              onClick={addOption}
+              className="inline-flex items-center gap-2 text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-950"
+            >
+              <PlusCircle className="h-4 w-4" />
+              Хариулт нэмэх
+            </button>
+          </div>
+        ) : null}
+
+        {type === "fill_blank" ? (
+          <div className="space-y-2.5">
+            <Label
+              htmlFor="fill_blank_answer"
+              className="text-sm font-medium text-zinc-700"
+            >
+              Зөв хариулт
+            </Label>
+            <Input
+              id="fill_blank_answer"
+              value={correctAnswer}
+              onChange={(event) => setCorrectAnswer(event.target.value)}
+              onFocus={() =>
+                setActiveFormulaTarget({
+                  id: "fill_blank_answer",
+                  label: "Зөв хариулт",
+                })
+              }
+              placeholder="Зөв хариултаа бичнэ үү"
+              className="h-12 rounded-2xl border-zinc-200 bg-white px-4 text-sm shadow-none focus-visible:ring-zinc-200"
+            />
+          </div>
+        ) : null}
+
+        {type === "essay" ? (
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-500">
+            Энэ төрлийн асуултыг багш дараа нь гараар шалгана.
+          </div>
+        ) : null}
+
+        {type === "matching" ? (
+          <div className="space-y-3">
+            <Label className="text-sm font-medium text-zinc-700">
+              Холбох мөрүүд
+            </Label>
+            {matchingPairs.map((pair, index) => (
+              <div
+                key={index}
+                className="grid gap-2 rounded-2xl border border-zinc-200 p-3 md:grid-cols-[1fr_auto_1fr_auto] md:items-center"
+              >
+                <Input
+                  id={`matching-left-${index}`}
+                  value={pair.left}
+                  onChange={(event) =>
+                    updateMatchingPair(index, "left", event.target.value)
+                  }
+                  onFocus={() =>
+                    setActiveFormulaTarget({
+                      id: `matching-left-${index}`,
+                      label: `Холбох мөр ${index + 1} · Зүүн тал`,
+                    })
+                  }
+                  placeholder={`Зүүн тал ${index + 1}`}
+                  className="h-10 rounded-xl border-zinc-200 bg-white px-3 text-sm shadow-none focus-visible:ring-zinc-200"
+                />
+                <ChevronDown className="mx-auto h-4 w-4 rotate-[-90deg] text-zinc-300" />
+                <Input
+                  id={`matching-right-${index}`}
+                  value={pair.right}
+                  onChange={(event) =>
+                    updateMatchingPair(index, "right", event.target.value)
+                  }
+                  onFocus={() =>
+                    setActiveFormulaTarget({
+                      id: `matching-right-${index}`,
+                      label: `Холбох мөр ${index + 1} · Баруун тал`,
+                    })
+                  }
+                  placeholder={`Баруун тал ${index + 1}`}
+                  className="h-10 rounded-xl border-zinc-200 bg-white px-3 text-sm shadow-none focus-visible:ring-zinc-200"
+                />
+                {matchingPairs.length > 2 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="shrink-0 text-zinc-400 hover:text-zinc-950"
+                    onClick={() => removeMatchingPair(index)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                ) : null}
+              </div>
+            ))}
+
+            <button
+              type="button"
+              onClick={addMatchingPair}
+              className="inline-flex items-center gap-2 text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-950"
+            >
+              <PlusCircle className="h-4 w-4" />
+              Мөр нэмэх
+            </button>
+          </div>
+        ) : null}
+
+        <Button
+          type="submit"
+          disabled={loading}
+          className="h-12 w-full rounded-2xl bg-zinc-900 text-base font-medium text-white hover:bg-zinc-800"
+        >
+          {loading ? "Асуулт нэмж байна..." : "Асуулт нэмэх"}
+        </Button>
+      </form>
+    </div>
   );
 }

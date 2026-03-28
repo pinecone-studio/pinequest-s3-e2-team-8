@@ -1,8 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
+import { hasUnavoidableExamWindowConflict } from "@/lib/exam-window-conflicts";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
-const EXAM_SCHEDULING_GUARD_ERROR =
-  "Шалгалтын давхцал шалгах шинэчлэл идэвхжээгүй байна. Хамгийн сүүлийн DB migration-аа apply хийнэ үү.";
 
 interface ScheduledExam {
   id: string;
@@ -32,9 +31,7 @@ function buildConflictError(
     .join(", ");
 
   const suffix =
-    conflicts.length > 3
-      ? ` болон өөр ${conflicts.length - 3} зөрчил`
-      : "";
+    conflicts.length > 3 ? ` болон өөр ${conflicts.length - 3} зөрчил` : "";
 
   return `"${examTitle}" шалгалтыг оноох боломжгүй. Давхцаж буй шалгалтын жишээ: ${examples}${suffix}.`;
 }
@@ -52,21 +49,6 @@ async function getExamSchedule(
   return data;
 }
 
-function getExamOccupiedEndMs(exam: Pick<ScheduledExam, "end_time" | "duration_minutes">) {
-  const closeTimeMs = new Date(exam.end_time).getTime();
-  const durationMs = Number(exam.duration_minutes ?? 0) * 60 * 1000;
-
-  if (
-    Number.isNaN(closeTimeMs) ||
-    !Number.isFinite(durationMs) ||
-    durationMs <= 0
-  ) {
-    return closeTimeMs;
-  }
-
-  return closeTimeMs + durationMs;
-}
-
 async function getGroupStudentIds(
   supabase: SupabaseServerClient,
   groupId: string
@@ -76,37 +58,129 @@ async function getGroupStudentIds(
     .select("student_id")
     .eq("group_id", groupId);
 
-  return Array.from(
-    new Set((data ?? []).map((member) => member.student_id))
-  );
+  return Array.from(new Set((data ?? []).map((member) => member.student_id)));
 }
 
-async function getConflictingAssignmentsForStudentsViaRpc(
+async function collectStudentAssignmentConflicts(
   supabase: SupabaseServerClient,
   exam: ScheduledExam,
   groupIds: string[]
 ) {
   if (groupIds.length === 0) return { rows: [] as ConflictRow[] };
 
-  const { data, error } = await supabase.rpc("get_exam_assignment_conflicts", {
-    p_exam_id: exam.id,
-    p_group_ids: groupIds,
-    p_start_time: exam.start_time,
-    p_end_time: exam.end_time,
-    p_duration_minutes: exam.duration_minutes,
-  });
+  const { data: targetMembers, error: targetMembersError } = await supabase
+    .from("student_group_members")
+    .select("student_id")
+    .in("group_id", groupIds);
 
-  if (error) {
-    if (error.code === "PGRST202" || error.code === "42883") {
-      return { error: EXAM_SCHEDULING_GUARD_ERROR };
-    }
-
+  if (targetMembersError) {
     return {
-      error: `Шалгалтын давхцлыг шалгах үед алдаа гарлаа: ${error.message}`,
+      error: `Шалгалтын давхцлыг шалгах үед алдаа гарлаа: ${targetMembersError.message}`,
     };
   }
 
-  return { rows: (data ?? []) as ConflictRow[] };
+  const studentIds = Array.from(
+    new Set((targetMembers ?? []).map((member) => String(member.student_id)))
+  );
+
+  if (studentIds.length === 0) return { rows: [] as ConflictRow[] };
+
+  const [
+    { data: profiles, error: profilesError },
+    { data: memberships, error: membershipsError },
+  ] = await Promise.all([
+    supabase.from("profiles").select("id, full_name, email").in("id", studentIds),
+    supabase
+      .from("student_group_members")
+      .select("student_id, group_id")
+      .in("student_id", studentIds),
+  ]);
+
+  if (profilesError) {
+    return {
+      error: `Шалгалтын давхцлыг шалгах үед алдаа гарлаа: ${profilesError.message}`,
+    };
+  }
+
+  if (membershipsError) {
+    return {
+      error: `Шалгалтын давхцлыг шалгах үед алдаа гарлаа: ${membershipsError.message}`,
+    };
+  }
+
+  const profileNameById = new Map(
+    (profiles ?? []).map((profile) => [
+      String(profile.id),
+      profile.full_name ?? profile.email ?? "Сурагч",
+    ])
+  );
+
+  const groupIdsByStudent = new Map<string, Set<string>>();
+  for (const membership of memberships ?? []) {
+    const studentId = String(membership.student_id);
+    const existing = groupIdsByStudent.get(studentId) ?? new Set<string>();
+    existing.add(String(membership.group_id));
+    groupIdsByStudent.set(studentId, existing);
+  }
+
+  const relatedGroupIds = Array.from(
+    new Set((memberships ?? []).map((membership) => String(membership.group_id)))
+  );
+
+  if (relatedGroupIds.length === 0) return { rows: [] as ConflictRow[] };
+
+  const { data: assignedExamRows, error: assignedExamsError } = await supabase
+    .from("exam_assignments")
+    .select("group_id, exams!inner(id, title, start_time, end_time, duration_minutes)")
+    .in("group_id", relatedGroupIds);
+
+  if (assignedExamsError) {
+    return {
+      error: `Шалгалтын давхцлыг шалгах үед алдаа гарлаа: ${assignedExamsError.message}`,
+    };
+  }
+
+  const rows: ConflictRow[] = [];
+  const seen = new Set<string>();
+
+  for (const studentId of studentIds) {
+    const studentGroupIds = groupIdsByStudent.get(studentId) ?? new Set<string>();
+
+    for (const assignment of assignedExamRows ?? []) {
+      if (!studentGroupIds.has(String(assignment.group_id))) continue;
+
+      const conflictingExam = Array.isArray(assignment.exams)
+        ? assignment.exams[0]
+        : assignment.exams;
+
+      if (!conflictingExam || String(conflictingExam.id) === exam.id) continue;
+
+      if (
+        !hasUnavoidableExamWindowConflict(exam, {
+          start_time: String(conflictingExam.start_time),
+          end_time: String(conflictingExam.end_time),
+          duration_minutes: Number(conflictingExam.duration_minutes ?? 0),
+        })
+      ) {
+        continue;
+      }
+
+      const conflictKey = `${studentId}:${String(conflictingExam.id)}`;
+      if (seen.has(conflictKey)) continue;
+      seen.add(conflictKey);
+
+      rows.push({
+        student_id: studentId,
+        student_name: profileNameById.get(studentId) ?? "Сурагч",
+        conflicting_exam_id: String(conflictingExam.id),
+        conflicting_exam_title: String(
+          conflictingExam.title ?? "Өөр шалгалт"
+        ),
+      });
+    }
+  }
+
+  return { rows };
 }
 
 async function getAssignedGroupIdsForExam(
@@ -143,20 +217,18 @@ export async function getGroupAssignmentConflictError(
   const studentIds = await getGroupStudentIds(supabase, groupId);
   if (studentIds.length === 0) return null;
 
-  const conflictResult = await getConflictingAssignmentsForStudentsViaRpc(
+  const conflictResult = await collectStudentAssignmentConflicts(
     supabase,
     targetExam,
     [groupId]
   );
   if ("error" in conflictResult) return conflictResult.error;
 
-  const conflicts = conflictResult.rows;
-
-  if (conflicts.length === 0) return null;
+  if (conflictResult.rows.length === 0) return null;
 
   return buildConflictError(
     targetExam.title,
-    conflicts.map((conflict) => ({
+    conflictResult.rows.map((conflict) => ({
       studentName: conflict.student_name || "Сурагч",
       conflictingExamTitle: conflict.conflicting_exam_title || "Өөр шалгалт",
     }))
@@ -184,7 +256,7 @@ export async function getExamAssignmentConflictError(
     duration_minutes: overrides?.duration_minutes ?? exam.duration_minutes,
   };
 
-  const conflictResult = await getConflictingAssignmentsForStudentsViaRpc(
+  const conflictResult = await collectStudentAssignmentConflicts(
     supabase,
     targetExam,
     assignedGroupIds
@@ -207,7 +279,6 @@ export async function getGroupMemberConflictError(
   groupId: string,
   studentId: string
 ) {
-  // Get all exams assigned to the target group
   const { data: groupExamRows } = await supabase
     .from("exam_assignments")
     .select("exam_id, exams!inner(id, title, start_time, end_time, duration_minutes)")
@@ -215,7 +286,6 @@ export async function getGroupMemberConflictError(
 
   if (!groupExamRows || groupExamRows.length === 0) return null;
 
-  // Get all other groups the student already belongs to
   const { data: memberRows } = await supabase
     .from("student_group_members")
     .select("group_id")
@@ -224,9 +294,8 @@ export async function getGroupMemberConflictError(
 
   if (!memberRows || memberRows.length === 0) return null;
 
-  const otherGroupIds = memberRows.map((r) => r.group_id);
+  const otherGroupIds = memberRows.map((row) => row.group_id);
 
-  // Get all exams assigned to the student's other groups
   const { data: otherExamRows } = await supabase
     .from("exam_assignments")
     .select("exam_id, exams!inner(id, title, start_time, end_time, duration_minutes)")
@@ -234,26 +303,32 @@ export async function getGroupMemberConflictError(
 
   if (!otherExamRows || otherExamRows.length === 0) return null;
 
-  // Check for time overlaps in memory (no N+1 queries)
-  for (const ge of groupExamRows) {
-    const exam = Array.isArray(ge.exams) ? ge.exams[0] : ge.exams;
+  for (const groupExamRow of groupExamRows) {
+    const exam = Array.isArray(groupExamRow.exams)
+      ? groupExamRow.exams[0]
+      : groupExamRow.exams;
     if (!exam) continue;
-    const examStart = new Date(exam.start_time).getTime();
-    const examEnd = getExamOccupiedEndMs({
-      end_time: exam.end_time,
-      duration_minutes: Number(exam.duration_minutes ?? 0),
-    });
 
-    for (const oe of otherExamRows) {
-      const other = Array.isArray(oe.exams) ? oe.exams[0] : oe.exams;
+    for (const otherExamRow of otherExamRows) {
+      const other = Array.isArray(otherExamRow.exams)
+        ? otherExamRow.exams[0]
+        : otherExamRow.exams;
       if (!other || other.id === exam.id) continue;
-      const otherStart = new Date(other.start_time).getTime();
-      const otherEnd = getExamOccupiedEndMs({
-        end_time: other.end_time,
-        duration_minutes: Number(other.duration_minutes ?? 0),
-      });
 
-      if (examStart < otherEnd && examEnd > otherStart) {
+      if (
+        hasUnavoidableExamWindowConflict(
+          {
+            start_time: String(exam.start_time),
+            end_time: String(exam.end_time),
+            duration_minutes: Number(exam.duration_minutes ?? 0),
+          },
+          {
+            start_time: String(other.start_time),
+            end_time: String(other.end_time),
+            duration_minutes: Number(other.duration_minutes ?? 0),
+          }
+        )
+      ) {
         return buildConflictError(exam.title, [
           { studentName: "Сурагч", conflictingExamTitle: other.title },
         ]);

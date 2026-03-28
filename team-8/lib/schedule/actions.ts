@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { hasUnavoidableExamWindowConflict } from "@/lib/exam-window-conflicts";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 type ConflictReason = "shared_students" | "same_room";
@@ -48,10 +49,10 @@ async function isAdminUser(
     .select("role")
     .eq("id", userId)
     .maybeSingle();
+
   return data?.role === "admin";
 }
 
-/** exam owner, admin, OR teaching-assignment teacher can manage */
 async function canManageExam(
   supabase: SupabaseServerClient,
   examId: string,
@@ -59,32 +60,33 @@ async function canManageExam(
 ): Promise<boolean> {
   if (await isAdminUser(supabase, userId)) return true;
 
-  // Owner check
   const { data: own } = await supabase
     .from("exams")
     .select("id")
     .eq("id", examId)
     .eq("created_by", userId)
     .maybeSingle();
+
   if (own) return true;
 
-  // Teaching-assignment: teacher must have assignment for exam's subject in one of exam's groups
   const { data: examData } = await supabase
     .from("exams")
     .select("subject_id")
     .eq("id", examId)
     .maybeSingle();
+
   if (!examData?.subject_id) return false;
 
   const { data: examAssignments } = await supabase
     .from("exam_assignments")
     .select("group_id")
     .eq("exam_id", examId);
+
   if (!examAssignments || examAssignments.length === 0) return false;
 
-  const groupIds = examAssignments.map((a) => a.group_id);
+  const groupIds = examAssignments.map((assignment) => assignment.group_id);
 
-  const { data: ta } = await supabase
+  const { data: teachingAssignment } = await supabase
     .from("teaching_assignments")
     .select("id")
     .eq("teacher_id", userId)
@@ -94,7 +96,7 @@ async function canManageExam(
     .limit(1)
     .maybeSingle();
 
-  return !!ta;
+  return Boolean(teachingAssignment);
 }
 
 async function applyLocalConflictFallback(
@@ -103,7 +105,9 @@ async function applyLocalConflictFallback(
 ) {
   const allGroupIds = new Set<string>();
   for (const exam of rows) {
-    for (const g of exam.groups) allGroupIds.add(g.id);
+    for (const group of exam.groups) {
+      allGroupIds.add(group.id);
+    }
   }
 
   const groupStudentMap = new Map<string, Set<string>>();
@@ -115,44 +119,43 @@ async function applyLocalConflictFallback(
       .in("group_id", [...allGroupIds]);
 
     for (const member of memberRows ?? []) {
-      if (!groupStudentMap.has(member.group_id)) {
-        groupStudentMap.set(member.group_id, new Set());
-      }
-      groupStudentMap.get(member.group_id)?.add(member.student_id);
+      const groupId = String(member.group_id);
+      const existing = groupStudentMap.get(groupId) ?? new Set<string>();
+      existing.add(String(member.student_id));
+      groupStudentMap.set(groupId, existing);
     }
   }
 
-  function getExamStudents(exam: ExamRow): Set<string> {
+  function getExamStudents(exam: ExamRow) {
     const students = new Set<string>();
+
     for (const group of exam.groups) {
       for (const studentId of groupStudentMap.get(group.id) ?? []) {
         students.add(studentId);
       }
     }
+
     return students;
   }
 
   for (const exam of rows) {
-    const eStart = new Date(exam.start_time).getTime();
-    const eEnd = getOccupiedEndMs(exam);
     const examStudents = getExamStudents(exam);
+    const examStartMs = new Date(exam.start_time).getTime();
+    const examOccupiedEndMs = getOccupiedEndMs(exam);
 
     for (const other of rows) {
       if (other.id === exam.id) continue;
-
-      const oStart = new Date(other.start_time).getTime();
-      const oEnd = getOccupiedEndMs(other);
-      const overlaps = eStart < oEnd && eEnd > oStart;
-
-      if (!overlaps) continue;
 
       const otherStudents = getExamStudents(other);
       const hasStudentOverlap =
         examStudents.size > 0 &&
         [...examStudents].some((studentId) => otherStudents.has(studentId));
 
+      const sharedStudentConflict =
+        hasStudentOverlap && hasUnavoidableExamWindowConflict(exam, other);
+
       if (
-        hasStudentOverlap &&
+        sharedStudentConflict &&
         !exam.conflicts.find(
           (conflict) =>
             conflict.examTitle === other.title &&
@@ -165,12 +168,17 @@ async function applyLocalConflictFallback(
         });
       }
 
+      const otherStartMs = new Date(other.start_time).getTime();
+      const otherOccupiedEndMs = getOccupiedEndMs(other);
       const sameRoom =
         exam.room &&
         other.room &&
         exam.room.trim().toLowerCase() === other.room.trim().toLowerCase();
+      const roomOverlaps =
+        examStartMs < otherOccupiedEndMs && examOccupiedEndMs > otherStartMs;
 
       if (
+        roomOverlaps &&
         sameRoom &&
         !exam.conflicts.find(
           (conflict) =>
@@ -187,51 +195,61 @@ async function applyLocalConflictFallback(
   }
 }
 
-/** Багшийн scope дахь бүх шалгалтыг room болон conflict мэдээлэлтэй авах */
 export async function getExamSchedules() {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
   if (!user) return [];
 
   const admin = await isAdminUser(supabase, user.id);
-
-  // ── Scope дахь exam_id-ийг цуглуулах ──────────────────────────────
   const scopeIds = new Set<string>();
 
   if (admin) {
     const { data } = await supabase.from("exams").select("id");
-    for (const e of data ?? []) scopeIds.add(e.id);
+    for (const exam of data ?? []) {
+      scopeIds.add(exam.id);
+    }
   } else {
-    // Өөрийн үүсгэсэн
-    const { data: own } = await supabase
+    const { data: ownExams } = await supabase
       .from("exams")
       .select("id")
       .eq("created_by", user.id);
-    for (const e of own ?? []) scopeIds.add(e.id);
 
-    // Teaching assignment: group+subject хосоор тулгах
-    const { data: taRows } = await supabase
+    for (const exam of ownExams ?? []) {
+      scopeIds.add(exam.id);
+    }
+
+    const { data: teachingAssignments } = await supabase
       .from("teaching_assignments")
       .select("group_id, subject_id")
       .eq("teacher_id", user.id)
       .eq("is_active", true);
 
-    if (taRows && taRows.length > 0) {
-      const groupIds = [...new Set(taRows.map((r) => r.group_id))];
-      const { data: assigned } = await supabase
+    if (teachingAssignments && teachingAssignments.length > 0) {
+      const groupIds = [
+        ...new Set(teachingAssignments.map((assignment) => assignment.group_id)),
+      ];
+
+      const { data: assignedExams } = await supabase
         .from("exam_assignments")
         .select("exam_id, group_id, exams(subject_id)")
         .in("group_id", groupIds);
 
-      for (const ae of assigned ?? []) {
-        const subjectId = Array.isArray(ae.exams)
-          ? ae.exams[0]?.subject_id
-          : (ae.exams as { subject_id: string } | null)?.subject_id;
-        // group+subject хос таарч байвал л оруулна
-        if (taRows.find((ta) => ta.subject_id === subjectId && ta.group_id === ae.group_id)) {
-          scopeIds.add(ae.exam_id);
+      for (const assignment of assignedExams ?? []) {
+        const subjectId = Array.isArray(assignment.exams)
+          ? assignment.exams[0]?.subject_id
+          : (assignment.exams as { subject_id: string } | null)?.subject_id;
+
+        if (
+          teachingAssignments.find(
+            (teachingAssignment) =>
+              teachingAssignment.subject_id === subjectId &&
+              teachingAssignment.group_id === assignment.group_id
+          )
+        ) {
+          scopeIds.add(assignment.exam_id);
         }
       }
     }
@@ -240,7 +258,6 @@ export async function getExamSchedules() {
   const examIds = [...scopeIds];
   if (examIds.length === 0) return [];
 
-  // ── Шалгалтуудыг дэлгэрэнгүй мэдээлэлтэй авах ────────────────────
   const { data: exams } = await supabase
     .from("exams")
     .select(
@@ -269,17 +286,23 @@ export async function getExamSchedules() {
     const assignments = Array.isArray(exam.exam_assignments)
       ? exam.exam_assignments
       : exam.exam_assignments
-      ? [exam.exam_assignments]
-      : [];
+        ? [exam.exam_assignments]
+        : [];
 
     const groups = assignments
-      .map((a) => {
-        const g = Array.isArray(a.student_groups)
-          ? a.student_groups[0]
-          : a.student_groups;
-        return g ? { id: (g as { id: string; name: string }).id, name: (g as { id: string; name: string }).name } : null;
+      .map((assignment) => {
+        const group = Array.isArray(assignment.student_groups)
+          ? assignment.student_groups[0]
+          : assignment.student_groups;
+
+        return group
+          ? {
+              id: (group as { id: string; name: string }).id,
+              name: (group as { id: string; name: string }).name,
+            }
+          : null;
       })
-      .filter((g): g is { id: string; name: string } => g !== null);
+      .filter((group): group is { id: string; name: string } => group !== null);
 
     return {
       id: exam.id,
@@ -295,47 +318,22 @@ export async function getExamSchedules() {
     };
   });
 
-  const { data: conflictRows, error: conflictError } = await supabase.rpc(
-    "get_schedule_conflicts_for_scope",
-    {
-      p_exam_ids: examIds,
-    }
-  );
-
-  if (conflictError) {
-    await applyLocalConflictFallback(supabase, rows);
-    return rows;
-  }
-
-  const rowMap = new Map(rows.map((row) => [row.id, row]));
-  for (const conflict of conflictRows ?? []) {
-    const row = rowMap.get(conflict.exam_id as string);
-    if (!row) continue;
-
-    const reason = conflict.reason as ConflictReason;
-    const examTitle = String(conflict.conflicting_exam_title ?? "Бусад шалгалт");
-    const exists = row.conflicts.find(
-      (item) => item.examTitle === examTitle && item.reason === reason
-    );
-
-    if (!exists) {
-      row.conflicts.push({ examTitle, reason });
-    }
-  }
-
+  await applyLocalConflictFallback(supabase, rows);
   return rows;
 }
 
-/** Шалгалтад танхим оноох / шинэчлэх */
 export async function setExamRoom(examId: string, room: string | null) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
   if (!user) return { error: "Нэвтрээгүй байна" };
 
   const canManage = await canManageExam(supabase, examId, user.id);
-  if (!canManage) return { error: "Энэ шалгалтад өөрчлөлт хийх эрх алга" };
+  if (!canManage) {
+    return { error: "Энэ шалгалтад өөрчлөлт хийх эрх алга" };
+  }
 
   const { data: exam } = await supabase
     .from("exams")
@@ -370,12 +368,12 @@ export async function setExamRoom(examId: string, room: string | null) {
   );
 
   if (error) {
-    // PostgreSQL EXCLUDE constraint violation (room overlap)
     if (error.code === "23P01") {
       return {
         error: `"${room.trim()}" танхим энэ цагт өөр шалгалтад ашиглагдаж байна`,
       };
     }
+
     return { error: error.message };
   }
 
