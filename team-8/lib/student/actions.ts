@@ -18,6 +18,12 @@ import {
   getSessionDeadlineMs,
   type RecipientAccessOverride,
 } from "@/lib/exam-session-lifecycle";
+import { notifyTeacherOfSubmission } from "@/lib/notification/actions";
+import {
+  isFinalizedAttemptStatus,
+  pickBestAttempt,
+  pickLatestAttempt,
+} from "@/lib/exam-attempt-utils";
 import { attachPassagesToQuestions } from "@/lib/question-passages";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -525,6 +531,31 @@ function getPercentage(totalScore: number, maxScore: number) {
   return maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
 }
 
+function toStudentAttemptSummary(
+  session:
+    | {
+        status?: string | null;
+        attempt_number?: number | null;
+        started_at?: string | null;
+      }
+    | null
+    | undefined
+): StudentExamAttemptSummary | null {
+  if (!session) return null;
+
+  return {
+    status: (session.status as string | null) ?? null,
+    attemptNumber: Number(session.attempt_number ?? 0),
+    startedAt: (session.started_at as string | null) ?? null,
+  };
+}
+
+function canAttemptExamAgain(lifecycleStatus: string | null | undefined) {
+  return ["available", "retake_available", "retake_scheduled"].includes(
+    String(lifecycleStatus ?? "")
+  );
+}
+
 function normalizeTextAnswer(value: string | null | undefined) {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -971,6 +1002,21 @@ async function finalizeSessionAttempt(
     revalidatePath("/student/results");
     revalidatePath("/student/schedule");
     revalidatePath(`/student/exams/${examId}/result`);
+
+    // Notify teacher of submission (fire-and-forget)
+    if (finalStatus === "submitted" || finalStatus === "graded") {
+      const [{ data: examRow }, { data: profileRow }] = await Promise.all([
+        supabase.from("exams").select("title").eq("id", examId).maybeSingle(),
+        supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle(),
+      ]);
+      if (examRow) {
+        notifyTeacherOfSubmission(
+          examId,
+          examRow.title,
+          profileRow?.full_name || "Сурагч"
+        ).catch(() => {});
+      }
+    }
 
     return {
       success: true as const,
@@ -1477,36 +1523,35 @@ export async function getExamResult(examId: string) {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: initialSession, error: sessionError } = await supabase
+  const sessionSelect =
+    "id, status, started_at, total_score, max_score, submitted_at, attempt_number, exam_id, exams(title, passing_score)";
+  const { data: initialSessions, error: sessionError } = await supabase
     .from("exam_sessions")
-    .select(
-      "id, status, started_at, total_score, max_score, submitted_at, attempt_number, exam_id, exams(title, passing_score)"
-    )
+    .select(sessionSelect)
     .eq("exam_id", examId)
     .eq("user_id", user.id)
     .in("status", ["in_progress", "submitted", "graded", "timed_out"])
-    .order("attempt_number", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order("attempt_number", { ascending: false });
 
   if (sessionError) {
     console.error("[getExamResult] session query error:", sessionError.message);
     return null;
   }
 
-  let session = initialSession;
-  if (!session) return null;
+  let sessions = initialSessions ?? [];
+  let latestSession = pickLatestAttempt(sessions);
+  if (!latestSession) return null;
 
-  if (session.status === "in_progress") {
+  if (latestSession.status === "in_progress") {
     const exam = await getEffectiveExamAccessForStudent(supabase, user.id, examId);
     if (!exam) return null;
 
-    if (!isSessionExpiredForExam(session.started_at ?? null, exam)) {
+    if (!isSessionExpiredForExam(latestSession.started_at ?? null, exam)) {
       return null;
     }
 
     const finalized = await finalizeSessionAttempt(supabase, {
-      sessionId: session.id,
+      sessionId: latestSession.id,
       examId,
       userId: user.id,
       reason: "timeout",
@@ -1517,14 +1562,13 @@ export async function getExamResult(examId: string) {
       return null;
     }
 
-    const { data: refreshedSession, error: refreshedSessionError } = await supabase
+    const { data: refreshedSessions, error: refreshedSessionError } = await supabase
       .from("exam_sessions")
-      .select(
-        "id, status, started_at, total_score, max_score, submitted_at, attempt_number, exam_id, exams(title, passing_score)"
-      )
-      .eq("id", session.id)
+      .select(sessionSelect)
+      .eq("exam_id", examId)
       .eq("user_id", user.id)
-      .maybeSingle();
+      .in("status", ["in_progress", "submitted", "graded", "timed_out"])
+      .order("attempt_number", { ascending: false });
 
     if (refreshedSessionError) {
       console.error(
@@ -1534,12 +1578,43 @@ export async function getExamResult(examId: string) {
       return null;
     }
 
-    if (!refreshedSession) return null;
-    session = refreshedSession;
+    sessions = refreshedSessions ?? [];
+    latestSession = pickLatestAttempt(sessions);
+    if (!latestSession) return null;
   }
 
-  if (!["submitted", "graded", "timed_out"].includes(String(session.status))) {
+  const finalizedSessions = sessions.filter((session) =>
+    isFinalizedAttemptStatus(String(session.status ?? ""))
+  );
+  const bestSession = pickBestAttempt(finalizedSessions);
+  if (!bestSession) {
     return null;
+  }
+
+  const assignedExam = await getAssignedPublishedExamRecord(
+    supabase,
+    user.id,
+    examId
+  );
+  const effectiveExam = assignedExam?.row
+    ? mergeAssignedExamAccess(
+        assignedExam.row,
+        toStudentAttemptSummary(latestSession)
+      )
+    : null;
+  const canViewDetailedFeedback = !canAttemptExamAgain(
+    effectiveExam?.myLifecycleStatus ?? null
+  );
+
+  if (!canViewDetailedFeedback) {
+    return {
+      ...bestSession,
+      answers: [],
+      best_attempt_number: Number(bestSession.attempt_number ?? 0),
+      latest_attempt_number: Number(latestSession.attempt_number ?? 0),
+      can_view_detailed_feedback: false,
+      can_attempt_again: true,
+    };
   }
 
   const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
@@ -1551,7 +1626,7 @@ export async function getExamResult(examId: string) {
       .select(
         "id, question_id, answer, score, is_correct, feedback, questions(id, type, content, content_html, image_url, options, correct_answer, points, order_index, explanation)"
       )
-      .eq("session_id", session.id)
+      .eq("session_id", bestSession.id)
       .order("questions(order_index)", { ascending: true }),
     snapshot
       ? Promise.resolve({
@@ -1634,7 +1709,14 @@ export async function getExamResult(examId: string) {
     };
   });
 
-  return { ...session, answers: fullBreakdown };
+  return {
+    ...bestSession,
+    answers: fullBreakdown,
+    best_attempt_number: Number(bestSession.attempt_number ?? 0),
+    latest_attempt_number: Number(latestSession.attempt_number ?? 0),
+    can_view_detailed_feedback: true,
+    can_attempt_again: false,
+  };
 }
 
 /**
@@ -1649,12 +1731,34 @@ export async function getStudentResults() {
 
   const { data } = await supabase
     .from("exam_sessions")
-    .select("*, exams(title, passing_score)")
+    .select(
+      "id, exam_id, status, total_score, max_score, submitted_at, started_at, attempt_number, exams(title, passing_score)"
+    )
     .eq("user_id", user.id)
     .in("status", ["submitted", "graded", "timed_out"])
     .order("submitted_at", { ascending: false });
 
-  return data ?? [];
+  const sessions = data ?? [];
+  const sessionsByExam = new Map<string, typeof sessions>();
+  for (const session of sessions) {
+    const examSessions = sessionsByExam.get(String(session.exam_id)) ?? [];
+    examSessions.push(session);
+    sessionsByExam.set(String(session.exam_id), examSessions);
+  }
+
+  return Array.from(sessionsByExam.values())
+    .map((examSessions) => pickBestAttempt(examSessions))
+    .filter((session): session is NonNullable<typeof session> => Boolean(session))
+    .sort((left, right) => {
+      const leftTime = new Date(
+        String(left.submitted_at ?? left.started_at ?? 0)
+      ).getTime();
+      const rightTime = new Date(
+        String(right.submitted_at ?? right.started_at ?? 0)
+      ).getTime();
+
+      return rightTime - leftTime;
+    });
 }
 
 /**

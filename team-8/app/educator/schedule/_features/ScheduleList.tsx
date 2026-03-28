@@ -7,6 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { setExamRoom } from "@/lib/schedule/actions";
 import {
+  formatDateLabelUB,
+  formatDateStampUB,
+  formatTimeUB,
+} from "@/lib/utils/date";
+import {
   AlertTriangle,
   CheckCircle2,
   Clock,
@@ -48,22 +53,10 @@ function getOccupiedEndMs(row: Pick<ScheduleRow, "end_time" | "duration_minutes"
   return closeTimeMs + durationMs;
 }
 
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("mn-MN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function groupByDate(rows: ScheduleRow[]) {
   const map = new Map<string, ScheduleRow[]>();
   for (const row of rows) {
-    const dateKey = new Date(row.start_time).toLocaleDateString("mn-MN", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      weekday: "short",
-    });
+    const dateKey = formatDateLabelUB(row.start_time);
     const existing = map.get(dateKey) ?? [];
     existing.push(row);
     map.set(dateKey, existing);
@@ -149,16 +142,12 @@ export default function ScheduleList({ rows }: { rows: ScheduleRow[] }) {
   const filteredRows = useMemo(() => {
     if (now === null) return rows;
 
-    const today = new Date(now).toLocaleDateString("en-CA", {
-      timeZone: "Asia/Ulaanbaatar",
-    });
+    const today = formatDateStampUB(new Date(now));
 
     return rows.filter((row) => {
       const start = new Date(row.start_time).getTime();
       const end = getOccupiedEndMs(row);
-      const rowDate = new Date(row.start_time).toLocaleDateString("en-CA", {
-        timeZone: "Asia/Ulaanbaatar",
-      });
+      const rowDate = formatDateStampUB(row.start_time);
 
       if (filter === "today") return rowDate === today;
       if (filter === "next7") {
@@ -184,12 +173,8 @@ export default function ScheduleList({ rows }: { rows: ScheduleRow[] }) {
     now === null
       ? 0
       : rows.filter((row) => {
-          const rowDate = new Date(row.start_time).toLocaleDateString("en-CA", {
-            timeZone: "Asia/Ulaanbaatar",
-          });
-          const today = new Date(now).toLocaleDateString("en-CA", {
-            timeZone: "Asia/Ulaanbaatar",
-          });
+          const rowDate = formatDateStampUB(row.start_time);
+          const today = formatDateStampUB(new Date(now));
           return rowDate === today;
         }).length;
   const liveCount =
@@ -330,8 +315,8 @@ export default function ScheduleList({ rows }: { rows: ScheduleRow[] }) {
                           )}
                           <span className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />
-                            {formatTime(exam.start_time)} –{" "}
-                            {formatTime(exam.end_time)}{" "}
+                            {formatTimeUB(exam.start_time)} –{" "}
+                            {formatTimeUB(exam.end_time)}{" "}
                             <span className="text-muted-foreground/70">
                               ({exam.duration_minutes} мин)
                             </span>

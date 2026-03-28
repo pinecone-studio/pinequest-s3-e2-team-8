@@ -2235,3 +2235,19 @@ set
   event_type = excluded.event_type,
   metadata = excluded.metadata,
   created_at = excluded.created_at;
+
+-- -------------------------------------------------
+-- Parent emails (эцэг эхийн хуурамч email)
+-- -------------------------------------------------
+-- student50 → bumbaariunbat@gmail.com (жинхэнэ demo)
+-- student01-49 → хуурамч email-үүд
+UPDATE public.profiles
+SET parent_email = format('parent.student%02s@pineexam.test', t.student_no)
+FROM tmp_seed_users t
+WHERE profiles.id = t.id
+  AND t.student_no IS NOT NULL
+  AND t.student_no != 50;
+
+UPDATE public.profiles
+SET parent_email = 'bumbaariunbat@gmail.com'
+WHERE id = '30000000-0000-0000-0000-000000000050';

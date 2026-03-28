@@ -1,12 +1,7 @@
 import Link from "next/link";
 import { getStudentExams } from "@/lib/student/actions";
 import { formatDateTimeUB } from "@/lib/utils/date";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -42,7 +37,7 @@ export default async function StudentExamsPage({
           {exams.map((exam) => {
             const lifecycle = String(exam.myLifecycleStatus ?? "");
             const persistedSessionStatus = String(exam.mySessionStatus ?? "");
-            const isResultAvailable =
+            const hasResultRecord =
               persistedSessionStatus === "submitted" ||
               persistedSessionStatus === "graded" ||
               persistedSessionStatus === "timed_out";
@@ -51,6 +46,8 @@ export default async function StudentExamsPage({
               lifecycle === "available" || lifecycle === "retake_available";
             const isUpcoming =
               lifecycle === "scheduled" || lifecycle === "retake_scheduled";
+            const isResultAvailable =
+              hasResultRecord && !isAvailable && !isUpcoming && !isInProgress;
             const isExcused = lifecycle === "excused";
             const isAbsent = lifecycle === "absent";
             const isTimedOut = lifecycle === "timed_out";
@@ -76,17 +73,25 @@ export default async function StudentExamsPage({
                     )}
                     {!isResultAvailable && isUpcoming && (
                       <Badge variant="outline" className="shrink-0">
-                        {lifecycle === "retake_scheduled" ? "Нөхөн товлогдсон" : "Удахгүй"}
+                        {lifecycle === "retake_scheduled"
+                          ? "Нөхөн товлогдсон"
+                          : "Удахгүй"}
                       </Badge>
                     )}
                     {isExcused && (
-                      <Badge variant="outline" className="shrink-0">Чөлөөлөгдсөн</Badge>
+                      <Badge variant="outline" className="shrink-0">
+                        Чөлөөлөгдсөн
+                      </Badge>
                     )}
                     {isTimedOut && (
-                      <Badge variant="outline" className="shrink-0">Хугацаа дууссан</Badge>
+                      <Badge variant="outline" className="shrink-0">
+                        Хугацаа дууссан
+                      </Badge>
                     )}
                     {isAbsent && (
-                      <Badge variant="outline" className="shrink-0">Өгөөгүй</Badge>
+                      <Badge variant="outline" className="shrink-0">
+                        Өгөөгүй
+                      </Badge>
                     )}
                   </div>
                 </CardHeader>
@@ -135,11 +140,13 @@ export default async function StudentExamsPage({
                     </Button>
                   )}
 
-                  {!isResultAvailable && !isInProgress && (isAbsent || isTimedOut) && (
-                    <Button disabled variant="outline" className="w-full">
-                      {isTimedOut ? "Хугацаа дууссан" : "Өгөөгүй"}
-                    </Button>
-                  )}
+                  {!isResultAvailable &&
+                    !isInProgress &&
+                    (isAbsent || isTimedOut) && (
+                      <Button disabled variant="outline" className="w-full">
+                        {isTimedOut ? "Хугацаа дууссан" : "Өгөөгүй"}
+                      </Button>
+                    )}
                 </CardContent>
               </Card>
             );

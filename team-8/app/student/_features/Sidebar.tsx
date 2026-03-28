@@ -23,8 +23,8 @@ interface NavItem {
 
 const ALL_NAV_ITEMS: NavItem[] = [
   { href: "/student", label: "Нүүр хуудас", icon: HomeIcon },
-  { href: "/student/exams", label: "Шалгалтууд", icon: FileText },
-  { href: "/student/results", label: "Миний дүн", icon: ListCheck },
+
+  { href: "/student/results", label: "Миний шалгалтууд", icon: ListCheck },
 ];
 
 export default function Sidebar() {

@@ -198,7 +198,9 @@ export default async function ExamResultPage({
   if (!data) redirect("/student/exams");
 
   const examMeta = Array.isArray(data.exams) ? data.exams[0] : data.exams;
-  const answers = data.answers ?? [];
+  const canViewDetailedFeedback =
+    Boolean(data.can_view_detailed_feedback ?? true);
+  const answers = canViewDetailedFeedback ? data.answers ?? [] : [];
   const derivedAnswers = answers.map((answer) => {
     const question = Array.isArray(answer.questions)
       ? answer.questions[0]
@@ -280,16 +282,20 @@ export default async function ExamResultPage({
     };
   });
 
-  const totalScore = derivedAnswers.reduce(
-    (sum, answer) => sum + Number(answer.derivedScore ?? 0),
-    0
-  );
-  const maxScore = derivedAnswers.reduce((sum, answer) => {
-    const question = Array.isArray(answer.questions)
-      ? answer.questions[0]
-      : answer.questions;
-    return sum + Number(question?.points ?? 0);
-  }, 0);
+  const totalScore = canViewDetailedFeedback
+    ? derivedAnswers.reduce(
+        (sum, answer) => sum + Number(answer.derivedScore ?? 0),
+        0
+      )
+    : Number(data.total_score ?? 0);
+  const maxScore = canViewDetailedFeedback
+    ? derivedAnswers.reduce((sum, answer) => {
+        const question = Array.isArray(answer.questions)
+          ? answer.questions[0]
+          : answer.questions;
+        return sum + Number(question?.points ?? 0);
+      }, 0)
+    : Number(data.max_score ?? 0);
   const percentage =
     maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
   const passingScore = examMeta?.passing_score ?? 60;
@@ -300,7 +306,9 @@ export default async function ExamResultPage({
       : answer.questions;
     return question?.type === "essay";
   });
-  const isFinalized = data.status === "graded" || (data.status === "timed_out" && !hasEssayAnswers);
+  const isFinalized =
+    data.status === "graded" ||
+    (data.status === "timed_out" && canViewDetailedFeedback && !hasEssayAnswers);
 
 
   return (
@@ -349,16 +357,32 @@ export default async function ExamResultPage({
               оноо өөрчлөгдөж болно.
             </p>
           )}
+          {!canViewDetailedFeedback && (
+            <p className="text-sm text-muted-foreground">
+              Танд дахин оролдох боломж үлдсэн тул одоохондоо зөв хариулт,
+              тайлбар, асуулт тус бүрийн задрал харагдахгүй. Одоогийн хамгийн
+              өндөр дүнг л үзүүлж байна.
+            </p>
+          )}
           {isFinalized && (
             <p className="text-sm font-medium text-green-600">
               ✓ Багш шалгаж дүн баталгаажсан
+            </p>
+          )}
+          {Number(data.best_attempt_number ?? 0) > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Харагдаж буй дүн: {Number(data.best_attempt_number)}-р оролдлого
+              {Number(data.latest_attempt_number ?? 0) >
+              Number(data.best_attempt_number ?? 0)
+                ? ` · сүүлийн оролдлого ${Number(data.latest_attempt_number)}`
+                : ""}
             </p>
           )}
         </CardContent>
       </Card>
 
       {/* Асуулт бүрийн хариулт */}
-      {derivedAnswers.length > 0 && (
+      {canViewDetailedFeedback && derivedAnswers.length > 0 && (
         <div className="space-y-3">
           <h3 className="font-semibold text-lg">Асуулт бүрийн дүн</h3>
           {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}

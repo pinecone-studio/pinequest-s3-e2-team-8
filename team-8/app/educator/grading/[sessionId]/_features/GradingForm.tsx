@@ -8,7 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import MathContent from "@/components/math/MathContent";
 import { gradeAnswer, finalizeGrading } from "@/lib/grading/actions";
+import { gradeEssayWithAI, autoGradeSessionEssays } from "@/lib/ai/actions";
 import { formatDateTimeUB } from "@/lib/utils/date";
+import { Bot, Loader2, Sparkles } from "lucide-react";
 
 const questionTypeLabels: Record<string, string> = {
   multiple_choice: "Сонгох",
@@ -119,6 +121,9 @@ export default function GradingForm({
   const [feedbacks, setFeedbacks] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
+  const [aiGrading, setAiGrading] = useState<string | null>(null);
+  const [aiGradingAll, setAiGradingAll] = useState(false);
+  const [aiResults, setAiResults] = useState<Record<string, { score: number; feedback: string }>>({});
 
   const exam = session.exams;
   const profile = session.profiles;
@@ -152,6 +157,50 @@ export default function GradingForm({
       alert(result.error);
     }
   };
+
+  const handleAIGrade = async (answerId: string) => {
+    setAiGrading(answerId);
+    const result = await gradeEssayWithAI(answerId);
+    setAiGrading(null);
+
+    if (result.error) {
+      alert(result.error);
+      return;
+    }
+
+    if (result.score !== undefined && result.feedback) {
+      setScores((p) => ({ ...p, [answerId]: result.score! }));
+      setFeedbacks((p) => ({ ...p, [answerId]: result.feedback! }));
+      setAiResults((p) => ({
+        ...p,
+        [answerId]: { score: result.score!, feedback: result.feedback! },
+      }));
+    }
+
+    router.refresh();
+  };
+
+  const handleAIGradeAll = async () => {
+    setAiGradingAll(true);
+    const result = await autoGradeSessionEssays(session.id);
+    setAiGradingAll(false);
+
+    if (result.error) {
+      alert(result.error);
+      return;
+    }
+
+    if (result.errors && result.errors.length > 0) {
+      alert(`${result.gradedCount} эссэ дүгнэгдлээ. Алдаа: ${result.errors.join(", ")}`);
+    }
+
+    router.refresh();
+  };
+
+  const essayCount = answers.filter((a) => {
+    const q = a.questions;
+    return q?.type === "essay" && a.answer?.trim() && a.score === null;
+  }).length;
 
   const handleFinalize = async () => {
     const ungradedAnswers = answers.filter((a) => scores[a.id] === undefined);
@@ -196,9 +245,31 @@ export default function GradingForm({
               : "—"}
           </p>
         </div>
-        <Button onClick={handleFinalize} disabled={finalizing}>
-          {finalizing ? "Хадгалж байна..." : "Дүн баталгаажуулах"}
-        </Button>
+        <div className="flex items-center gap-2">
+          {essayCount > 0 && (
+            <Button
+              variant="outline"
+              onClick={handleAIGradeAll}
+              disabled={aiGradingAll || finalizing}
+              className="border-purple-300 text-purple-700 hover:bg-purple-50"
+            >
+              {aiGradingAll ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  AI дүгнэж байна...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  AI бүх эссэг дүгнэх ({essayCount})
+                </>
+              )}
+            </Button>
+          )}
+          <Button onClick={handleFinalize} disabled={finalizing}>
+            {finalizing ? "Хадгалж байна..." : "Дүн баталгаажуулах"}
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -362,46 +433,75 @@ export default function GradingForm({
                 )}
 
                 {!isAutoGraded && (
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm">Оноо:</span>
+                  <div className="space-y-3">
+                    {aiResults[a.id] && (
+                      <div className="rounded-lg border border-purple-200 bg-purple-50/50 p-3">
+                        <div className="flex items-center gap-2 text-sm font-medium text-purple-700">
+                          <Bot className="h-4 w-4" />
+                          AI дүгнэлт: {aiResults[a.id].score}/{maxPoints} оноо
+                        </div>
+                        <p className="mt-1 text-sm text-purple-600">
+                          {aiResults[a.id].feedback}
+                        </p>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">Оноо:</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={maxPoints}
+                          step={0.5}
+                          value={scores[a.id] ?? ""}
+                          onChange={(e) =>
+                            setScores((p) => ({
+                              ...p,
+                              [a.id]: parseFloat(e.target.value) || 0,
+                            }))
+                          }
+                          className="w-20"
+                        />
+                        <span className="text-sm text-muted-foreground">
+                          / {maxPoints}
+                        </span>
+                      </div>
                       <Input
-                        type="number"
-                        min={0}
-                        max={maxPoints}
-                        step={0.5}
-                        value={scores[a.id] ?? ""}
+                        placeholder="Тайлбар..."
+                        value={feedbacks[a.id] ?? ""}
                         onChange={(e) =>
-                          setScores((p) => ({
+                          setFeedbacks((p) => ({
                             ...p,
-                            [a.id]: parseFloat(e.target.value) || 0,
+                            [a.id]: e.target.value,
                           }))
                         }
-                        className="w-20"
+                        className="flex-1"
                       />
-                      <span className="text-sm text-muted-foreground">
-                        / {maxPoints}
-                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-purple-300 text-purple-700 hover:bg-purple-50"
+                        onClick={() => handleAIGrade(a.id)}
+                        disabled={aiGrading === a.id || saving === a.id}
+                      >
+                        {aiGrading === a.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Bot className="mr-1 h-4 w-4" />
+                            AI
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleGrade(a.id, maxPoints)}
+                        disabled={saving === a.id}
+                      >
+                        {saving === a.id ? "..." : "Хадгалах"}
+                      </Button>
                     </div>
-                    <Input
-                      placeholder="Тайлбар..."
-                      value={feedbacks[a.id] ?? ""}
-                      onChange={(e) =>
-                        setFeedbacks((p) => ({
-                          ...p,
-                          [a.id]: e.target.value,
-                        }))
-                      }
-                      className="flex-1"
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleGrade(a.id, maxPoints)}
-                      disabled={saving === a.id}
-                    >
-                      {saving === a.id ? "..." : "Хадгалах"}
-                    </Button>
                   </div>
                 )}
               </CardContent>

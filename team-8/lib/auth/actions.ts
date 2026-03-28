@@ -121,6 +121,7 @@ function buildFallbackProfile(user: {
     full_name: fullName,
     role,
     avatar_url: null,
+    parent_email: null,
     created_at: user.created_at ?? now,
     updated_at: user.updated_at ?? user.created_at ?? now,
   };

@@ -7,10 +7,18 @@ import { getGroupAssignmentConflictError } from "@/lib/exam-conflicts";
 import { syncExamRecipients } from "@/lib/exam-recipients";
 import { getExamPublishGuardError } from "@/lib/exam-readiness";
 import { assignExamToGroupRecord } from "@/lib/exam-assignments";
+import { notifyStudentsOfNewExam } from "@/lib/notification/actions";
+import { toUlaanbaatarIsoString } from "@/lib/utils/date";
 import {
   deriveStudentExamLifecycle,
   getEffectiveExamAccess,
 } from "@/lib/exam-session-lifecycle";
+import {
+  getAttemptPercentage,
+  isFinalizedAttemptStatus,
+  pickBestAttempt,
+  pickLatestAttempt,
+} from "@/lib/exam-attempt-utils";
 import {
   buildExamLifecycleMap,
 } from "@/lib/exam-lifecycle";
@@ -27,7 +35,7 @@ import {
 function toUlaanbaatarTimestamp(rawValue: FormDataEntryValue | null) {
   const value = String(rawValue ?? "").trim();
   if (!value) return null;
-  return `${value}+08:00`;
+  return toUlaanbaatarIsoString(value);
 }
 
 function parsePositiveInteger(rawValue: FormDataEntryValue | null) {
@@ -444,6 +452,21 @@ export async function publishExam(examId: string) {
 
   if (error) return { error: error.message };
 
+  // Notify all assigned students about the new exam
+  const { data: recipients } = await supabase
+    .from("exam_recipients")
+    .select("student_id")
+    .eq("exam_id", examId);
+
+  if (recipients && recipients.length > 0) {
+    const studentIds = recipients.map((r) => r.student_id);
+    notifyStudentsOfNewExam(
+      examId,
+      snapshot.exam.title,
+      studentIds
+    ).catch(() => {});
+  }
+
   revalidatePath("/educator");
   revalidatePath(`/educator/exams/${examId}`);
   return { success: true };
@@ -574,7 +597,7 @@ export async function getExamResults(examId: string) {
     supabase
       .from("exam_recipients")
       .select(
-        "student_id, access_start_time, access_end_time, max_attempts_override, excused_at, status_note, profiles(full_name, email)"
+        "student_id, access_start_time, access_end_time, max_attempts_override, excused_at, status_note, profiles:profiles!exam_recipients_student_id_fkey(full_name, email)"
       )
       .eq("exam_id", examId),
     supabase
@@ -587,6 +610,20 @@ export async function getExamResults(examId: string) {
       .order("attempt_number", { ascending: false }),
   ]);
 
+  if (recipientsResult.error) {
+    console.error("Failed to load exam recipients for results", {
+      examId,
+      error: recipientsResult.error,
+    });
+  }
+
+  if (sessionsResult.error) {
+    console.error("Failed to load exam sessions for results", {
+      examId,
+      error: sessionsResult.error,
+    });
+  }
+
   const recipients = (recipientsResult.data ?? []).filter(
     (recipient) =>
       managementScope.manageAll || visibleStudentIds.has(recipient.student_id)
@@ -594,28 +631,61 @@ export async function getExamResults(examId: string) {
   const sessions = (sessionsResult.data ?? []).filter(
     (session) => managementScope.manageAll || visibleStudentIds.has(session.user_id)
   );
-  const latestSessionByStudent = new Map<string, (typeof sessions)[number]>();
-
+  const sessionsByStudent = new Map<string, typeof sessions>();
   for (const session of sessions) {
-    if (!latestSessionByStudent.has(session.user_id)) {
-      latestSessionByStudent.set(session.user_id, session);
+    const studentSessions = sessionsByStudent.get(session.user_id) ?? [];
+    studentSessions.push(session);
+    sessionsByStudent.set(session.user_id, studentSessions);
+  }
+
+  const latestSessionByStudent = new Map<string, (typeof sessions)[number]>();
+  const bestSessionByStudent = new Map<string, (typeof sessions)[number]>();
+
+  for (const [studentId, studentSessions] of sessionsByStudent.entries()) {
+    const latestSession = pickLatestAttempt(studentSessions);
+    if (latestSession) {
+      latestSessionByStudent.set(studentId, latestSession);
+    }
+
+    const bestSession = pickBestAttempt(
+      studentSessions.filter((session) =>
+        isFinalizedAttemptStatus(String(session.status ?? ""))
+      )
+    );
+    if (bestSession) {
+      bestSessionByStudent.set(studentId, bestSession);
     }
   }
 
+  const recipientsByStudent = new Map(
+    recipients.map((recipient) => [recipient.student_id, recipient] as const)
+  );
+  const orderedStudentIds = [
+    ...recipients.map((recipient) => recipient.student_id),
+    ...sessions
+      .map((session) => session.user_id)
+      .filter((studentId) => !recipientsByStudent.has(studentId)),
+  ];
+
   const passingScore = exam.passing_score ?? 60;
   const nowMs = Date.now();
+  const normalizeProfile = (
+    profile:
+      | { full_name: string | null; email: string | null }
+      | Array<{ full_name: string | null; email: string | null }>
+      | null
+      | undefined
+  ) => (Array.isArray(profile) ? profile[0] ?? null : profile ?? null);
 
-  const sessionResults = recipients.map((recipient) => {
-    const latestSession = latestSessionByStudent.get(recipient.student_id);
-    const recipientProfile = Array.isArray(recipient.profiles)
-      ? recipient.profiles[0]
-      : recipient.profiles;
-    const sessionProfile = latestSession
-      ? Array.isArray(latestSession.profiles)
-        ? latestSession.profiles[0]
-        : latestSession.profiles
-      : null;
-    const studentGroupIds = studentGroupMap.get(recipient.student_id) ?? [];
+  const sessionResults = orderedStudentIds.map((studentId) => {
+    const recipient = recipientsByStudent.get(studentId);
+    const latestSession = latestSessionByStudent.get(studentId);
+    const bestSession = bestSessionByStudent.get(studentId);
+    const recipientProfile = normalizeProfile(recipient?.profiles);
+    const sessionProfile = normalizeProfile(
+      bestSession?.profiles ?? latestSession?.profiles
+    );
+    const studentGroupIds = studentGroupMap.get(studentId) ?? [];
     const studentGroups = visibleGroups.filter((g) =>
       studentGroupIds.includes(g.id)
     );
@@ -626,7 +696,7 @@ export async function getExamResults(examId: string) {
         duration_minutes: exam.duration_minutes,
         max_attempts: exam.max_attempts,
       },
-      recipient
+      recipient ?? {}
     );
     const lifecycle = deriveStudentExamLifecycle({
       exam: {
@@ -635,22 +705,25 @@ export async function getExamResults(examId: string) {
         max_attempts: exam.max_attempts,
         duration_minutes: exam.duration_minutes,
       },
-      recipient,
+      recipient: recipient ?? {},
       latestSessionStatus: latestSession?.status ?? null,
       latestAttemptNumber: latestSession?.attempt_number ?? 0,
       latestSessionStartedAt: latestSession?.started_at ?? null,
       nowMs,
     });
-    const isAttempted = ["submitted", "graded", "timed_out"].includes(
+    const isAttempted = Boolean(bestSession);
+    const totalScore = Number(bestSession?.total_score ?? 0);
+    const maxScore = Number(bestSession?.max_score ?? 0);
+    const percentage = isAttempted
+      ? getAttemptPercentage(bestSession ?? {})
+      : 0;
+    const hasRemainingAttempts = ["available", "retake_available"].includes(
       lifecycle.key
     );
-    const totalScore = Number(latestSession?.total_score ?? 0);
-    const maxScore = Number(latestSession?.max_score ?? 0);
-    const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
 
     return {
-      session_id: latestSession?.id ?? null,
-      student_id: recipient.student_id,
+      session_id: bestSession?.id ?? latestSession?.id ?? null,
+      student_id: studentId,
       student_name:
         recipientProfile?.full_name ??
         sessionProfile?.full_name ??
@@ -664,17 +737,21 @@ export async function getExamResults(examId: string) {
       percentage: isAttempted ? percentage : null,
       status: lifecycle.key,
       status_label: lifecycle.label,
-      submitted_at: latestSession?.submitted_at ?? latestSession?.started_at ?? null,
+      submitted_at:
+        bestSession?.submitted_at ??
+        bestSession?.started_at ??
+        latestSession?.submitted_at ??
+        latestSession?.started_at ??
+        null,
       passed: isAttempted ? percentage >= passingScore : false,
       groups: studentGroups,
       has_retake_override: access.hasRetakeOverride,
-      status_note: recipient.status_note ?? null,
+      has_remaining_attempts: hasRemainingAttempts,
+      status_note: recipient?.status_note ?? null,
     };
   });
 
-  const attemptedRows = sessionResults.filter((row) =>
-    ["submitted", "graded", "timed_out"].includes(row.status)
-  );
+  const attemptedRows = sessionResults.filter((row) => row.percentage !== null);
   const total = sessionResults.length;
   const passCount = attemptedRows.filter((row) => row.passed).length;
   const avgScore =

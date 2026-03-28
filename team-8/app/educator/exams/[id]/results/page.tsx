@@ -31,13 +31,12 @@ type ResultRow = {
   passed: boolean;
   groups: Array<{ id: string; name: string }>;
   has_retake_override: boolean;
+  has_remaining_attempts: boolean;
   status_note: string | null;
 };
 
 function buildStats(rows: ResultRow[]) {
-  const attemptedRows = rows.filter((row) =>
-    ["submitted", "graded", "timed_out"].includes(row.status)
-  );
+  const attemptedRows = rows.filter((row) => row.percentage !== null);
   const passCount = attemptedRows.filter((row) => row.passed).length;
 
   return {
@@ -393,7 +392,8 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
                                 Нөхөн эрх цуцлах
                               </Button>
                             </form>
-                          ) : session.status !== "in_progress" ? (
+                          ) : session.status !== "in_progress" &&
+                            !session.has_remaining_attempts ? (
                             <form
                               action={async () => {
                                 "use server";
