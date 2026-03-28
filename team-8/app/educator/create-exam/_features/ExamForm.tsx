@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -301,6 +301,10 @@ export default function ExamForm({
   const [titleValue, setTitleValue] = useState(initialTitle);
   const [descriptionValue, setDescriptionValue] = useState(initialDescription);
   const isFinalStep = currentStep === steps.length - 1;
+
+  useEffect(() => {
+    setError(initialError);
+  }, [initialError]);
 
   function getGroupsForSubject(nextSubjectId: string) {
     if (nextSubjectId === "__none") return [];

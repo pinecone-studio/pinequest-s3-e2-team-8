@@ -255,7 +255,9 @@ function TimePickerField({
           <TimePickerColumn
             values={cycleFromSelected(timeHours, hour12)}
             selected={hour12}
-            onSelect={(nextHour) => onChange(to24HourTime(nextHour, minute, meridiem))}
+            onSelect={(nextHour) =>
+              onChange(to24HourTime(nextHour, minute, meridiem))
+            }
           />
           <TimePickerColumn
             values={cycleFromSelected(timeMinutes, minute)}

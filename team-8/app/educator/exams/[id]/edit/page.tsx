@@ -6,12 +6,12 @@ import ExamForm from "@/app/educator/create-exam/_features/ExamForm";
 
 interface Props {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ step?: string }>;
+  searchParams: Promise<{ error?: string; step?: string }>;
 }
 
 export default async function EditExamPage({ params, searchParams }: Props) {
   const { id } = await params;
-  const { step } = await searchParams;
+  const { error: pageError, step } = await searchParams;
   const [exam, subjects, groups] = await Promise.all([
     getExamById(id),
     getTeacherSubjects(),
@@ -50,6 +50,7 @@ export default async function EditExamPage({ params, searchParams }: Props) {
       initialMaxAttempts={exam.max_attempts ?? 1}
       initialShuffleQuestions={exam.shuffle_questions}
       initialShuffleOptions={exam.shuffle_options}
+      initialError={pageError ?? null}
     />
   );
 }

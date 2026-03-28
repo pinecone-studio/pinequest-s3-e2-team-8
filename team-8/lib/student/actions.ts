@@ -224,6 +224,60 @@ async function cacheSessionMeta(sessionId: string, userId: string, status: strin
   );
 }
 
+async function replaceSessionDraftAnswers(
+  sessionId: string,
+  userId: string,
+  answers: Record<string, string>
+) {
+  const redisKey = getSessionAnswersCacheKey(sessionId, userId);
+  const sanitizedEntries = Object.entries(answers).filter(
+    ([questionId, answer]) =>
+      questionId.trim() !== "" && String(answer ?? "").trim() !== ""
+  );
+
+  await redis.del(redisKey);
+
+  if (sanitizedEntries.length === 0) {
+    return;
+  }
+
+  await redis.hset(redisKey, Object.fromEntries(sanitizedEntries));
+  await redis.expire(redisKey, 7200);
+}
+
+async function syncClientAnswersToDb(
+  supabase: SupabaseServerClient,
+  sessionId: string,
+  userId: string,
+  answers: Record<string, string>
+) {
+  const rows = Object.entries(answers)
+    .filter(
+      ([questionId, answer]) =>
+        questionId.trim() !== "" && String(answer ?? "").trim() !== ""
+    )
+    .map(([questionId, answer]) => ({
+      session_id: sessionId,
+      question_id: questionId,
+      user_id: userId,
+      answer: String(answer),
+    }));
+
+  if (rows.length === 0) {
+    return { success: true as const };
+  }
+
+  const { error } = await supabase.from("answers").upsert(rows, {
+    onConflict: "session_id,question_id",
+  });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return { success: true as const };
+}
+
 async function getAssignedPublishedExamRows(
   supabase: SupabaseServerClient,
   userId: string,
@@ -478,7 +532,11 @@ function parseAnswerArray(value: string | null | undefined) {
       ? parsed.map((item) => normalizeTextAnswer(item)).filter(Boolean).sort()
       : [];
   } catch {
-    return [];
+    return String(value ?? "")
+      .split(",")
+      .map((item) => normalizeTextAnswer(item))
+      .filter(Boolean)
+      .sort();
   }
 }
 
@@ -780,8 +838,9 @@ async function finalizeSessionAttempt(
           score,
         });
       } else if (question.type === "multiple_response") {
+        const normalizedSubmittedAnswers = parseAnswerArray(ans.answer);
         const isCorrect = areArraysEqual(
-          parseAnswerArray(ans.answer),
+          normalizedSubmittedAnswers,
           parseAnswerArray(question.correct_answer)
         );
         const score = isCorrect ? Number(question.points ?? 0) : 0;
@@ -790,7 +849,10 @@ async function finalizeSessionAttempt(
           session_id: String(ans.session_id),
           question_id: String(ans.question_id),
           user_id: String(ans.user_id),
-          answer: (ans.answer as string | null) ?? null,
+          answer:
+            normalizedSubmittedAnswers.length > 0
+              ? JSON.stringify(normalizedSubmittedAnswers)
+              : null,
           is_correct: isCorrect,
           score,
         });
@@ -1292,7 +1354,10 @@ export async function saveAnswer(
 /**
  * Шалгалт дуусгах — Auto-grade + submit
  */
-export async function submitExam(sessionId: string) {
+export async function submitExam(
+  sessionId: string,
+  clientAnswers?: Record<string, string>
+) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -1326,6 +1391,20 @@ export async function submitExam(sessionId: string) {
       maxScore,
       percentage: getPercentage(totalScore, maxScore),
     };
+  }
+
+  if (clientAnswers) {
+    const syncResult = await syncClientAnswersToDb(
+      supabase,
+      sessionId,
+      user.id,
+      clientAnswers
+    );
+    if ("error" in syncResult) {
+      return { error: `Хариултыг хадгалахад алдаа гарлаа: ${syncResult.error}` };
+    }
+
+    await replaceSessionDraftAnswers(sessionId, user.id, clientAnswers);
   }
 
   return finalizeSessionAttempt(supabase, {
@@ -1462,26 +1541,96 @@ export async function getExamResult(examId: string) {
   const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
   const snapshotQuestionMap = getSnapshotQuestionMap(snapshot);
 
-  // Per-question breakdown: хариулт + асуулт мэдээлэл
-  const { data: answers } = await supabase
-    .from("answers")
-    .select(
-      "id, question_id, answer, score, is_correct, feedback, questions(id, type, content, content_html, image_url, options, correct_answer, points, order_index, explanation)"
-    )
-    .eq("session_id", session.id)
-    .order("questions(order_index)", { ascending: true });
+  const [{ data: answers }, { data: questions }] = await Promise.all([
+    supabase
+      .from("answers")
+      .select(
+        "id, question_id, answer, score, is_correct, feedback, questions(id, type, content, content_html, image_url, options, correct_answer, points, order_index, explanation)"
+      )
+      .eq("session_id", session.id)
+      .order("questions(order_index)", { ascending: true }),
+    snapshot
+      ? Promise.resolve({
+          data: snapshot.questions.map((question) => ({
+            id: question.id,
+            type: question.type,
+            content: question.content,
+            content_html: question.content_html,
+            image_url: question.image_url,
+            options: question.options,
+            correct_answer: question.correct_answer,
+            points: question.points,
+            order_index: question.order_index,
+            explanation: question.explanation,
+          })),
+        })
+      : supabase
+          .from("questions")
+          .select(
+            "id, type, content, content_html, image_url, options, correct_answer, points, order_index, explanation"
+          )
+          .eq("exam_id", examId)
+          .order("order_index", { ascending: true }),
+  ]);
 
-  const snapshotAwareAnswers = (answers ?? []).map((answer) => {
-    const snapshotQuestion = snapshotQuestionMap.get(String(answer.question_id));
-    if (!snapshotQuestion) return answer;
+  const answerMap = new Map<
+    string,
+    {
+      id: string;
+      question_id: string;
+      answer: string | null;
+      score: number | null;
+      is_correct: boolean | null;
+      feedback: string | null;
+      questions: Record<string, unknown> | null;
+    }
+  >();
+
+  for (const answer of answers ?? []) {
+    const questionId = String(answer.question_id);
+    const snapshotQuestion = snapshotQuestionMap.get(questionId);
+    answerMap.set(questionId, {
+      id: String(answer.id),
+      question_id: questionId,
+      answer: (answer.answer as string | null) ?? null,
+      score: (answer.score as number | null) ?? null,
+      is_correct: (answer.is_correct as boolean | null) ?? null,
+      feedback: (answer.feedback as string | null) ?? null,
+      questions:
+        ((snapshotQuestion as unknown) as Record<string, unknown> | null) ??
+        (getRelationObject(
+          answer.questions as
+            | Record<string, unknown>
+            | Record<string, unknown>[]
+            | null
+        ) as Record<string, unknown> | null),
+    });
+  }
+
+  const fullBreakdown = (questions ?? []).map((question) => {
+    const questionId = String(question.id);
+    const existingAnswer = answerMap.get(questionId);
+
+    if (existingAnswer) {
+      return existingAnswer;
+    }
 
     return {
-      ...answer,
-      questions: snapshotQuestion,
+      id: `missing:${questionId}`,
+      question_id: questionId,
+      answer: null,
+      score: 0,
+      is_correct: null,
+      feedback: null,
+      questions:
+        (((snapshotQuestionMap.get(questionId) ?? null) as unknown) as
+          | Record<string, unknown>
+          | null) ??
+        ((question as unknown) as Record<string, unknown>),
     };
   });
 
-  return { ...session, answers: snapshotAwareAnswers };
+  return { ...session, answers: fullBreakdown };
 }
 
 /**

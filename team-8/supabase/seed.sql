@@ -14,15 +14,27 @@
 create extension if not exists pgcrypto;
 
 -- -------------------------------------------------
--- Clean previous demo users
+-- FULL CLEANUP — бүх хуучин data устгах
 -- -------------------------------------------------
-delete from auth.identities
-where user_id in (
-  select id from auth.users where email like '%@pineexam.test'
-);
+delete from public.proctor_events;
+delete from public.answers;
+delete from public.exam_sessions;
+delete from public.exam_recipients;
+delete from public.exam_assignments;
+delete from public.exam_schedules;
+delete from public.questions;
+delete from public.question_passages;
+delete from public.question_bank;
+delete from public.exams;
+delete from public.teaching_assignments;
+delete from public.teacher_subjects;
+delete from public.student_group_members;
+delete from public.student_groups;
+delete from public.profiles;
 
-delete from auth.users
-where email like '%@pineexam.test';
+-- auth хэрэглэгчдийг бүгдийг устгах
+delete from auth.identities;
+delete from auth.users;
 
 -- -------------------------------------------------
 -- Seed users
@@ -224,13 +236,23 @@ where u.app_role = 'student'
 on conflict (group_id, student_id) do nothing;
 
 -- Elective groups
+-- Demo focus:
+--   teacher01@pineexam.test teaches Math + Information Technology
+--   student50@pineexam.test belongs to 10B + elective Math + Coding Club
+delete from public.student_group_members
+where group_id in (
+  '40000000-0000-0000-0000-000000000101'::uuid,
+  '40000000-0000-0000-0000-000000000102'::uuid,
+  '40000000-0000-0000-0000-000000000103'::uuid
+);
+
 insert into public.student_group_members (group_id, student_id, joined_at)
 select
   '40000000-0000-0000-0000-000000000101'::uuid,
   u.id,
   now()
 from tmp_seed_users u
-where u.student_no in (41, 42, 43, 46, 47)
+where u.student_no in (41, 42, 43, 46, 47, 50)
 on conflict (group_id, student_id) do nothing;
 
 insert into public.student_group_members (group_id, student_id, joined_at)
@@ -239,7 +261,7 @@ select
   u.id,
   now()
 from tmp_seed_users u
-where u.student_no in (44, 45, 48, 49, 50)
+where u.student_no in (44, 45, 48, 49)
 on conflict (group_id, student_id) do nothing;
 
 insert into public.student_group_members (group_id, student_id, joined_at)
@@ -248,7 +270,7 @@ select
   u.id,
   now()
 from tmp_seed_users u
-where u.student_no in (31, 32, 33, 41, 42, 43)
+where u.student_no in (41, 42, 43, 46, 47, 50)
 on conflict (group_id, student_id) do nothing;
 
 -- -------------------------------------------------
@@ -262,6 +284,7 @@ create temporary table tmp_teacher_subjects (
 insert into tmp_teacher_subjects (teacher_email, subject_name)
 values
   ('teacher01@pineexam.test', 'Математик'),
+  ('teacher01@pineexam.test', 'Мэдээлэл зүй'),
   ('teacher02@pineexam.test', 'Монгол хэл'),
   ('teacher03@pineexam.test', 'Англи хэл'),
   ('teacher03@pineexam.test', 'Орос хэл'),
@@ -273,6 +296,9 @@ values
   ('teacher08@pineexam.test', 'Иргэний ёс зүй'),
   ('teacher09@pineexam.test', 'Мэдээлэл зүй'),
   ('teacher10@pineexam.test', 'Газарзүй');
+
+delete from public.teacher_subjects
+where teacher_id = '20000000-0000-0000-0000-000000000001'::uuid;
 
 insert into public.teacher_subjects (teacher_id, subject_id, assigned_by, created_at)
 select
@@ -294,11 +320,11 @@ create temporary table tmp_teaching_assignments (
 
 insert into tmp_teaching_assignments (teacher_email, group_name, subject_name)
 values
-  ('teacher01@pineexam.test', '9A', 'Математик'),
-  ('teacher01@pineexam.test', '9B', 'Математик'),
   ('teacher01@pineexam.test', '10A', 'Математик'),
   ('teacher01@pineexam.test', '10B', 'Математик'),
   ('teacher01@pineexam.test', '10-р ангийн сонгон Математик', 'Математик'),
+  ('teacher01@pineexam.test', '10B', 'Мэдээлэл зүй'),
+  ('teacher01@pineexam.test', 'Coding Club', 'Мэдээлэл зүй'),
 
   ('teacher02@pineexam.test', '6A', 'Монгол хэл'),
   ('teacher02@pineexam.test', '6B', 'Монгол хэл'),
@@ -362,6 +388,9 @@ values
   ('teacher10@pineexam.test', '8A', 'Газарзүй'),
   ('teacher10@pineexam.test', '8B', 'Газарзүй');
 
+delete from public.teaching_assignments
+where teacher_id = '20000000-0000-0000-0000-000000000001'::uuid;
+
 insert into public.teaching_assignments (
   id,
   teacher_id,
@@ -412,13 +441,13 @@ insert into tmp_seed_exams
 values
   (
     '50000000-0000-0000-0000-000000000001',
-    'Математик - II улирлын сорил',
-    '10-р ангийн алгебр, функцийн сорил.',
+    'Математик - Функц ба график',
+    'teacher01-ийн идэвхтэй demo шалгалт. student50 яг одоо өгөх боломжтой.',
     'Математик',
     'teacher01@pineexam.test',
-    date_trunc('day', now()) + interval '1 day 09 hours',
-    date_trunc('day', now()) + interval '1 day 10 hours 15 minutes',
-    75,
+    now() - interval '15 minutes',
+    now() + interval '30 minutes',
+    60,
     true,
     1,
     true,
@@ -428,13 +457,13 @@ values
   ),
   (
     '50000000-0000-0000-0000-000000000002',
-    'Математик - Сонгон бодлогын ноорог',
-    'Сонгон математикийн бэлтгэл шалгалт.',
+    'Математик - Сонгон бодлого (ноорог)',
+    'teacher01-ийн асуулт үүсгэх, эх материал холбох demo noorog шалгалт.',
     'Математик',
     'teacher01@pineexam.test',
-    date_trunc('day', now()) + interval '8 day 14 hours',
-    date_trunc('day', now()) + interval '8 day 15 hours 30 minutes',
-    90,
+    date_trunc('day', now()) + interval '7 day 14 hours',
+    date_trunc('day', now()) + interval '7 day 14 hours 20 minutes',
+    80,
     false,
     2,
     true,
@@ -460,13 +489,13 @@ values
   ),
   (
     '50000000-0000-0000-0000-000000000004',
-    'Мэдээлэл зүй - Coding Logic Quiz',
-    'Алгоритм, өгөгдлийн бүтэц, логик сэтгэлгээ.',
+    'Мэдээлэл зүй - Алгоритм ба хүснэгт',
+    'teacher01-ийн удахгүй эхлэх мэдээлэл зүйн шалгалт.',
     'Мэдээлэл зүй',
-    'teacher09@pineexam.test',
-    date_trunc('day', now()) + interval '2 day 15 hours',
-    date_trunc('day', now()) + interval '2 day 16 hours',
-    60,
+    'teacher01@pineexam.test',
+    date_trunc('day', now()) + interval '1 day 15 hours',
+    date_trunc('day', now()) + interval '1 day 15 hours 30 minutes',
+    50,
     true,
     2,
     true,
@@ -521,6 +550,38 @@ values
     false,
     60,
     'Lab-3'
+  ),
+  (
+    '50000000-0000-0000-0000-000000000008',
+    'Математик - Тэгшитгэл ба функцийн дүн',
+    'teacher01-ийн шалгаж дууссан demo шалгалт. student50 дээр бодит хариулт, оноо харагдана.',
+    'Математик',
+    'teacher01@pineexam.test',
+    date_trunc('day', now()) - interval '3 day' + interval '14 hours',
+    date_trunc('day', now()) - interval '3 day' + interval '14 hours 20 minutes',
+    60,
+    true,
+    1,
+    true,
+    true,
+    60,
+    '202'
+  ),
+  (
+    '50000000-0000-0000-0000-000000000009',
+    'Мэдээлэл зүй - Код унших даалгавар',
+    'teacher01-ийн багш шалгаж байгаа demo шалгалт. student50 дээр урьдчилсан дүн харагдана.',
+    'Мэдээлэл зүй',
+    'teacher01@pineexam.test',
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours',
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours 15 minutes',
+    45,
+    true,
+    1,
+    false,
+    true,
+    60,
+    'Lab-2'
   );
 
 insert into public.exams (
@@ -598,19 +659,25 @@ create temporary table tmp_exam_group_assignments (
 
 insert into tmp_exam_group_assignments (exam_id, group_name)
 values
-  ('50000000-0000-0000-0000-000000000001', '10A'),
   ('50000000-0000-0000-0000-000000000001', '10B'),
   ('50000000-0000-0000-0000-000000000001', '10-р ангийн сонгон Математик'),
+  ('50000000-0000-0000-0000-000000000002', '10A'),
+  ('50000000-0000-0000-0000-000000000002', '10-р ангийн сонгон Математик'),
   ('50000000-0000-0000-0000-000000000003', '8A'),
   ('50000000-0000-0000-0000-000000000003', '8B'),
   ('50000000-0000-0000-0000-000000000003', '10-р ангийн сонгон Англи хэл'),
-  ('50000000-0000-0000-0000-000000000004', '9A'),
-  ('50000000-0000-0000-0000-000000000004', '10A'),
+  ('50000000-0000-0000-0000-000000000004', '10B'),
   ('50000000-0000-0000-0000-000000000004', 'Coding Club'),
   ('50000000-0000-0000-0000-000000000006', '9A'),
   ('50000000-0000-0000-0000-000000000006', '9B'),
   ('50000000-0000-0000-0000-000000000007', '10A'),
-  ('50000000-0000-0000-0000-000000000007', '10B');
+  ('50000000-0000-0000-0000-000000000008', '10B'),
+  ('50000000-0000-0000-0000-000000000008', '10-р ангийн сонгон Математик'),
+  ('50000000-0000-0000-0000-000000000009', '10B'),
+  ('50000000-0000-0000-0000-000000000009', 'Coding Club');
+
+delete from public.exam_assignments
+where exam_id in (select id from tmp_seed_exams);
 
 insert into public.exam_assignments (id, exam_id, group_id, assigned_by, assigned_at)
 select
@@ -681,13 +748,71 @@ values
     0,
     '20000000-0000-0000-0000-000000000002',
     now()
+  ),
+  (
+    '75000000-0000-0000-0000-000000000003',
+    '50000000-0000-0000-0000-000000000001',
+    'Параболын график',
+    'Доорх график болон тайлбарыг ашиглаад холбогдох асуултуудад хариул.',
+    '<p>График нь <strong>f(x)=x^2-4x+3</strong> функцийг илэрхийлнэ.</p><ul><li>Орой нь (2,-1)</li><li>x-тэнхлэгийг 1 болон 3 дээр огтолно</li><li>y-тэнхлэгийг 3 дээр огтолно</li></ul>',
+    'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="360" height="200" viewBox="0 0 360 200"><rect width="360" height="200" fill="%23f8fafc"/><line x1="50" y1="25" x2="50" y2="170" stroke="%23334155" stroke-width="2"/><line x1="20" y1="140" x2="330" y2="140" stroke="%23334155" stroke-width="2"/><path d="M95 140 Q180 40 265 140" fill="none" stroke="%230f766e" stroke-width="4"/><circle cx="180" cy="75" r="5" fill="%230f766e"/><text x="188" y="72" font-size="12" fill="%230f172a">(2,-1)</text></svg>',
+    0,
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '75000000-0000-0000-0000-000000000004',
+    '50000000-0000-0000-0000-000000000002',
+    'Сонгон бодлогын нөхцөл',
+    'Нэг нөхцөлтэй олон бодлого зохиох жишээ эх материал.',
+    '<p>Адил хөлт гурвалжны периметр 24 см, суурь нь 8 см бол тэнцүү хажуу бүрийн уртыг ол.</p><p>Дараах асуултууд энэ нөхцөл дээр суурилна.</p>',
+    'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="320" height="180" fill="%23fff7ed"/><polygon points="160,25 60,145 260,145" fill="%23fde68a" stroke="%23924f19" stroke-width="3"/><text x="145" y="20" font-size="13" fill="%237c2d12">?</text><text x="85" y="160" font-size="13" fill="%237c2d12">8 см</text></svg>',
+    0,
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '75000000-0000-0000-0000-000000000005',
+    '50000000-0000-0000-0000-000000000004',
+    'Алгоритмын хүснэгт ба блок',
+    'Кодын логикийг хүснэгт болон схемтэй нь уншаад хариулна.',
+    '<p>Доорх хүснэгтэд клубийн даалгаврын оноог харуулав.</p><table><thead><tr><th>Сурагч</th><th>Даалгавар</th><th>Оноо</th></tr></thead><tbody><tr><td>Бат</td><td>Flowchart</td><td>8</td></tr><tr><td>Саруул</td><td>Python loop</td><td>10</td></tr><tr><td>Номин</td><td>HTML table</td><td>7</td></tr></tbody></table>',
+    'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="360" height="170" viewBox="0 0 360 170"><rect width="360" height="170" fill="%23eff6ff"/><rect x="40" y="20" width="90" height="40" rx="8" fill="%23bfdbfe" stroke="%231d4ed8"/><text x="68" y="45" font-size="13" fill="%231e3a8a">Эхлэх</text><rect x="140" y="20" width="90" height="40" rx="8" fill="%23dbeafe" stroke="%231d4ed8"/><text x="158" y="45" font-size="13" fill="%231e3a8a">Унших</text><rect x="240" y="20" width="90" height="40" rx="8" fill="%23bfdbfe" stroke="%231d4ed8"/><text x="268" y="45" font-size="13" fill="%231e3a8a">Дуусах</text><line x1="130" y1="40" x2="140" y2="40" stroke="%231d4ed8" stroke-width="3"/><line x1="230" y1="40" x2="240" y2="40" stroke="%231d4ed8" stroke-width="3"/></svg>',
+    0,
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '75000000-0000-0000-0000-000000000006',
+    '50000000-0000-0000-0000-000000000009',
+    'Клубийн даалгаврын хүснэгт',
+    'Хүснэгтийг уншаад кодтой холбоотой асуултуудад хариул.',
+    '<p>Дараах хүснэгтийг ажигла.</p><table><thead><tr><th>Нэр</th><th>Даалгавар</th><th>Гүйцэтгэл</th></tr></thead><tbody><tr><td>Тэмүүжин</td><td>Loop demo</td><td>5</td></tr><tr><td>Оюунаа</td><td>Scratch game</td><td>7</td></tr><tr><td>Марал</td><td>HTML layout</td><td>4</td></tr></tbody></table>',
+    null,
+    0,
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '75000000-0000-0000-0000-000000000007',
+    '50000000-0000-0000-0000-000000000008',
+    'Функцийн утгын хүснэгт',
+    'Доорх хүснэгтийг ашиглаад тэгшитгэл, функцийн асуултуудад хариул.',
+    '<table><thead><tr><th>x</th><th>-1</th><th>0</th><th>1</th><th>2</th></tr></thead><tbody><tr><td>y</td><td>0</td><td>-3</td><td>-4</td><td>-3</td></tr></tbody></table><p>Хүснэгт нь нэг квадратыг илэрхийлнэ.</p>',
+    null,
+    0,
+    '20000000-0000-0000-0000-000000000001',
+    now()
   )
 on conflict (id) do update
 set
+  exam_id = excluded.exam_id,
   content = excluded.content,
   content_html = excluded.content_html,
+  image_url = excluded.image_url,
   title = excluded.title,
-  order_index = excluded.order_index;
+  order_index = excluded.order_index,
+  created_by = excluded.created_by;
 
 -- -------------------------------------------------
 -- Questions
@@ -712,16 +837,16 @@ values
   (
     '70000000-0000-0000-0000-000000000001',
     '50000000-0000-0000-0000-000000000001',
-    null,
+    '75000000-0000-0000-0000-000000000003',
     'multiple_choice',
-    'f(x)=x^2-4x+3 функцийн оройн x координатыг ол.',
-    '<p>Дараах функцийг ажигла: $$f(x)=x^2-4x+3$$</p><p>Оройн <strong>x</strong> координатыг ол.</p>',
+    'Графикаас функцийн оройн x координатыг ол.',
+    '<p>Дээрх графикт харуулсан параболын <strong>оройн x координат</strong> хэд вэ?</p>',
     null,
     '["1","2","3","4"]'::jsonb,
     '2',
     2,
     0,
-    'Квадрат функцийн оройн x координат нь -b/2a = 4/2 = 2.',
+    'График болон $$-b/2a$$ томьёогоор шалгахад x = 2.',
     '20000000-0000-0000-0000-000000000001',
     now()
   ),
@@ -730,14 +855,14 @@ values
     '50000000-0000-0000-0000-000000000001',
     null,
     'fill_blank',
-    '2x + 5 = 13 тэгшитгэлийн x-ийн утгыг нөхөж бич.',
-    '<p>$$2x + 5 = 13$$ тэгшитгэлийн <em>x</em>-ийг ол.</p>',
+    'f(2)-ийн утгыг нөхөж бич.',
+    '<p>$$f(x)=x^2-4x+3$$ үед $$f(2) = $$ ____</p>',
     null,
     null,
-    '4',
-    3,
+    '-1',
+    2,
     1,
-    '5-ыг нөгөө талд шилжүүлээд 8, дараа нь 2-т хуваана.',
+    'Оройн цэг нь (2,-1) тул $$f(2)=-1$$.',
     '20000000-0000-0000-0000-000000000001',
     now()
   ),
@@ -746,14 +871,14 @@ values
     '50000000-0000-0000-0000-000000000001',
     null,
     'essay',
-    'Квадрат функцийн графикийг яагаад парабол гэдгийг тайлбарла.',
+    'Парабол яагаад дээш нээгдэж байгааг 2-3 өгүүлбэрээр тайлбарла.',
     null,
     null,
     null,
     null,
     5,
-    2,
-    'Оргил, симметрийн тэнхлэг, коэффициентийн нөлөөг тайлбарлахыг хүлээнэ.',
+    4,
+    'a коэффициент эерэг тул график дээш нээгдэнэ. Орой ба тэнхлэгийн тухай дурдвал сайн.',
     '20000000-0000-0000-0000-000000000001',
     now()
   ),
@@ -794,12 +919,12 @@ values
     '70000000-0000-0000-0000-000000000006',
     '50000000-0000-0000-0000-000000000003',
     null,
-    'essay',
+    'matching',
     'Match the word with its meaning: reduce, encourage, waste.',
     null,
     null,
-    null,
-    null,
+    '["reduce|||make smaller","encourage|||give support","waste|||unused material"]'::jsonb,
+    '[{"left":"reduce","right":"make smaller"},{"left":"encourage","right":"give support"},{"left":"waste","right":"unused material"}]',
     3,
     2,
     'Vocabulary matching.',
@@ -810,33 +935,33 @@ values
   (
     '70000000-0000-0000-0000-000000000007',
     '50000000-0000-0000-0000-000000000004',
+    '75000000-0000-0000-0000-000000000005',
+    'multiple_choice',
+    'Хүснэгтээс хамгийн өндөр оноо авсан даалгаврыг сонго.',
+    '<p>Хүснэгтэд харуулсан даалгавруудаас аль нь хамгийн өндөр оноотой вэ?</p>',
     null,
-    'essay',
-    'CPU, Bug, Loop нэр томьёонуудыг тайлбарла.',
-    '<p>Algorithm-related terms.</p>',
-    null,
-    null,
-    null,
+    '["Flowchart","Python loop","HTML table","Бүгд ижил"]'::jsonb,
+    'Python loop',
     3,
     0,
-    'Үндсэн нэр томьёог холбоно.',
-    '20000000-0000-0000-0000-000000000009',
+    'Хүснэгтийн дагуу Python loop = 10 оноо.',
+    '20000000-0000-0000-0000-000000000001',
     now()
   ),
   (
     '70000000-0000-0000-0000-000000000008',
     '50000000-0000-0000-0000-000000000004',
     null,
-    'multiple_choice',
-    'Which of the following are programming languages?',
+    'multiple_response',
+    'Програмчлалын хэлнүүдийг бүгдийг нь сонго.',
     null,
     null,
     '["Python","HTML","JavaScript","Keyboard"]'::jsonb,
-    '"Python"',
+    '["Python","JavaScript"]',
     3,
     1,
     'Python and JavaScript are programming languages.',
-    '20000000-0000-0000-0000-000000000009',
+    '20000000-0000-0000-0000-000000000001',
     now()
   ),
   (
@@ -852,7 +977,7 @@ values
     2,
     2,
     'Binary digits are 0 and 1.',
-    '20000000-0000-0000-0000-000000000009',
+    '20000000-0000-0000-0000-000000000001',
     now()
   ),
 
@@ -925,12 +1050,12 @@ values
     '70000000-0000-0000-0000-000000000014',
     '50000000-0000-0000-0000-000000000007',
     null,
-    'multiple_choice',
-    'Which are chemical changes?',
+    'multiple_response',
+    'Which are chemical changes? Choose all that apply.',
     null,
     null,
     '["Burning paper","Melting ice","Rusting iron","Boiling water"]'::jsonb,
-    '"Burning paper"',
+    '["Burning paper","Rusting iron"]',
     3,
     1,
     'Burning and rusting are chemical changes.',
@@ -984,6 +1109,247 @@ values
     1,
     'Хаврын бороо, шинэхэн өнгө гэсэн дүрслэл нь сэргэг мэдрэмж төрүүлнэ.',
     '20000000-0000-0000-0000-000000000002',
+    now()
+  ),
+
+  (
+    '70000000-0000-0000-0000-000000000018',
+    '50000000-0000-0000-0000-000000000001',
+    '75000000-0000-0000-0000-000000000003',
+    'multiple_response',
+    'Графикаас зөв мэдээллүүдийг бүгдийг нь сонго.',
+    '<p>Доорх сонголтуудаас зөв мэдээллүүдийг сонгоно уу.</p>',
+    null,
+    '["Орой нь x=2 дээр байна","x=1 болон x=3 дээр огтолно","y-огтлолцол нь 3","Доош нээгдэнэ"]'::jsonb,
+    '["Орой нь x=2 дээр байна","x=1 болон x=3 дээр огтолно","y-огтлолцол нь 3"]',
+    4,
+    2,
+    'Сүүлийн сонголтоос бусад нь зөв.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000019',
+    '50000000-0000-0000-0000-000000000001',
+    '75000000-0000-0000-0000-000000000003',
+    'matching',
+    'Графиктай холбоотой ойлголтуудыг зөв холбо.',
+    null,
+    null,
+    '["Орой|||(2,-1)","Симметрийн тэнхлэг|||x=2","y-огтлолцол|||3"]'::jsonb,
+    '[{"left":"Орой","right":"(2,-1)"},{"left":"Симметрийн тэнхлэг","right":"x=2"},{"left":"y-огтлолцол","right":"3"}]',
+    3,
+    3,
+    'Параболын үндсэн шинжүүдийг таних асуулт.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000020',
+    '50000000-0000-0000-0000-000000000008',
+    null,
+    'multiple_choice',
+    'y = 2x + 1 үед x = 3 бол y хэд вэ?',
+    '<p>$$y = 2x + 1$$ үед $$x = 3$$.</p>',
+    null,
+    '["5","6","7","8"]'::jsonb,
+    '7',
+    2,
+    0,
+    '2*3+1 = 7.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000021',
+    '50000000-0000-0000-0000-000000000008',
+    null,
+    'fill_blank',
+    '|-4| = ____',
+    '<p>Абсолют утгыг ол.</p>',
+    null,
+    null,
+    '4',
+    1,
+    1,
+    'Абсолют утга нь сөрөг биш байна.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000022',
+    '50000000-0000-0000-0000-000000000008',
+    null,
+    'multiple_response',
+    'Анхны тоонуудыг бүгдийг нь сонго.',
+    null,
+    null,
+    '["2","3","4","5"]'::jsonb,
+    '["2","3","5"]',
+    3,
+    2,
+    '2, 3, 5 нь анхны тоо.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000023',
+    '50000000-0000-0000-0000-000000000008',
+    null,
+    'matching',
+    'Томьёо болон утгыг зөв холбо.',
+    null,
+    null,
+    '["2^3|||8","3^2|||9","√16|||4"]'::jsonb,
+    '[{"left":"2^3","right":"8"},{"left":"3^2","right":"9"},{"left":"√16","right":"4"}]',
+    3,
+    3,
+    'Үндсэн зэрэг, язгуурын ойлголтыг шалгана.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000024',
+    '50000000-0000-0000-0000-000000000008',
+    '75000000-0000-0000-0000-000000000007',
+    'essay',
+    'Квадрат функцийн оройг хүснэгтээс хэрхэн танихаа тайлбарла.',
+    null,
+    null,
+    null,
+    null,
+    4,
+    4,
+    'Хамгийн бага эсвэл их y утгыг олж тайлбарлахыг хүлээнэ.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000025',
+    '50000000-0000-0000-0000-000000000004',
+    null,
+    'matching',
+    'Програмчлалын нэр томьёо ба үүргийг зөв холбо.',
+    null,
+    null,
+    '["Variable|||өгөгдөл хадгална","Loop|||үйлдлийг давтана","Condition|||шийдвэр гаргана"]'::jsonb,
+    '[{"left":"Variable","right":"өгөгдөл хадгална"},{"left":"Loop","right":"үйлдлийг давтана"},{"left":"Condition","right":"шийдвэр гаргана"}]',
+    3,
+    3,
+    'Суурь нэр томьёог холбох асуулт.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000026',
+    '50000000-0000-0000-0000-000000000009',
+    '75000000-0000-0000-0000-000000000006',
+    'multiple_choice',
+    'Хүснэгтээс хамгийн олон даалгавар гүйцэтгэсэн сурагчийг сонго.',
+    null,
+    null,
+    '["Тэмүүжин","Оюунаа","Марал","Бүгд ижил"]'::jsonb,
+    'Оюунаа',
+    2,
+    0,
+    'Хүснэгтэд Оюунаа 7 гүйцэтгэлтэй байна.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000027',
+    '50000000-0000-0000-0000-000000000009',
+    null,
+    'matching',
+    'Кодын ойлголтыг зөв тайлбартай холбо.',
+    null,
+    null,
+    '["Loop|||давталт","Sprite|||харагдах дүр","Variable|||утга хадгална"]'::jsonb,
+    '[{"left":"Loop","right":"давталт"},{"left":"Sprite","right":"харагдах дүр"},{"left":"Variable","right":"утга хадгална"}]',
+    3,
+    1,
+    'Scratch болон Python-ийн үндсэн ойлголтууд.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000028',
+    '50000000-0000-0000-0000-000000000009',
+    null,
+    'essay',
+    'Loop ашиглах нь кодыг яагаад товч, ойлгомжтой болгодгийг тайлбарла.',
+    null,
+    null,
+    null,
+    null,
+    4,
+    2,
+    'Жишээтэй тайлбарлавал өндөр оноо авна.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000029',
+    '50000000-0000-0000-0000-000000000009',
+    null,
+    'fill_blank',
+    'repeat 5 times блок нь үйлдлийг ____ удаа давтана.',
+    null,
+    null,
+    null,
+    '5',
+    1,
+    3,
+    'repeat 5 times гэдэг нь 5 удаа давтахыг хэлнэ.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000030',
+    '50000000-0000-0000-0000-000000000002',
+    '75000000-0000-0000-0000-000000000004',
+    'multiple_choice',
+    'Адил хөлт гурвалжны хоёр тэнцүү талын уртыг ол.',
+    null,
+    null,
+    '["6 см","8 см","10 см","12 см"]'::jsonb,
+    '8 см',
+    2,
+    0,
+    '24 - 8 = 16, 16 / 2 = 8.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000031',
+    '50000000-0000-0000-0000-000000000002',
+    '75000000-0000-0000-0000-000000000004',
+    'fill_blank',
+    'Хоёр тэнцүү талын нийлбэр ____ см байна.',
+    null,
+    null,
+    null,
+    '16',
+    1,
+    1,
+    'Периметрээс суурийг хасна.',
+    '20000000-0000-0000-0000-000000000001',
+    now()
+  ),
+  (
+    '70000000-0000-0000-0000-000000000032',
+    '50000000-0000-0000-0000-000000000002',
+    '75000000-0000-0000-0000-000000000004',
+    'essay',
+    'Энэ нөхцөлөөс цааш ямар 2 дэд бодлого зохиож болохоо тайлбарла.',
+    null,
+    null,
+    null,
+    null,
+    4,
+    2,
+    'Нэг нөхцөлөөс олон асуулт салаалуулж болдгийг харуулах demo асуулт.',
+    '20000000-0000-0000-0000-000000000001',
     now()
   )
 on conflict (id) do update
@@ -1104,6 +1470,42 @@ from (
       'Багаар ажиллахад хамгийн чухал үнэт зүйл аль нь вэ?', null, null,
       '["Хүндлэл","Маргаан","Хойрго байдал","Хардалт"]'::jsonb, 'Хүндлэл',
       1::numeric, 'easy', array['ethics','teamwork']::text[], 'Хүндлэл, хамтын ажиллагаа.', 1
+    ),
+    (
+      '80000000-0000-0000-0000-000000000013'::uuid, 'teacher01@pineexam.test', 'Математик', 'multiple_response',
+      'Квадрат функцийн зөв шинжүүдийг бүгдийг нь сонго.', '<p>$$y = ax^2 + bx + c$$ функцтэй холбоотой зөв ойлголтуудыг сонго.</p>', null,
+      '["Парабол хэлбэртэй","Симметрийн тэнхлэгтэй","Шулуун шугам болно","Орой цэгтэй"]'::jsonb, '["Парабол хэлбэртэй","Симметрийн тэнхлэгтэй","Орой цэгтэй"]',
+      3::numeric, 'medium', array['quadratic','grade-10']::text[], 'Квадрат функцийн үндсэн шинжүүд.', 2
+    ),
+    (
+      '80000000-0000-0000-0000-000000000014'::uuid, 'teacher01@pineexam.test', 'Математик', 'matching',
+      'Томьёо ба утгыг зөв холбо.', null, null,
+      '["2^3|||8","3^2|||9","√16|||4"]'::jsonb, '[{"left":"2^3","right":"8"},{"left":"3^2","right":"9"},{"left":"√16","right":"4"}]',
+      3::numeric, 'easy', array['powers','roots']::text[], 'Зэрэг ба язгуурын ойлголт.', 1
+    ),
+    (
+      '80000000-0000-0000-0000-000000000015'::uuid, 'teacher01@pineexam.test', 'Мэдээлэл зүй', 'multiple_choice',
+      'RAM санах ой юунд ашиглагддаг вэ?', '<p>Компьютерийн <strong>RAM</strong> нь ямар үүрэгтэй вэ?</p>', null,
+      '["Түр хадгалалт","Байнгын хадгалалт","Зураг хэвлэх","Дуу өсгөх"]'::jsonb, 'Түр хадгалалт',
+      2::numeric, 'easy', array['hardware','memory']::text[], 'RAM нь түр хадгалалтын санах ой.', 4
+    ),
+    (
+      '80000000-0000-0000-0000-000000000016'::uuid, 'teacher01@pineexam.test', 'Мэдээлэл зүй', 'fill_blank',
+      'Binary тооллын системд зөвхөн ____ болон ____ гэсэн хоёр тэмдэг ашиглана.', null, null, null, '0,1',
+      2::numeric, 'easy', array['binary','logic']::text[], 'Хоёртын системийн суурь ойлголт.', 3
+    ),
+    (
+      '80000000-0000-0000-0000-000000000017'::uuid, 'admin@pineexam.test', 'Мэдээлэл зүй', 'multiple_response',
+      'Алгоритмын үндсэн бүтэц аль нь вэ?', '<p>Суурь 3 бүтцийг сонгоно уу.</p>', null,
+      '["Дараалал","Салаалалт","Давталт","Зураг будах"]'::jsonb, '["Дараалал","Салаалалт","Давталт"]',
+      3::numeric, 'medium', array['algorithm','curated']::text[], 'Алгоритмын үндсэн бүтцүүд.', 6
+    ),
+    (
+      '80000000-0000-0000-0000-000000000018'::uuid, 'teacher01@pineexam.test', 'Математик', 'multiple_choice',
+      'Зурагт аль график нь парабол вэ?', '<p>Доорх зурагт харуулсан нум хэлбэрийн графикийг ажигла.</p>',
+      'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="280" height="150" viewBox="0 0 280 150"><rect width="280" height="150" fill="%23f8fafc"/><line x1="30" y1="120" x2="250" y2="120" stroke="%23334155" stroke-width="2"/><line x1="50" y1="20" x2="50" y2="130" stroke="%23334155" stroke-width="2"/><path d="M90 120 Q150 30 210 120" fill="none" stroke="%230f766e" stroke-width="4"/></svg>',
+      '["Парабол","Шулуун","Тойрог","Синус"]'::jsonb, 'Парабол',
+      2::numeric, 'easy', array['graph','visual']::text[], 'Зураг дээрх график нь парабол.', 2
     )
 ) as v(id, teacher_email, subject_name, type, content, content_html, image_url, options, correct_answer, points, difficulty, tags, explanation, usage_count)
 join public.subjects s on s.name = v.subject_name
@@ -1136,10 +1538,13 @@ begin
   ) then
     update public.question_bank
     set
-      visibility = 'shared_subject',
+      visibility = 'admin_curated',
       last_used_at = now() - interval '3 day'
     where id in (
       '80000000-0000-0000-0000-000000000001'::uuid,
+      '80000000-0000-0000-0000-000000000013'::uuid,
+      '80000000-0000-0000-0000-000000000015'::uuid,
+      '80000000-0000-0000-0000-000000000018'::uuid,
       '80000000-0000-0000-0000-000000000005'::uuid,
       '80000000-0000-0000-0000-000000000007'::uuid
     );
@@ -1150,14 +1555,181 @@ begin
       last_used_at = now() - interval '1 day'
     where id in (
       '80000000-0000-0000-0000-000000000003'::uuid,
-      '80000000-0000-0000-0000-000000000010'::uuid
+      '80000000-0000-0000-0000-000000000010'::uuid,
+      '80000000-0000-0000-0000-000000000017'::uuid
     );
 
     update public.question_bank
     set
-      visibility = 'archived',
-      last_used_at = now() - interval '45 day'
-    where id = '80000000-0000-0000-0000-000000000006'::uuid;
+      visibility = 'admin_curated',
+      last_used_at = now() - interval '6 day'
+    where id in (
+      '80000000-0000-0000-0000-000000000006'::uuid,
+      '80000000-0000-0000-0000-000000000014'::uuid,
+      '80000000-0000-0000-0000-000000000016'::uuid
+    );
+  end if;
+
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'question_bank'
+      and column_name = 'grade_level'
+  ) then
+    update public.question_bank
+    set
+      grade_level = case id
+        when '80000000-0000-0000-0000-000000000001'::uuid then 10
+        when '80000000-0000-0000-0000-000000000013'::uuid then 10
+        when '80000000-0000-0000-0000-000000000014'::uuid then 10
+        when '80000000-0000-0000-0000-000000000015'::uuid then 10
+        when '80000000-0000-0000-0000-000000000016'::uuid then 10
+        when '80000000-0000-0000-0000-000000000017'::uuid then 10
+        when '80000000-0000-0000-0000-000000000018'::uuid then 10
+        else grade_level
+      end,
+      subtopic = case id
+        when '80000000-0000-0000-0000-000000000001'::uuid then 'Тригонометр'
+        when '80000000-0000-0000-0000-000000000013'::uuid then 'Квадрат функц'
+        when '80000000-0000-0000-0000-000000000014'::uuid then 'Зэрэг ба язгуур'
+        when '80000000-0000-0000-0000-000000000015'::uuid then 'Компьютерын үндэс'
+        when '80000000-0000-0000-0000-000000000016'::uuid then 'Тооллын систем'
+        when '80000000-0000-0000-0000-000000000017'::uuid then 'Алгоритм'
+        when '80000000-0000-0000-0000-000000000018'::uuid then 'Функцийн график'
+        else subtopic
+      end,
+      difficulty_level = case id
+        when '80000000-0000-0000-0000-000000000001'::uuid then 1
+        when '80000000-0000-0000-0000-000000000013'::uuid then 2
+        when '80000000-0000-0000-0000-000000000014'::uuid then 1
+        when '80000000-0000-0000-0000-000000000015'::uuid then 1
+        when '80000000-0000-0000-0000-000000000016'::uuid then 1
+        when '80000000-0000-0000-0000-000000000017'::uuid then 2
+        when '80000000-0000-0000-0000-000000000018'::uuid then 2
+        else difficulty_level
+      end
+    where id in (
+      '80000000-0000-0000-0000-000000000001'::uuid,
+      '80000000-0000-0000-0000-000000000013'::uuid,
+      '80000000-0000-0000-0000-000000000014'::uuid,
+      '80000000-0000-0000-0000-000000000015'::uuid,
+      '80000000-0000-0000-0000-000000000016'::uuid,
+      '80000000-0000-0000-0000-000000000017'::uuid,
+      '80000000-0000-0000-0000-000000000018'::uuid
+    );
+  end if;
+end $$;
+
+do $$
+declare
+  v_admin_id uuid;
+  v_math_id uuid;
+  v_it_id uuid;
+begin
+  if exists (
+    select 1
+    from information_schema.tables
+    where table_schema = 'public'
+      and table_name = 'sample_exams'
+  ) then
+    select id into v_admin_id from public.profiles where email = 'admin@pineexam.test';
+    select id into v_math_id from public.subjects where name = 'Математик';
+    select id into v_it_id from public.subjects where name = 'Мэдээлэл зүй';
+
+    insert into public.sample_exams (
+      id,
+      title,
+      description,
+      subject_id,
+      grade_level,
+      subtopic,
+      difficulty_level,
+      duration_minutes,
+      question_count,
+      total_points,
+      created_by
+    )
+    values
+      (
+        '81000000-0000-0000-0000-000000000001'::uuid,
+        '10-р анги · Тригонометр ба зэрэг',
+        'Суурь ойлголтыг шалгах жишиг шалгалт.',
+        v_math_id,
+        10,
+        'Тригонометр',
+        1,
+        35,
+        2,
+        5,
+        v_admin_id
+      ),
+      (
+        '81000000-0000-0000-0000-000000000002'::uuid,
+        '10-р анги · Квадрат функц ба график',
+        'Функцийн хэлбэр, графикийг хамарсан жишиг шалгалт.',
+        v_math_id,
+        10,
+        'Квадрат функц',
+        2,
+        40,
+        2,
+        5,
+        v_admin_id
+      ),
+      (
+        '81000000-0000-0000-0000-000000000003'::uuid,
+        '10-р анги · Алгоритм ба компьютерын үндэс',
+        'Мэдээлэл зүйн жишиг шалгалт.',
+        v_it_id,
+        10,
+        'Алгоритм',
+        2,
+        45,
+        3,
+        7,
+        v_admin_id
+      )
+    on conflict (id) do update
+    set
+      title = excluded.title,
+      description = excluded.description,
+      subject_id = excluded.subject_id,
+      grade_level = excluded.grade_level,
+      subtopic = excluded.subtopic,
+      difficulty_level = excluded.difficulty_level,
+      duration_minutes = excluded.duration_minutes,
+      question_count = excluded.question_count,
+      total_points = excluded.total_points,
+      created_by = excluded.created_by,
+      updated_at = now();
+
+    delete from public.sample_exam_items
+    where sample_exam_id in (
+      '81000000-0000-0000-0000-000000000001'::uuid,
+      '81000000-0000-0000-0000-000000000002'::uuid,
+      '81000000-0000-0000-0000-000000000003'::uuid
+    );
+
+    insert into public.sample_exam_items (
+      id,
+      sample_exam_id,
+      question_bank_id,
+      order_index
+    )
+    values
+      ('82000000-0000-0000-0000-000000000001'::uuid, '81000000-0000-0000-0000-000000000001'::uuid, '80000000-0000-0000-0000-000000000001'::uuid, 0),
+      ('82000000-0000-0000-0000-000000000002'::uuid, '81000000-0000-0000-0000-000000000001'::uuid, '80000000-0000-0000-0000-000000000014'::uuid, 1),
+      ('82000000-0000-0000-0000-000000000003'::uuid, '81000000-0000-0000-0000-000000000002'::uuid, '80000000-0000-0000-0000-000000000013'::uuid, 0),
+      ('82000000-0000-0000-0000-000000000004'::uuid, '81000000-0000-0000-0000-000000000002'::uuid, '80000000-0000-0000-0000-000000000018'::uuid, 1),
+      ('82000000-0000-0000-0000-000000000005'::uuid, '81000000-0000-0000-0000-000000000003'::uuid, '80000000-0000-0000-0000-000000000015'::uuid, 0),
+      ('82000000-0000-0000-0000-000000000006'::uuid, '81000000-0000-0000-0000-000000000003'::uuid, '80000000-0000-0000-0000-000000000016'::uuid, 1),
+      ('82000000-0000-0000-0000-000000000007'::uuid, '81000000-0000-0000-0000-000000000003'::uuid, '80000000-0000-0000-0000-000000000017'::uuid, 2)
+    on conflict (id) do update
+    set
+      sample_exam_id = excluded.sample_exam_id,
+      question_bank_id = excluded.question_bank_id,
+      order_index = excluded.order_index;
   end if;
 end $$;
 
@@ -1228,6 +1800,39 @@ values
     date_trunc('day', now()) - interval '1 day' + interval '11 hours 05 minutes',
     date_trunc('day', now()) - interval '1 day' + interval '11 hours 50 minutes',
     5,
+    10,
+    1
+  ),
+  (
+    '60000000-0000-0000-0000-000000000006',
+    '50000000-0000-0000-0000-000000000008',
+    '30000000-0000-0000-0000-000000000050',
+    'graded',
+    date_trunc('day', now()) - interval '3 day' + interval '14 hours 03 minutes',
+    date_trunc('day', now()) - interval '3 day' + interval '14 hours 41 minutes',
+    12,
+    13,
+    1
+  ),
+  (
+    '60000000-0000-0000-0000-000000000007',
+    '50000000-0000-0000-0000-000000000009',
+    '30000000-0000-0000-0000-000000000050',
+    'submitted',
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours 02 minutes',
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours 31 minutes',
+    6,
+    10,
+    1
+  ),
+  (
+    '60000000-0000-0000-0000-000000000008',
+    '50000000-0000-0000-0000-000000000009',
+    '30000000-0000-0000-0000-000000000046',
+    'submitted',
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours 05 minutes',
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours 34 minutes',
+    3,
     10,
     1
   )
@@ -1411,6 +2016,176 @@ values
     null,
     null,
     date_trunc('day', now()) - interval '1 day' + interval '11 hours 23 minutes'
+  ),
+
+  (
+    '61000000-0000-0000-0000-000000000013',
+    '60000000-0000-0000-0000-000000000006',
+    '70000000-0000-0000-0000-000000000020',
+    '30000000-0000-0000-0000-000000000050',
+    '7',
+    true,
+    2,
+    '20000000-0000-0000-0000-000000000001',
+    date_trunc('day', now()) - interval '3 day' + interval '15 hours',
+    'Тооцоо зөв.',
+    date_trunc('day', now()) - interval '3 day' + interval '14 hours 15 minutes'
+  ),
+  (
+    '61000000-0000-0000-0000-000000000014',
+    '60000000-0000-0000-0000-000000000006',
+    '70000000-0000-0000-0000-000000000021',
+    '30000000-0000-0000-0000-000000000050',
+    '4',
+    true,
+    1,
+    '20000000-0000-0000-0000-000000000001',
+    date_trunc('day', now()) - interval '3 day' + interval '15 hours',
+    'Зөв.',
+    date_trunc('day', now()) - interval '3 day' + interval '14 hours 18 minutes'
+  ),
+  (
+    '61000000-0000-0000-0000-000000000015',
+    '60000000-0000-0000-0000-000000000006',
+    '70000000-0000-0000-0000-000000000022',
+    '30000000-0000-0000-0000-000000000050',
+    '["2","3","5"]',
+    true,
+    3,
+    '20000000-0000-0000-0000-000000000001',
+    date_trunc('day', now()) - interval '3 day' + interval '15 hours 01 minutes',
+    'Анхны тоонуудыг зөв сонгосон.',
+    date_trunc('day', now()) - interval '3 day' + interval '14 hours 25 minutes'
+  ),
+  (
+    '61000000-0000-0000-0000-000000000016',
+    '60000000-0000-0000-0000-000000000006',
+    '70000000-0000-0000-0000-000000000023',
+    '30000000-0000-0000-0000-000000000050',
+    '{"2^3":"8","3^2":"9","√16":"4"}',
+    true,
+    3,
+    '20000000-0000-0000-0000-000000000001',
+    date_trunc('day', now()) - interval '3 day' + interval '15 hours 01 minutes',
+    'Бүгд зөв.',
+    date_trunc('day', now()) - interval '3 day' + interval '14 hours 31 minutes'
+  ),
+  (
+    '61000000-0000-0000-0000-000000000017',
+    '60000000-0000-0000-0000-000000000006',
+    '70000000-0000-0000-0000-000000000024',
+    '30000000-0000-0000-0000-000000000050',
+    'Хүснэгтийн хамгийн бага y утгыг ажиглаад тухайн x дээр орой байрлаж байгааг тайлбарлаж болно.',
+    null,
+    3,
+    '20000000-0000-0000-0000-000000000001',
+    date_trunc('day', now()) - interval '3 day' + interval '15 hours 08 minutes',
+    'Гол санаа зөв, жишээ нэмж болно.',
+    date_trunc('day', now()) - interval '3 day' + interval '14 hours 37 minutes'
+  ),
+  (
+    '61000000-0000-0000-0000-000000000018',
+    '60000000-0000-0000-0000-000000000007',
+    '70000000-0000-0000-0000-000000000026',
+    '30000000-0000-0000-0000-000000000050',
+    'Оюунаа',
+    true,
+    2,
+    null,
+    null,
+    null,
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours 12 minutes'
+  ),
+  (
+    '61000000-0000-0000-0000-000000000019',
+    '60000000-0000-0000-0000-000000000007',
+    '70000000-0000-0000-0000-000000000027',
+    '30000000-0000-0000-0000-000000000050',
+    '{"Loop":"давталт","Sprite":"харагдах дүр","Variable":"утга хадгална"}',
+    true,
+    3,
+    null,
+    null,
+    null,
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours 18 minutes'
+  ),
+  (
+    '61000000-0000-0000-0000-000000000020',
+    '60000000-0000-0000-0000-000000000007',
+    '70000000-0000-0000-0000-000000000028',
+    '30000000-0000-0000-0000-000000000050',
+    'Loop ашиглавал ижил үйлдлийг олон давтахдаа кодыг товч, алдаа багатай бичиж болно.',
+    null,
+    null,
+    null,
+    null,
+    null,
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours 25 minutes'
+  ),
+  (
+    '61000000-0000-0000-0000-000000000021',
+    '60000000-0000-0000-0000-000000000007',
+    '70000000-0000-0000-0000-000000000029',
+    '30000000-0000-0000-0000-000000000050',
+    '5',
+    true,
+    1,
+    null,
+    null,
+    null,
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours 29 minutes'
+  ),
+  (
+    '61000000-0000-0000-0000-000000000022',
+    '60000000-0000-0000-0000-000000000008',
+    '70000000-0000-0000-0000-000000000026',
+    '30000000-0000-0000-0000-000000000046',
+    'Тэмүүжин',
+    false,
+    0,
+    null,
+    null,
+    null,
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours 14 minutes'
+  ),
+  (
+    '61000000-0000-0000-0000-000000000023',
+    '60000000-0000-0000-0000-000000000008',
+    '70000000-0000-0000-0000-000000000027',
+    '30000000-0000-0000-0000-000000000046',
+    '{"Loop":"давталт","Sprite":"харагдах дүр","Variable":"утга хадгална"}',
+    true,
+    3,
+    null,
+    null,
+    null,
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours 21 minutes'
+  ),
+  (
+    '61000000-0000-0000-0000-000000000024',
+    '60000000-0000-0000-0000-000000000008',
+    '70000000-0000-0000-0000-000000000028',
+    '30000000-0000-0000-0000-000000000046',
+    'Loop ашиглахад нэг кодоо олон давтаж бичихгүй байхад тусалдаг.',
+    null,
+    null,
+    null,
+    null,
+    null,
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours 27 minutes'
+  ),
+  (
+    '61000000-0000-0000-0000-000000000025',
+    '60000000-0000-0000-0000-000000000008',
+    '70000000-0000-0000-0000-000000000029',
+    '30000000-0000-0000-0000-000000000046',
+    '3',
+    false,
+    0,
+    null,
+    null,
+    null,
+    date_trunc('day', now()) - interval '1 day' + interval '10 hours 30 minutes'
   )
 on conflict (id) do update
 set

@@ -192,7 +192,9 @@ export async function updateExam(examId: string, formData: FormData) {
 
   const { data: existingExam } = await supabase
     .from("exams")
-    .select("id, title, subject_id, is_published")
+    .select(
+      "id, title, description, subject_id, is_published, shuffle_questions, shuffle_options"
+    )
     .eq("id", examId)
     .eq("created_by", user.id)
     .maybeSingle();
@@ -319,15 +321,21 @@ export async function updateExam(examId: string, formData: FormData) {
     .from("exams")
     .update({
       title,
-      description: (formData.get("description") as string) || null,
+      description: formData.has("description")
+        ? String(formData.get("description") ?? "").trim() || null
+        : existingExam.description ?? null,
       subject_id,
       duration_minutes: durationMinutes,
       start_time,
       end_time,
       passing_score: parseFloat(formData.get("passing_score") as string) || 60,
       max_attempts: parseInt(formData.get("max_attempts") as string) || 1,
-      shuffle_questions: formData.get("shuffle_questions") === "on",
-      shuffle_options: formData.get("shuffle_options") === "on",
+      shuffle_questions: formData.has("shuffle_questions")
+        ? formData.get("shuffle_questions") === "on"
+        : existingExam.shuffle_questions,
+      shuffle_options: formData.has("shuffle_options")
+        ? formData.get("shuffle_options") === "on"
+        : existingExam.shuffle_options,
     })
     .eq("id", examId)
     .eq("created_by", user.id);

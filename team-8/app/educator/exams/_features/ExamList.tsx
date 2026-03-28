@@ -6,7 +6,7 @@ import { deleteExam, publishExam } from "@/lib/exam/actions";
 import { formatDateTimeUB } from "@/lib/utils/date";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,9 +47,33 @@ interface Props {
   exams: Exam[];
 }
 
+type GroupMode = "status" | "subject";
+
+const STATUS_ORDER: ExamLifecycleSummary["key"][] = [
+  "draft",
+  "ready",
+  "published",
+  "live",
+  "grading",
+  "finalized",
+];
+
+const STATUS_LABELS: Record<ExamLifecycleSummary["key"], string> = {
+  draft: "Ноорог",
+  ready: "Бэлэн",
+  published: "Товлогдсон",
+  live: "Явагдаж байна",
+  grading: "Шалгаж байна",
+  finalized: "Дууссан",
+};
+
 export default function ExamList({ exams }: Props) {
+  const [groupMode, setGroupMode] = useState<GroupMode>("status");
   const [currentTime, setCurrentTime] = useState(0);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -74,50 +98,54 @@ export default function ExamList({ exams }: Props) {
     if (result?.error) setActionError(result.error);
   }
 
-  function getFallbackLifecycle(startTime: string, endTime: string, isPublished: boolean) {
+  function getFallbackLifecycle(
+    startTime: string,
+    endTime: string,
+    isPublished: boolean
+  ): ExamLifecycleSummary {
     const start = new Date(startTime).getTime();
     const end = new Date(endTime).getTime();
 
     if (!isPublished) {
       return {
+        key: "draft",
         label: "Ноорог",
-        description: "Шалгалтаа нийтлэхээс өмнө агуулга, assignment-аа шалгана уу.",
-        variant: "outline" as const,
+        description: "",
+        variant: "outline",
       };
     }
 
     if (currentTime < start) {
       return {
+        key: "published",
         label: "Товлогдсон",
-        description: "Шалгалт нийтлэгдсэн бөгөөд эхлэх цагаа хүлээж байна.",
-        variant: "outline" as const,
+        description: "",
+        variant: "outline",
       };
     }
 
     if (currentTime <= end) {
       return {
+        key: "live",
         label: "Явагдаж байна",
-        description: "Сурагчид одоогоор шалгалт өгч байна.",
-        variant: "default" as const,
+        description: "",
+        variant: "default",
       };
     }
 
     return {
+      key: "finalized",
       label: "Дууссан",
-      description: "Шалгалтын идэвхтэй хугацаа дууссан байна.",
-      variant: "secondary" as const,
+      description: "",
+      variant: "secondary",
     };
   }
 
   if (exams.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
-        <p className="text-muted-foreground">Шалгалт байхгүй байна.</p>
-        <Button
-          asChild
-          variant="secondary"
-          className="mt-4 bg-indigo-100/70 text-indigo-700 hover:bg-indigo-100"
-        >
+      <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-16 text-center">
+        <p className="text-sm text-muted-foreground">Шалгалт алга.</p>
+        <Button asChild variant="secondary" className="mt-4">
           <Link href="/educator/create-exam">
             <PlusCircle className="mr-2 h-4 w-4" />
             Шалгалт үүсгэх
@@ -127,26 +155,89 @@ export default function ExamList({ exams }: Props) {
     );
   }
 
+  const normalized = exams.map((exam) => {
+    const lifecycle =
+      exam.lifecycle ??
+      getFallbackLifecycle(exam.start_time, exam.end_time, exam.is_published);
+
+    return {
+      exam,
+      lifecycle,
+      questionCount: exam.questions?.[0]?.count ?? 0,
+      subjectName: exam.subjects?.name?.trim() || "Хичээлгүй",
+    };
+  });
+
+  const grouped =
+    groupMode === "status"
+      ? STATUS_ORDER.map((statusKey) => ({
+          key: statusKey,
+          label: STATUS_LABELS[statusKey],
+          items: normalized.filter((item) => item.lifecycle.key === statusKey),
+        })).filter((section) => section.items.length > 0)
+      : Array.from(
+          normalized.reduce(
+            (acc, item) => {
+              const key = item.subjectName;
+              const existing = acc.get(key) ?? [];
+              existing.push(item);
+              acc.set(key, existing);
+              return acc;
+            },
+            new Map<string, typeof normalized>()
+          )
+        )
+          .sort((a, b) => a[0].localeCompare(b[0], "mn"))
+          .map(([key, items]) => ({
+            key,
+            label: key,
+            items,
+          }));
+
+  function getPrimaryAction(
+    exam: Exam,
+    lifecycle: ExamLifecycleSummary
+  ):
+    | { href: string; label: string; variant?: "outline" | "secondary" }
+    | null {
+    if (!exam.is_published) {
+      return {
+        href: `/educator/exams/${exam.id}/edit`,
+        label: "Засах",
+        variant: "outline",
+      };
+    }
+
+    if (lifecycle.key === "finalized" || lifecycle.key === "grading") {
+      return {
+        href: `/educator/exams/${exam.id}/results`,
+        label: "Дүн",
+        variant: "secondary",
+      };
+    }
+
+    return null;
+  }
+
   return (
     <>
       {actionError && (
-        <div className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {actionError}
-          <button
-            className="ml-2 underline"
-            onClick={() => setActionError(null)}
-          >
-            Хаах
-          </button>
         </div>
       )}
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Шалгалт устгах уу?</AlertDialogTitle>
             <AlertDialogDescription>
-              &ldquo;{deleteTarget?.title}&rdquo; шалгалтыг устгах гэж байна. Энэ үйлдлийг буцааж болохгүй.
+              &ldquo;{deleteTarget?.title}&rdquo; шалгалтыг устгана.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -161,94 +252,127 @@ export default function ExamList({ exams }: Props) {
         </AlertDialogContent>
       </AlertDialog>
 
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-      {exams.map((exam) => {
-        const qCount = exam.questions?.[0]?.count ?? 0;
-        const startDate = formatDateTimeUB(exam.start_time);
-        const lifecycle =
-          exam.lifecycle ??
-          getFallbackLifecycle(
-            exam.start_time,
-            exam.end_time,
-            exam.is_published
-          );
-        return (
-          <Card key={exam.id} className="flex flex-col">
-            <CardHeader className="flex-row items-start justify-between space-y-0 pb-2">
-              <CardTitle className="text-base leading-tight">{exam.title}</CardTitle>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem asChild>
-                    <Link href={`/educator/exams/${exam.id}/questions`}>Асуулт засах</Link>
-                  </DropdownMenuItem>
-                  {exam.is_published && (
-                    <DropdownMenuItem asChild>
-                      <Link href={`/educator/exams/${exam.id}/results`}>
-                        <BarChart2 className="mr-2 h-4 w-4" />
-                        Дүн харах
-                      </Link>
-                    </DropdownMenuItem>
-                  )}
-                  {!exam.is_published && (
-                    <DropdownMenuItem asChild>
-                      <Link href={`/educator/exams/${exam.id}/edit`}>Шалгалт засах</Link>
-                    </DropdownMenuItem>
-                  )}
-                  {!exam.is_published && qCount > 0 && (
-                    <DropdownMenuItem onClick={() => handlePublish(exam.id)}>
-                      Нийтлэх
-                    </DropdownMenuItem>
-                  )}
-                  {!exam.is_published && qCount === 0 && (
-                    <DropdownMenuItem disabled className="text-muted-foreground">
-                      Нийтлэх (асуулт нэмнэ үү)
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="text-destructive"
-                    onClick={() => setDeleteTarget({ id: exam.id, title: exam.title })}
-                  >
-                    Устгах
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </CardHeader>
-            <CardContent className="flex flex-1 flex-col gap-3">
-              {exam.description && (
-                <p className="text-xs text-muted-foreground line-clamp-2">{exam.description}</p>
-              )}
-              <div className="flex flex-wrap gap-2">
-                <Badge variant={lifecycle.variant}>{lifecycle.label}</Badge>
-                <Badge variant="outline">{qCount} асуулт</Badge>
-                <Badge variant="outline">{exam.duration_minutes} мин</Badge>
-                <Badge variant="outline">{exam.max_attempts} оролдлого</Badge>
-                {exam.subjects?.name && (
-                  <Badge variant="secondary">{exam.subjects.name}</Badge>
-                )}
-                {exam.shuffle_options && (
-                  <Badge variant="outline">Сонголт холих</Badge>
-                )}
+      <div className="space-y-4">
+        <div className="inline-flex rounded-lg border bg-background p-1">
+          <Button
+            type="button"
+            variant={groupMode === "status" ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => setGroupMode("status")}
+          >
+            Төлөвөөр
+          </Button>
+          <Button
+            type="button"
+            variant={groupMode === "subject" ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => setGroupMode("subject")}
+          >
+            Хичээлээр
+          </Button>
+        </div>
+
+        <div className="space-y-4">
+          {grouped.map((section) => (
+            <Card key={section.key} className="overflow-hidden">
+              <div className="flex items-center justify-between border-b px-4 py-3">
+                <h3 className="text-sm font-semibold">{section.label}</h3>
+                <span className="text-xs text-muted-foreground">
+                  {section.items.length}
+                </span>
               </div>
-              <div className="space-y-1 text-xs text-muted-foreground">
-                <p>{startDate}</p>
-                <p>{lifecycle.description}</p>
+
+              <div className="divide-y">
+                {section.items.map(({ exam, lifecycle, questionCount, subjectName }) => (
+                  (() => {
+                    const primaryAction = getPrimaryAction(exam, lifecycle);
+
+                    return (
+                      <div
+                        key={exam.id}
+                        className="flex items-center gap-3 px-4 py-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="truncate text-sm font-medium">{exam.title}</p>
+                            {groupMode === "subject" && (
+                              <Badge variant={lifecycle.variant}>{lifecycle.label}</Badge>
+                            )}
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {groupMode === "status" ? `${subjectName} · ` : ""}
+                            {formatDateTimeUB(exam.start_time)} · {exam.duration_minutes} мин
+                            {" · "}
+                            {questionCount} асуулт
+                          </p>
+                        </div>
+
+                        {primaryAction && (
+                          <Button
+                            asChild
+                            variant={primaryAction.variant ?? "outline"}
+                            size="sm"
+                          >
+                            <Link href={primaryAction.href}>{primaryAction.label}</Link>
+                          </Button>
+                        )}
+
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem asChild>
+                              <Link href={`/educator/exams/${exam.id}/questions`}>
+                                Асуулт
+                              </Link>
+                            </DropdownMenuItem>
+                            {exam.is_published ? (
+                              <DropdownMenuItem asChild>
+                                <Link href={`/educator/exams/${exam.id}/results`}>
+                                  <BarChart2 className="mr-2 h-4 w-4" />
+                                  Дүн
+                                </Link>
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem asChild>
+                                <Link href={`/educator/exams/${exam.id}/edit`}>
+                                  Засварлах
+                                </Link>
+                              </DropdownMenuItem>
+                            )}
+                            {!exam.is_published && questionCount > 0 && (
+                              <DropdownMenuItem onClick={() => handlePublish(exam.id)}>
+                                Нийтлэх
+                              </DropdownMenuItem>
+                            )}
+                            {!exam.is_published && questionCount === 0 && (
+                              <DropdownMenuItem disabled className="text-muted-foreground">
+                                Нийтлэх боломжгүй
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={() =>
+                                setDeleteTarget({ id: exam.id, title: exam.title })
+                              }
+                            >
+                              Устгах
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    );
+                  })()
+                ))}
               </div>
-              <Link href={`/educator/exams/${exam.id}/questions`} className="mt-auto">
-                <Button variant="outline" size="sm" className="w-full">
-                  {exam.is_published ? "Харах" : "Засах"}
-                </Button>
-              </Link>
-            </CardContent>
-          </Card>
-        );
-      })}
-    </div>
+            </Card>
+          ))}
+        </div>
+      </div>
     </>
   );
 }

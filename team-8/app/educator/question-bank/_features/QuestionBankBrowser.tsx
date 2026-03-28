@@ -3,124 +3,54 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Pencil, Search, Trash2 } from "lucide-react";
+import { Search } from "lucide-react";
 import {
-  deleteQuestionBankItem,
   importQuestionFromBank,
+  importSampleExamToExam,
 } from "@/lib/question/actions";
-import type {
-  Difficulty,
-  QuestionBank,
-  QuestionBankSummary,
-  Subject,
-} from "@/types";
+import type { QuestionBank, SampleExam, Subject } from "@/types";
+import MathContent from "@/components/math/MathContent";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import MathContent from "@/components/math/MathContent";
-import EditQuestionBankDialog from "./EditQuestionBankDialog";
 
 const typeLabels: Record<string, string> = {
   multiple_choice: "Сонголтот",
   multiple_response: "Олон зөв",
-  true_false: "Үнэн/Худал",
   essay: "Нээлттэй",
-  fill_blank: "Цоорхой",
+  fill_blank: "Нөхөх",
   matching: "Холбох",
 };
 
-const difficultyLabels: Record<Difficulty, string> = {
-  easy: "Хялбар",
-  medium: "Дунд",
-  hard: "Хэцүү",
+const difficultyLabels: Record<number, string> = {
+  1: "Хөнгөн",
+  2: "Дунд",
+  3: "Хүнд",
 };
 
 interface QuestionBankBrowserProps {
-  questions: QuestionBank[];
-  summary: QuestionBankSummary;
+  certifiedQuestions: QuestionBank[];
+  sampleExams: SampleExam[];
   subjects: Subject[];
-  viewerId: string | null;
-  isAdmin: boolean;
   examId?: string;
   examTitle?: string;
   targetExamSubjectId?: string;
   importUnavailableMessage?: string | null;
 }
 
-interface StatCardProps {
-  title: string;
-  value: number;
-  bgColor: string;
-  darkColor: string;
-}
+type TabKey = "sample" | "bank";
 
-function StatCard({ title, value, bgColor, darkColor }: StatCardProps) {
-  return (
-    <Card
-      className={`relative h-full overflow-hidden rounded-2xl p-4 text-white shadow-lg ${bgColor}`}
-    >
-      <div
-        className={`absolute left-[-20%] top-[-30%] h-[80%] w-[60%] rounded-[50%] opacity-60 ${darkColor}`}
-      />
-      <div
-        className={`absolute bottom-[-30%] right-[-20%] h-[70%] w-[50%] rounded-[40%] opacity-70 ${darkColor}`}
-      />
-      <div className="absolute inset-0 rounded-full bg-white/10 opacity-30 blur-3xl" />
-
-      <div className="relative z-10 flex h-full flex-col justify-between">
-        <div className="space-y-1">
-          <h3 className="text-sm font-bold tracking-tight opacity-90">
-            {title}
-          </h3>
-          <p className="text-2xl font-semibold">{value}</p>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-function isManageable(
-  question: QuestionBank,
-  viewerId: string | null,
-  isAdmin: boolean,
-) {
-  if (question.visibility === "admin_curated") {
-    return isAdmin;
-  }
-
-  return isAdmin || question.created_by === viewerId;
-}
-
-function getDifficultyBadgeClassName(difficulty: Difficulty) {
-  if (difficulty === "easy") {
-    return "border-transparent bg-[#8BCF8A] text-white";
-  }
-
-  if (difficulty === "medium") {
-    return "border-transparent bg-[#F7BC41] text-white";
-  }
-
-  return "border-transparent bg-[#E56B67] text-white";
+function uniqueValues(values: Array<string | null | undefined>) {
+  return Array.from(
+    new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean))
+  ).sort((left, right) => left.localeCompare(right, "mn"));
 }
 
 export default function QuestionBankBrowser({
-  questions,
-  summary,
+  certifiedQuestions,
+  sampleExams,
   subjects,
-  viewerId,
-  isAdmin,
   examId,
   examTitle,
   targetExamSubjectId,
@@ -128,108 +58,174 @@ export default function QuestionBankBrowser({
 }: QuestionBankBrowserProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [tab, setTab] = useState<TabKey>("sample");
   const [query, setQuery] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [difficultyFilter, setDifficultyFilter] = useState("all");
   const [subjectFilter, setSubjectFilter] = useState("all");
-  const [visibilityFilter, setVisibilityFilter] = useState("all");
-  const [error, setError] = useState<string | null>(
-    importUnavailableMessage ?? null,
+  const [gradeFilter, setGradeFilter] = useState("all");
+  const [subtopicFilter, setSubtopicFilter] = useState("all");
+  const [difficultyFilter, setDifficultyFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [message, setMessage] = useState<string | null>(
+    importUnavailableMessage ?? null
   );
-  const [warning, setWarning] = useState<string | null>(null);
-  const [lastImportedId, setLastImportedId] = useState<string | null>(null);
+  const [lastImportedQuestionId, setLastImportedQuestionId] = useState<string | null>(null);
+  const [lastImportedSampleId, setLastImportedSampleId] = useState<string | null>(null);
 
   const normalizedQuery = query.trim().toLowerCase();
-  const availableSubjects = useMemo(
+
+  const subjectOptions = useMemo(
     () =>
       Array.from(
-        new Map(
-          subjects.map((subject) => [subject.id, subject.name]),
-        ).entries(),
-      ).sort((a, b) => a[1].localeCompare(b[1], "mn")),
-    [subjects],
+        new Map(subjects.map((subject) => [subject.id, subject.name])).entries()
+      ).sort((left, right) => left[1].localeCompare(right[1], "mn")),
+    [subjects]
   );
 
-  const filteredQuestions = useMemo(() => {
-    return questions.filter((question) => {
+  const gradeOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...certifiedQuestions.map((question) => question.grade_level),
+            ...sampleExams.map((sampleExam) => sampleExam.grade_level),
+          ].filter((grade): grade is number => Boolean(grade))
+        )
+      ).sort((left, right) => left - right),
+    [certifiedQuestions, sampleExams]
+  );
+
+  const subtopicOptions = useMemo(
+    () =>
+      uniqueValues([
+        ...certifiedQuestions.map((question) => question.subtopic),
+        ...sampleExams.map((sampleExam) => sampleExam.subtopic),
+      ]),
+    [certifiedQuestions, sampleExams]
+  );
+
+  const filteredSampleExams = useMemo(() => {
+    return sampleExams.filter((sampleExam) => {
+      const matchesQuery =
+        normalizedQuery.length === 0 ||
+        sampleExam.title.toLowerCase().includes(normalizedQuery) ||
+        (sampleExam.description ?? "").toLowerCase().includes(normalizedQuery) ||
+        (sampleExam.subtopic ?? "").toLowerCase().includes(normalizedQuery) ||
+        (sampleExam.subjects?.name ?? "").toLowerCase().includes(normalizedQuery);
+
+      const matchesSubject =
+        subjectFilter === "all" || sampleExam.subject_id === subjectFilter;
+      const matchesGrade =
+        gradeFilter === "all" || String(sampleExam.grade_level) === gradeFilter;
+      const matchesSubtopic =
+        subtopicFilter === "all" || sampleExam.subtopic === subtopicFilter;
+      const matchesDifficulty =
+        difficultyFilter === "all" ||
+        String(sampleExam.difficulty_level) === difficultyFilter;
+
+      return (
+        matchesQuery &&
+        matchesSubject &&
+        matchesGrade &&
+        matchesSubtopic &&
+        matchesDifficulty
+      );
+    });
+  }, [
+    difficultyFilter,
+    gradeFilter,
+    normalizedQuery,
+    sampleExams,
+    subjectFilter,
+    subtopicFilter,
+  ]);
+
+  const filteredCertifiedQuestions = useMemo(() => {
+    return certifiedQuestions.filter((question) => {
       const tags = Array.isArray(question.tags) ? question.tags : [];
-      const subjectName = question.subjects?.name ?? null;
       const matchesQuery =
         normalizedQuery.length === 0 ||
         question.content.toLowerCase().includes(normalizedQuery) ||
         (question.explanation ?? "").toLowerCase().includes(normalizedQuery) ||
-        tags.some((tag) => tag.toLowerCase().includes(normalizedQuery)) ||
-        (subjectName ?? "").toLowerCase().includes(normalizedQuery);
+        (question.subtopic ?? "").toLowerCase().includes(normalizedQuery) ||
+        (question.subjects?.name ?? "").toLowerCase().includes(normalizedQuery) ||
+        tags.some((tag) => tag.toLowerCase().includes(normalizedQuery));
 
-      const matchesType = typeFilter === "all" || question.type === typeFilter;
-      const matchesDifficulty =
-        difficultyFilter === "all" || question.difficulty === difficultyFilter;
       const matchesSubject =
         subjectFilter === "all" || question.subject_id === subjectFilter;
-      const matchesVisibility =
-        visibilityFilter === "all" || question.visibility === visibilityFilter;
+      const matchesGrade =
+        gradeFilter === "all" || String(question.grade_level ?? "") === gradeFilter;
+      const matchesSubtopic =
+        subtopicFilter === "all" || question.subtopic === subtopicFilter;
+      const matchesDifficulty =
+        difficultyFilter === "all" ||
+        String(question.difficulty_level) === difficultyFilter;
+      const matchesType = typeFilter === "all" || question.type === typeFilter;
 
       return (
         matchesQuery &&
-        matchesType &&
-        matchesDifficulty &&
         matchesSubject &&
-        matchesVisibility
+        matchesGrade &&
+        matchesSubtopic &&
+        matchesDifficulty &&
+        matchesType
       );
     });
-  }, [difficultyFilter, normalizedQuery, questions, subjectFilter, typeFilter, visibilityFilter]);
+  }, [
+    certifiedQuestions,
+    difficultyFilter,
+    gradeFilter,
+    normalizedQuery,
+    subjectFilter,
+    subtopicFilter,
+    typeFilter,
+  ]);
 
-  function handleImport(bankQuestionId: string) {
-    if (!examId) {
-      setError(
-        importUnavailableMessage ?? "Импорт хийх шалгалт сонгогдоогүй байна",
-      );
-      return;
-    }
+  function handleImportQuestion(questionId: string) {
+    if (!examId) return;
 
-    setError(null);
-    setWarning(null);
+    setMessage(null);
     startTransition(() => {
       void (async () => {
-        const result = await importQuestionFromBank(examId, bankQuestionId);
+        const result = await importQuestionFromBank(examId, questionId);
         if (result?.error) {
-          setError(result.error);
+          setMessage(result.error);
           return;
         }
 
-        setLastImportedId(bankQuestionId);
-        setWarning(result?.warning ?? null);
+        setLastImportedQuestionId(questionId);
+        setLastImportedSampleId(null);
         router.refresh();
       })();
     });
   }
 
-  function handleDelete(questionId: string) {
-    setError(null);
-    setWarning(null);
+  function handleImportSampleExam(sampleExamId: string) {
+    if (!examId) return;
+
+    setMessage(null);
     startTransition(() => {
       void (async () => {
-        const result = await deleteQuestionBankItem(questionId);
+        const result = await importSampleExamToExam(examId, sampleExamId);
         if (result?.error) {
-          setError(result.error);
+          setMessage(result.error);
           return;
         }
 
+        setLastImportedSampleId(sampleExamId);
+        setLastImportedQuestionId(null);
         router.refresh();
       })();
     });
   }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {examId && examTitle ? (
         <Card>
           <CardContent className="flex flex-col gap-3 pt-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <p className="text-sm font-medium">Import mode идэвхтэй</p>
-              <p className="text-sm text-muted-foreground">
-                Асуултуудыг <span className="font-medium">{examTitle}</span>{" "}
-                шалгалт руу шууд оруулна.
-              </p>
+              <p className="text-sm font-medium">Шалгалт руу оруулах горим</p>
+              <p className="text-sm text-muted-foreground">{examTitle}</p>
             </div>
             <Button asChild variant="outline">
               <Link href={`/educator/exams/${examId}/questions`}>
@@ -238,272 +234,282 @@ export default function QuestionBankBrowser({
             </Button>
           </CardContent>
         </Card>
-      ) : importUnavailableMessage ? (
-        <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-          {importUnavailableMessage}
-        </div>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <StatCard
-          title="Нийт асуулт"
-          value={summary.total}
-          bgColor="bg-[#4F9DF7]"
-          darkColor="bg-[#2F6BD7]"
-        />
-
-        <StatCard
-          title="Удирдаж болох"
-          value={summary.manageable}
-          bgColor="bg-[#A855F7]"
-          darkColor="bg-[#7E22CE]"
-        />
-
-        <StatCard
-          title="Хуваалцсан / Curated"
-          value={summary.shared_subject_count + summary.admin_curated_count}
-          bgColor="bg-[#06B6D4]"
-          darkColor="bg-[#0891B2]"
-        />
-
-        <StatCard
-          title="Сүүлийн 30 хоног"
-          value={summary.recently_used_count}
-          bgColor="bg-[#FB923C]"
-          darkColor="bg-[#EA580C]"
-        />
-
-        <StatCard
-          title="Нийт ашиглалт"
-          value={summary.total_usage_count}
-          bgColor="bg-[#6366F1]"
-          darkColor="bg-[#4338CA]"
-        />
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant={tab === "sample" ? "default" : "outline"}
+          onClick={() => setTab("sample")}
+        >
+          Жишиг шалгалт
+        </Button>
+        <Button
+          type="button"
+          variant={tab === "bank" ? "default" : "outline"}
+          onClick={() => setTab("bank")}
+        >
+          Баталгаажсан сан
+        </Button>
       </div>
 
-      <div className="">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_repeat(4,minmax(0,1fr))]">
-          <label className="relative block">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Хайх"
-              className="h-11 rounded-2xl border-0 bg-muted pl-11 shadow-none font-medium"
-            />
-          </label>
-          <label className="relative block">
-            <select
-              value={typeFilter}
-              onChange={(event) => setTypeFilter(event.target.value)}
-              className="h-11 w-full appearance-none rounded-2xl border-0 bg-muted px-4 pr-10 text-sm shadow-none font-medium outline-none"
-            >
-              <option value="all">Бүх төрөл</option>
-              <option value="multiple_choice">Сонголтот</option>
-              <option value="multiple_response">Олон зөв</option>
-              <option value="essay">Нээлттэй</option>
-              <option value="fill_blank">Цоорхой</option>
-              <option value="matching">Холбох</option>
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          </label>
-          <label className="relative block">
-            <select
-              value={difficultyFilter}
-              onChange={(event) => setDifficultyFilter(event.target.value)}
-              className="h-11 w-full appearance-none rounded-2xl font-medium border-0 bg-muted px-4 pr-10 text-sm shadow-none outline-none"
-            >
-              <option value="all">Бүх түвшин</option>
-              <option value="easy">Хялбар</option>
-              <option value="medium">Дунд</option>
-              <option value="hard">Хэцүү</option>
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          </label>
-          <label className="relative block">
-            <select
-              value={subjectFilter}
-              onChange={(event) => setSubjectFilter(event.target.value)}
-              className="h-11 w-full appearance-none font-medium rounded-2xl border-0 bg-muted px-4 pr-10 text-sm shadow-none outline-none"
-            >
-              <option value="all">Бүх хичээл</option>
-              {availableSubjects.map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name}
-                </option>
-              ))}
-            </select>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <label className="relative block xl:col-span-2">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Хайх"
+            className="pl-10"
+          />
+        </label>
 
-            <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          </label>
-          <label className="relative block">
-            <select
-              value={visibilityFilter}
-              onChange={(event) => setVisibilityFilter(event.target.value)}
-              className="h-11 w-full appearance-none rounded-2xl font-medium border-0 bg-muted px-4 pr-10 text-sm shadow-none outline-none"
-            >
-              <option value="all">Бүх төлөв</option>
-              <option value="private">Хувийн</option>
-              <option value="shared_subject">Хичээлийн дундын</option>
-              <option value="admin_curated">Баталгаажсан сан</option>
-              <option value="archived">Архив</option>
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          </label>
-        </div>
+        <select
+          value={subjectFilter}
+          onChange={(event) => setSubjectFilter(event.target.value)}
+          className="h-10 rounded-md border bg-background px-3 text-sm"
+        >
+          <option value="all">Бүх хичээл</option>
+          {subjectOptions.map(([id, name]) => (
+            <option key={id} value={id}>
+              {name}
+            </option>
+          ))}
+        </select>
 
-        {error && (
-          <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
-            {error}
-          </div>
+        <select
+          value={gradeFilter}
+          onChange={(event) => setGradeFilter(event.target.value)}
+          className="h-10 rounded-md border bg-background px-3 text-sm"
+        >
+          <option value="all">Бүх анги</option>
+          {gradeOptions.map((grade) => (
+            <option key={grade} value={String(grade)}>
+              {grade}-р анги
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={subtopicFilter}
+          onChange={(event) => setSubtopicFilter(event.target.value)}
+          className="h-10 rounded-md border bg-background px-3 text-sm"
+        >
+          <option value="all">Бүх дэд сэдэв</option>
+          {subtopicOptions.map((subtopic) => (
+            <option key={subtopic} value={subtopic}>
+              {subtopic}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={difficultyFilter}
+          onChange={(event) => setDifficultyFilter(event.target.value)}
+          className="h-10 rounded-md border bg-background px-3 text-sm"
+        >
+          <option value="all">Бүх түвшин</option>
+          <option value="1">1 · Хөнгөн</option>
+          <option value="2">2 · Дунд</option>
+          <option value="3">3 · Хүнд</option>
+        </select>
+
+        {tab === "bank" && (
+          <select
+            value={typeFilter}
+            onChange={(event) => setTypeFilter(event.target.value)}
+            className="h-10 rounded-md border bg-background px-3 text-sm"
+          >
+            <option value="all">Бүх төрөл</option>
+            <option value="multiple_choice">Сонголтот</option>
+            <option value="multiple_response">Олон зөв</option>
+            <option value="essay">Нээлттэй</option>
+            <option value="fill_blank">Нөхөх</option>
+            <option value="matching">Холбох</option>
+          </select>
         )}
       </div>
 
-      {warning && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          {warning}
+      {message && (
+        <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+          {message}
         </div>
       )}
 
-      {filteredQuestions.length === 0 ? (
-        <div className="rounded-lg border border-dashed py-16 text-center text-muted-foreground">
-          Шүүлтэд тохирох асуулт олдсонгүй.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {filteredQuestions.map((question, idx) => {
-            const canManage = isManageable(question, viewerId, isAdmin);
-            const hasSubjectMismatch = Boolean(
-              targetExamSubjectId &&
-              question.subject_id &&
-              question.subject_id !== targetExamSubjectId,
-            );
-            const canImport =
-              question.visibility !== "archived" && !hasSubjectMismatch;
+      {tab === "sample" ? (
+        filteredSampleExams.length === 0 ? (
+          <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
+            Жишиг шалгалт олдсонгүй.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filteredSampleExams.map((sampleExam) => {
+              const hasSubjectMismatch = Boolean(
+                targetExamSubjectId &&
+                  sampleExam.subject_id &&
+                  sampleExam.subject_id !== targetExamSubjectId
+              );
 
-            return (
-              <Card
-                key={question.id}
-                className="overflow-hidden rounded-[22px] border border-black/5 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.12)]"
-              >
-                <CardContent className="flex gap-4 p-1">
-                  <div className="min-w-0 flex-1 space-y-3">
-                    <div className="flex justify-between">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border border-[#D0D0D0] bg-white px-2.5 py-3 text-[13px] font-medium text-black shadow-none"
-                        >
-                          {typeLabels[question.type] ?? question.type}
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className={`rounded-full px-2.5 py-3 text-[13px] font-medium shadow-none ${getDifficultyBadgeClassName(question.difficulty)}`}
-                        >
-                          {difficultyLabels[question.difficulty]}
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-transparent bg-[#E6E6E6] px-2.5 py-3 text-[13px] font-medium text-black shadow-none"
-                        >
-                          {question.points} оноо
-                        </Badge>
-                        {lastImportedId === question.id && (
-                          <Badge className="rounded-full px-6 py-2 text-base">
-                            Импорт хийсэн
+              return (
+                <Card key={sampleExam.id}>
+                  <CardContent className="space-y-4 pt-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div className="space-y-2">
+                        <h3 className="font-semibold">{sampleExam.title}</h3>
+                        <div className="flex flex-wrap gap-2">
+                          {sampleExam.subjects?.name && (
+                            <Badge variant="outline">{sampleExam.subjects.name}</Badge>
+                          )}
+                          <Badge variant="outline">
+                            {sampleExam.grade_level}-р анги
                           </Badge>
+                          {sampleExam.subtopic && (
+                            <Badge variant="outline">{sampleExam.subtopic}</Badge>
+                          )}
+                          <Badge variant="secondary">
+                            {difficultyLabels[sampleExam.difficulty_level]}
+                          </Badge>
+                          <Badge variant="outline">
+                            {sampleExam.duration_minutes} минут
+                          </Badge>
+                          <Badge variant="outline">
+                            {sampleExam.question_count} асуулт
+                          </Badge>
+                        </div>
+                        {sampleExam.description && (
+                          <p className="text-sm text-muted-foreground">
+                            {sampleExam.description}
+                          </p>
                         )}
                       </div>
-                      <div className="flex shrink-0 items-start gap-4">
-                        {canManage ? (
-                          <>
-                            <EditQuestionBankDialog
-                              question={question}
-                              subjects={subjects}
-                              canAdminCurate={isAdmin}
-                              trigger={
-                                <Button
-                                  type="button"
-                                  size="icon"
-                                  variant="ghost"
-                                  className="h-9 w-9 rounded-full text-slate-600 hover:bg-slate-100"
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                  <span className="sr-only">Засах</span>
-                                </Button>
-                              }
-                            />
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button
-                                  type="button"
-                                  size="icon"
-                                  variant="ghost"
-                                  className="h-9 w-9 rounded-full text-rose-500 hover:bg-rose-50 hover:text-rose-600"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                  <span className="sr-only">Устгах</span>
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>
-                                    Энэ бичлэгийг устгах уу?
-                                  </AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    Асуултын сангаас бүр мөсөн устгана.
-                                    Шалгалтад өмнө импортолсон хувилбарууд
-                                    устахгүй.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Болих</AlertDialogCancel>
-                                  <AlertDialogAction
-                                    variant="destructive"
-                                    onClick={() => handleDelete(question.id)}
-                                    disabled={isPending}
-                                  >
-                                    {isPending ? "Устгаж байна..." : "Устгах"}
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="flex min-w-0 items-start justify-between gap-4">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 items-start gap-2 text-[13px] font-semibold text-foreground">
-                          <span className="shrink-0">{idx + 1}.</span>
-                          <MathContent
-                            html={question.content_html}
-                            text={question.content}
-                            className="min-w-0 flex-1 break-words [&_p]:m-0 [&_p]:whitespace-normal"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    {examId && !importUnavailableMessage ? (
-                      <div className="flex justify-end pt-1">
+
+                      {examId ? (
                         <Button
                           type="button"
-                          size="sm"
-                          onClick={() => handleImport(question.id)}
-                          disabled={isPending || !canImport}
-                          variant={canImport ? "default" : "outline"}
+                          onClick={() => handleImportSampleExam(sampleExam.id)}
+                          disabled={isPending || hasSubjectMismatch}
+                          variant={hasSubjectMismatch ? "outline" : "default"}
                         >
-                          {question.visibility === "archived"
-                            ? "Архивласан"
+                          {lastImportedSampleId === sampleExam.id
+                            ? "Оруулсан"
                             : hasSubjectMismatch
                               ? "Хичээл таарахгүй"
                               : isPending
-                                ? "Импорт..."
+                                ? "Оруулж байна..."
                                 : "Шалгалт руу оруулах"}
                         </Button>
-                      </div>
+                      ) : null}
+                    </div>
+
+                    {sampleExam.sample_exam_items && sampleExam.sample_exam_items.length > 0 && (
+                      <details className="rounded-lg border bg-muted/10 p-3">
+                        <summary className="cursor-pointer text-sm font-medium">
+                          Агуулга харах
+                        </summary>
+                        <div className="mt-3 space-y-3">
+                          {sampleExam.sample_exam_items
+                            .sort((left, right) => left.order_index - right.order_index)
+                            .map((item, index) => (
+                              <div key={item.id} className="space-y-1">
+                                <div className="flex flex-wrap items-center gap-2 text-sm">
+                                  <span className="font-medium">{index + 1}.</span>
+                                  {item.question_bank?.type && (
+                                    <Badge variant="outline">
+                                      {typeLabels[item.question_bank.type] ?? item.question_bank.type}
+                                    </Badge>
+                                  )}
+                                  {item.question_bank?.points ? (
+                                    <Badge variant="outline">
+                                      {item.question_bank.points} оноо
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                                {item.question_bank && (
+                                  <MathContent
+                                    html={item.question_bank.content_html}
+                                    text={item.question_bank.content}
+                                    className="prose prose-sm max-w-none text-foreground"
+                                  />
+                                )}
+                              </div>
+                            ))}
+                        </div>
+                      </details>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )
+      ) : filteredCertifiedQuestions.length === 0 ? (
+        <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
+          Баталгаажсан бодлого олдсонгүй.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filteredCertifiedQuestions.map((question) => {
+            const hasSubjectMismatch = Boolean(
+              targetExamSubjectId &&
+                question.subject_id &&
+                question.subject_id !== targetExamSubjectId
+            );
+
+            return (
+              <Card key={question.id}>
+                <CardContent className="space-y-3 pt-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="flex flex-wrap gap-2">
+                      {question.subjects?.name && (
+                        <Badge variant="outline">{question.subjects.name}</Badge>
+                      )}
+                      {question.grade_level && (
+                        <Badge variant="outline">{question.grade_level}-р анги</Badge>
+                      )}
+                      {question.subtopic && (
+                        <Badge variant="outline">{question.subtopic}</Badge>
+                      )}
+                      <Badge variant="outline">
+                        {typeLabels[question.type] ?? question.type}
+                      </Badge>
+                      <Badge variant="secondary">
+                        {difficultyLabels[question.difficulty_level]}
+                      </Badge>
+                      <Badge variant="outline">{question.points} оноо</Badge>
+                    </div>
+
+                    {examId ? (
+                      <Button
+                        type="button"
+                        onClick={() => handleImportQuestion(question.id)}
+                        disabled={isPending || hasSubjectMismatch}
+                        variant={hasSubjectMismatch ? "outline" : "default"}
+                      >
+                        {lastImportedQuestionId === question.id
+                          ? "Оруулсан"
+                          : hasSubjectMismatch
+                            ? "Хичээл таарахгүй"
+                            : isPending
+                              ? "Оруулж байна..."
+                              : "Шалгалт руу оруулах"}
+                      </Button>
                     ) : null}
                   </div>
+
+                  <MathContent
+                    html={question.content_html}
+                    text={question.content}
+                    className="prose prose-sm max-w-none text-foreground"
+                  />
+
+                  {question.image_url && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={question.image_url}
+                      alt="Асуултын зураг"
+                      className="max-h-56 rounded-lg border"
+                    />
+                  )}
                 </CardContent>
               </Card>
             );

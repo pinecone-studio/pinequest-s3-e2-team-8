@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -29,7 +28,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 const questionTypes: { value: QuestionType; label: string }[] = [
   { value: "multiple_choice", label: "Сонгох" },
-  { value: "multiple_response", label: "Олон сонголттой" },
+  { value: "multiple_response", label: "Олон зөв" },
   { value: "fill_blank", label: "Нөхөх" },
   { value: "essay", label: "Задгай / Эссэ" },
   { value: "matching", label: "Холбох" },
@@ -111,7 +110,14 @@ export default function EditQuestionDialog({
 }: EditQuestionDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const contentTargetId = `content-${question.id}`;
+  const contentHtmlTargetId = `content-html-${question.id}`;
   const [type, setType] = useState<QuestionType>(question.type);
+  const [isFormulaToolOpen, setIsFormulaToolOpen] = useState(false);
+  const [activeFormulaTarget, setActiveFormulaTarget] = useState({
+    id: contentTargetId,
+    label: "Асуулт",
+  });
   const [selectedPassageId, setSelectedPassageId] = useState(
     getInitialPassageId(question)
   );
@@ -130,6 +136,9 @@ export default function EditQuestionDialog({
     selectedPassageId === "__none"
       ? null
       : passages.find((passage) => passage.id === selectedPassageId) ?? null;
+  const hasAdvancedValues = Boolean(
+    question.image_url || question.content_html || question.explanation
+  );
 
   function resetState(nextType: QuestionType = question.type) {
     setType(nextType);
@@ -143,12 +152,29 @@ export default function EditQuestionDialog({
   function handleOpenChange(nextOpen: boolean) {
     if (nextOpen) {
       resetState();
+      setIsFormulaToolOpen(false);
+      setActiveFormulaTarget({
+        id: contentTargetId,
+        label: "Асуулт",
+      });
     } else {
       setError(null);
       setSaving(false);
+      setIsFormulaToolOpen(false);
     }
 
     setOpen(nextOpen);
+  }
+
+  function toggleFormulaTool(targetId: string, label: string) {
+    const isSameTarget = activeFormulaTarget.id === targetId;
+    if (isFormulaToolOpen && isSameTarget) {
+      setIsFormulaToolOpen(false);
+      return;
+    }
+
+    setActiveFormulaTarget({ id: targetId, label });
+    setIsFormulaToolOpen(true);
   }
 
   function handleTypeChange(value: QuestionType) {
@@ -279,7 +305,7 @@ export default function EditQuestionDialog({
       formData.set("correct_answer", JSON.stringify(validCorrectAnswers));
     } else if (type === "fill_blank") {
       if (!correctAnswer.trim()) {
-        setError("Нөхөх асуултын зөв хариултыг оруулна уу.");
+        setError("Зөв хариултаа оруулна уу.");
         setSaving(false);
         return;
       }
@@ -295,7 +321,7 @@ export default function EditQuestionDialog({
         .filter((pair) => pair.left && pair.right);
 
       if (validPairs.length < 2) {
-        setError("Холбох асуултад дор хаяж 2 мөр хэрэгтэй.");
+        setError("Дор хаяж 2 мөр хэрэгтэй.");
         setSaving(false);
         return;
       }
@@ -325,26 +351,25 @@ export default function EditQuestionDialog({
           Засах
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Асуулт засах</DialogTitle>
-          <DialogDescription>
-            Draft шалгалтын асуултын төрөл, passage холбоос, контент, зураг,
-            зөв хариултыг шинэчилнэ.
-          </DialogDescription>
         </DialogHeader>
 
-        <form className="space-y-4" action={handleSubmit}>
+        <form className="space-y-5" action={handleSubmit}>
           {error && (
             <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
               {error}
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 rounded-xl border p-4 md:grid-cols-3">
             <div className="space-y-2">
               <Label>Асуултын төрөл</Label>
-              <Select value={type} onValueChange={(value) => handleTypeChange(value as QuestionType)}>
+              <Select
+                value={type}
+                onValueChange={(value) => handleTypeChange(value as QuestionType)}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -359,10 +384,22 @@ export default function EditQuestionDialog({
             </div>
 
             <div className="space-y-2">
-              <Label>Нийтлэг өгөгдөл / эх материал</Label>
+              <Label htmlFor={`points-${question.id}`}>Оноо</Label>
+              <Input
+                id={`points-${question.id}`}
+                name="points"
+                type="number"
+                min="0.5"
+                step="0.5"
+                defaultValue={question.points}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Эх материал</Label>
               <Select value={selectedPassageId} onValueChange={setSelectedPassageId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Эх материал холбохгүй" />
+                  <SelectValue placeholder="Холбохгүй" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none">Холбохгүй</SelectItem>
@@ -377,8 +414,8 @@ export default function EditQuestionDialog({
           </div>
 
           {selectedPassage && (
-            <div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="space-y-2 rounded-lg border border-dashed bg-muted/20 p-3">
+              <p className="text-xs font-medium text-muted-foreground">
                 Сонгосон эх материал
               </p>
               {selectedPassage.title && (
@@ -400,68 +437,53 @@ export default function EditQuestionDialog({
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor={`points-${question.id}`}>Оноо</Label>
-              <Input
-                id={`points-${question.id}`}
-                name="points"
-                type="number"
-                min="0.5"
-                step="0.5"
-                defaultValue={question.points}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={`image-url-${question.id}`}>Зургийн URL</Label>
-              <Input
-                id={`image-url-${question.id}`}
-                name="image_url"
-                type="url"
-                defaultValue={question.image_url ?? ""}
-                placeholder="https://example.com/question-image.png"
-              />
-            </div>
-          </div>
+          {isFormulaToolOpen && (
+            <LatexShortcutPanel
+              targetId={activeFormulaTarget.id}
+              targetLabel={activeFormulaTarget.label}
+              title="Томьёоны самбар"
+              description="Талбар дээр дараад томьёогоо оруулна."
+            />
+          )}
 
           <div className="space-y-2">
-            <Label htmlFor={`content-${question.id}`}>Агуулга</Label>
-            <LatexShortcutPanel
-              targetId={`content-${question.id}`}
-              title="Formula Tool"
-              description="Асуултын текст дотор томьёо, язгуур, хими, физикийн тэмдэгтээ шууд оруулна."
-            />
+            <div className="flex items-center justify-between">
+              <Label htmlFor={contentTargetId}>Асуулт</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-muted-foreground"
+                onClick={() => toggleFormulaTool(contentTargetId, "Асуулт")}
+              >
+                {isFormulaToolOpen && activeFormulaTarget.id === contentTargetId
+                  ? "Томьёо нуух"
+                  : "Томьёо"}
+              </Button>
+            </div>
             <Textarea
-              id={`content-${question.id}`}
+              id={contentTargetId}
               name="content"
-              rows={3}
-              defaultValue={question.content}
-              placeholder="Асуултын үндсэн текст..."
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor={`content-html-${question.id}`}>
-              Форматтай контент (HTML)
-            </Label>
-            <Textarea
-              id={`content-html-${question.id}`}
-              name="content_html"
               rows={4}
-              defaultValue={question.content_html ?? ""}
-              placeholder="<p>Formula, текстийн онцгой формат, HTML...</p>"
-            />
-            <LatexShortcutPanel
-              targetId={`content-html-${question.id}`}
-              title="LaTeX Helper"
-              description="HTML контент дотор формул эсвэл тусгай тэмдэгтээ нэмж болно."
+              defaultValue={question.content}
+              placeholder="Асуултын текст..."
+              onFocus={() =>
+                setActiveFormulaTarget({
+                  id: contentTargetId,
+                  label: "Асуулт",
+                })
+              }
             />
           </div>
 
           {(type === "multiple_choice" || type === "multiple_response") && (
-            <div className="space-y-3">
+            <div className="space-y-3 rounded-xl border p-4">
               <div className="flex items-center justify-between">
-                <Label>Сонголтууд</Label>
+                <Label>
+                  {type === "multiple_choice"
+                    ? "Сонголтууд"
+                    : "Сонголтууд ба зөв хариултууд"}
+                </Label>
                 <Button type="button" variant="outline" size="sm" onClick={addOption}>
                   Сонголт нэмэх
                 </Button>
@@ -474,7 +496,10 @@ export default function EditQuestionDialog({
                     : multipleCorrectAnswers.includes(option) && option.trim() !== "";
 
                 return (
-                  <div key={`${question.id}-option-${index}`} className="flex items-center gap-2">
+                  <div
+                    key={`${question.id}-option-${index}`}
+                    className="grid gap-2 md:grid-cols-[auto_1fr_auto]"
+                  >
                     <input
                       type={type === "multiple_choice" ? "radio" : "checkbox"}
                       name={`correct-choice-${question.id}-${index}`}
@@ -484,7 +509,7 @@ export default function EditQuestionDialog({
                           ? setCorrectAnswer(option)
                           : toggleMultipleAnswer(option)
                       }
-                      className="h-4 w-4 shrink-0"
+                      className="mt-3 h-4 w-4 shrink-0"
                       disabled={!option.trim()}
                     />
                     <Input
@@ -509,7 +534,7 @@ export default function EditQuestionDialog({
           )}
 
           {type === "fill_blank" && (
-            <div className="space-y-2">
+            <div className="space-y-2 rounded-xl border p-4">
               <Label htmlFor={`fill-blank-${question.id}`}>Зөв хариулт</Label>
               <Input
                 id={`fill-blank-${question.id}`}
@@ -521,7 +546,7 @@ export default function EditQuestionDialog({
           )}
 
           {type === "matching" && (
-            <div className="space-y-3">
+            <div className="space-y-3 rounded-xl border p-4">
               <div className="flex items-center justify-between">
                 <Label>Холбох мөрүүд</Label>
                 <Button type="button" variant="outline" size="sm" onClick={addMatchingPair}>
@@ -532,7 +557,7 @@ export default function EditQuestionDialog({
               {matchingPairs.map((pair, index) => (
                 <div
                   key={`${question.id}-pair-${index}`}
-                  className="grid gap-2 md:grid-cols-[1fr_auto_1fr_auto] md:items-center"
+                  className="grid gap-2 md:grid-cols-[1fr_1fr_auto]"
                 >
                   <Input
                     value={pair.left}
@@ -541,7 +566,6 @@ export default function EditQuestionDialog({
                     }
                     placeholder={`Зүүн тал ${index + 1}`}
                   />
-                  <span className="text-center text-sm text-muted-foreground">→</span>
                   <Input
                     value={pair.right}
                     onChange={(event) =>
@@ -565,21 +589,72 @@ export default function EditQuestionDialog({
           )}
 
           {type === "essay" && (
-            <p className="text-sm text-muted-foreground">
-              Задгай асуултыг багш grading дээр гараар үнэлнэ.
-            </p>
+            <div className="rounded-xl border p-4 text-sm text-muted-foreground">
+              Энэ асуултыг дараа нь багш гараар үнэлнэ.
+            </div>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor={`explanation-${question.id}`}>Тайлбар</Label>
-            <Textarea
-              id={`explanation-${question.id}`}
-              name="explanation"
-              rows={3}
-              defaultValue={question.explanation ?? ""}
-              placeholder="Зөв хариултын тайлбар, тэмдэглэл..."
-            />
-          </div>
+          <details className="rounded-xl border p-4" open={hasAdvancedValues}>
+            <summary className="cursor-pointer text-sm font-medium">Нэмэлт</summary>
+            <div className="mt-4 space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor={`image-url-${question.id}`}>Зургийн URL</Label>
+                  <Input
+                    id={`image-url-${question.id}`}
+                    name="image_url"
+                    type="url"
+                    defaultValue={question.image_url ?? ""}
+                    placeholder="https://example.com/question-image.png"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor={`explanation-${question.id}`}>Тайлбар</Label>
+                  <Textarea
+                    id={`explanation-${question.id}`}
+                    name="explanation"
+                    rows={3}
+                    defaultValue={question.explanation ?? ""}
+                    placeholder="Товч тайлбар..."
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor={contentHtmlTargetId}>HTML контент</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs text-muted-foreground"
+                    onClick={() =>
+                      toggleFormulaTool(contentHtmlTargetId, "HTML контент")
+                    }
+                  >
+                    {isFormulaToolOpen &&
+                    activeFormulaTarget.id === contentHtmlTargetId
+                      ? "Томьёо нуух"
+                      : "Томьёо"}
+                  </Button>
+                </div>
+                <Textarea
+                  id={contentHtmlTargetId}
+                  name="content_html"
+                  rows={4}
+                  defaultValue={question.content_html ?? ""}
+                  placeholder="<p>Форматтай текст...</p>"
+                  onFocus={() =>
+                    setActiveFormulaTarget({
+                      id: contentHtmlTargetId,
+                      label: "HTML контент",
+                    })
+                  }
+                />
+              </div>
+            </div>
+          </details>
 
           <DialogFooter className="gap-2">
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>

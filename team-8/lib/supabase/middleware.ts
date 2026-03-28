@@ -37,6 +37,7 @@ export async function updateSession(request: NextRequest) {
     (p) => pathname === p || pathname.startsWith(p + "/")
   );
   const isApiPath = pathname.startsWith("/api");
+  const isAuthPath = pathname === "/login" || pathname === "/register";
 
   // Allow API routes through
   if (isApiPath) return supabaseResponse;
@@ -48,10 +49,19 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Logged in user visiting login/register → redirect to app root.
-  // Role-specific routing is handled by app/page.tsx and layouts, which avoids
-  // an extra profiles query on every protected request in middleware.
-  if (user && (pathname === "/login" || pathname === "/register")) {
+  // Public auth routes need a stronger check than getSession().
+  // After reseeding auth users, stale cookies can still produce a local session
+  // object and cause /login -> / -> /login redirect loops.
+  if (user && isAuthPath) {
+    const {
+      data: { user: verifiedUser },
+    } = await supabase.auth.getUser();
+
+    if (!verifiedUser) {
+      await supabase.auth.signOut();
+      return supabaseResponse;
+    }
+
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);

@@ -63,7 +63,7 @@ interface QuestionImportActionsProps {
 
 const questionTypes: { value: QuestionType; label: string }[] = [
   { value: "multiple_choice", label: "Сонгох" },
-  { value: "multiple_response", label: "Олон сонголттой" },
+  { value: "multiple_response", label: "Олон зөв" },
   { value: "fill_blank", label: "Нөхөх" },
   { value: "essay", label: "Задгай / Эссэ" },
   { value: "matching", label: "Холбох" },
