@@ -8,6 +8,7 @@ import { syncExamRecipients } from "@/lib/exam-recipients";
 import { getExamPublishGuardError } from "@/lib/exam-readiness";
 import { assignExamToGroupRecord } from "@/lib/exam-assignments";
 import { notifyStudentsOfNewExam } from "@/lib/notification/actions";
+import { prewarmExamCache } from "@/lib/student/actions";
 import { toUlaanbaatarIsoString } from "@/lib/utils/date";
 import {
   deriveStudentExamLifecycle,
@@ -422,6 +423,19 @@ export async function publishExam(examId: string) {
     return { error: "Шалгалтын snapshot үүсгэж чадсангүй" };
   }
 
+  // Redis prewarm: cache stampede-ээс сэргийлж exam payload-г урьдчилан cache-лэнэ.
+  // Publish зөвхөн cache амжилттай бэлтгэгдсэн үед үргэлжилнэ.
+  try {
+    await prewarmExamCache(examId, snapshot);
+  } catch (prewarmError) {
+    return {
+      error:
+        prewarmError instanceof Error
+          ? `Шалгалтын cache бэлтгэхэд алдаа гарлаа: ${prewarmError.message}`
+          : "Шалгалтын cache бэлтгэхэд алдаа гарлаа",
+    };
+  }
+
   const publishPayload = {
     is_published: true,
     published_snapshot: snapshot,
@@ -463,7 +477,11 @@ export async function publishExam(examId: string) {
     notifyStudentsOfNewExam(
       examId,
       snapshot.exam.title,
-      studentIds
+      studentIds,
+      {
+        startTime: snapshot.exam.start_time,
+        durationMinutes: snapshot.exam.duration_minutes,
+      }
     ).catch(() => {});
   }
 

@@ -408,6 +408,7 @@ export async function finalizeGrading(sessionId: string) {
 
     // Notify parent
     notifyParentOfGrading(
+      sessionId,
       session.user_id,
       studentProfile?.full_name || "Сурагч",
       examRow.title,

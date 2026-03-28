@@ -32,18 +32,16 @@ export function useCameraMonitor({
   const streamRef = useRef<MediaStream | null>(null);
   // Prevent logging camera_denied more than once per session mount.
   const deniedLoggedRef = useRef(false);
+  const cameraApiAvailable =
+    typeof navigator !== "undefined" &&
+    Boolean(navigator.mediaDevices?.getUserMedia);
+  const effectiveCameraStatus: CameraStatus =
+    !enabled || (typeof navigator !== "undefined" && !cameraApiAvailable)
+      ? "unavailable"
+      : cameraStatus;
 
   useEffect(() => {
-    if (!enabled) {
-      setCameraStatus("unavailable");
-      return;
-    }
-
-    if (
-      typeof navigator === "undefined" ||
-      !navigator.mediaDevices?.getUserMedia
-    ) {
-      setCameraStatus("unavailable");
+    if (!enabled || !cameraApiAvailable) {
       return;
     }
 
@@ -83,9 +81,7 @@ export function useCameraMonitor({
         streamRef.current = null;
       }
     };
-    // sessionId is stable for the lifetime of a session; enabled changes at most once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, enabled]);
+  }, [cameraApiAvailable, sessionId, enabled]);
 
-  return { cameraStatus, videoRef };
+  return { cameraStatus: effectiveCameraStatus, videoRef };
 }

@@ -6,7 +6,6 @@ import { useState } from "react";
 import { logout } from "@/lib/auth/actions";
 import {
   ChevronLeft,
-  FileText,
   HomeIcon,
   ListCheck,
   LogOut,

@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import MathContent from "@/components/math/MathContent";
 import {
   logProctorEvent,
-  saveAnswer,
+  saveAnswersBatch,
   submitExam,
 } from "@/lib/student/actions";
 import { useCameraMonitor } from "@/hooks/useCameraMonitor";
@@ -191,9 +191,8 @@ export default function ExamTaker({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
-  const saveTimersRef = useRef<Record<string, number>>({});
-  const dirtyAnswersRef = useRef<Record<string, string>>({});
-  const activeSavePromisesRef = useRef<Record<string, Promise<unknown>>>({});
+  const lastCheckpointRef = useRef<Record<string, string>>(savedAnswers);
+  const isCheckpointingRef = useRef(false);
   const currentQuestionRef = useRef<QuestionItem | null>(
     displayQuestions[0] ?? null
   );
@@ -289,75 +288,43 @@ export default function ExamTaker({
     [sessionId]
   );
 
-  const persistAnswer = useCallback(
-    (questionId: string, answer: string) => {
-      const request = saveAnswer(sessionId, questionId, answer).finally(() => {
-        if (dirtyAnswersRef.current[questionId] === answer) {
-          delete dirtyAnswersRef.current[questionId];
-        }
+  const checkpointDirtyAnswers = useCallback(async () => {
+    if (isCheckpointingRef.current || isSubmittingRef.current) return;
 
-        if (activeSavePromisesRef.current[questionId] === request) {
-          delete activeSavePromisesRef.current[questionId];
-        }
-      });
+    const currentAnswers = answersRef.current;
+    const lastCheckpoint = lastCheckpointRef.current;
 
-      activeSavePromisesRef.current[questionId] = request;
-      return request;
-    },
-    [sessionId]
-  );
-
-  const queueSave = useCallback(
-    (questionId: string, answer: string, questionType: string) => {
-      dirtyAnswersRef.current[questionId] = answer;
-
-      const existingTimer = saveTimersRef.current[questionId];
-      if (existingTimer) {
-        clearTimeout(existingTimer);
+    const dirty: Record<string, string> = {};
+    for (const [qId, answer] of Object.entries(currentAnswers)) {
+      if (lastCheckpoint[qId] !== answer) {
+        dirty[qId] = answer;
       }
-
-      const delay =
-        questionType === "essay" || questionType === "fill_blank" ? 700 : 0;
-
-      if (delay === 0) {
-        delete saveTimersRef.current[questionId];
-        void persistAnswer(questionId, answer);
-        return;
+    }
+    for (const qId of Object.keys(lastCheckpoint)) {
+      if (!(qId in currentAnswers)) {
+        dirty[qId] = "";
       }
+    }
 
-      saveTimersRef.current[questionId] = window.setTimeout(() => {
-        delete saveTimersRef.current[questionId];
-        void persistAnswer(questionId, answer);
-      }, delay);
-    },
-    [persistAnswer]
-  );
+    if (Object.keys(dirty).length === 0) return;
+
+    isCheckpointingRef.current = true;
+    try {
+      const result = await saveAnswersBatch(sessionId, dirty);
+      // Алдаа буцаасан бол lastCheckpoint шинэчлэхгүй — дараагийн checkpoint дахин оролдоно
+      if (!result || "error" in result) return;
+      lastCheckpointRef.current = { ...currentAnswers };
+    } finally {
+      isCheckpointingRef.current = false;
+    }
+  }, [sessionId]);
 
   const flushPendingAnswers = useCallback(async () => {
-    for (const timerId of Object.values(saveTimersRef.current)) {
-      clearTimeout(timerId);
+    while (isCheckpointingRef.current) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    saveTimersRef.current = {};
-
-    while (true) {
-      const pendingDirtyAnswers = { ...dirtyAnswersRef.current };
-      const activeRequests = Object.values(activeSavePromisesRef.current);
-      const pendingRequests = Object.entries(pendingDirtyAnswers)
-        .filter(([questionId]) => {
-          const activeRequest = activeSavePromisesRef.current[questionId];
-          if (!activeRequest) return true;
-
-          return false;
-        })
-        .map(([questionId, answer]) => persistAnswer(questionId, answer));
-
-      if (activeRequests.length === 0 && pendingRequests.length === 0) {
-        break;
-      }
-
-      await Promise.all([...activeRequests, ...pendingRequests]);
-    }
-  }, [persistAnswer]);
+    await checkpointDirtyAnswers();
+  }, [checkpointDirtyAnswers]);
 
   // Шалгалт дуусгах
   const handleSubmit = useCallback(async () => {
@@ -405,13 +372,31 @@ export default function ExamTaker({
     window.localStorage.setItem(draftStorageKey, JSON.stringify(answers));
   }, [answers, draftStorageKey]);
 
+  // Batched checkpoint: flush dirty answers every 5 seconds
   useEffect(() => {
-    return () => {
-      for (const timerId of Object.values(saveTimersRef.current)) {
-        clearTimeout(timerId);
-      }
+    const interval = setInterval(() => {
+      void checkpointDirtyAnswers();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [checkpointDirtyAnswers]);
+
+  // Checkpoint on question navigation
+  useEffect(() => {
+    void checkpointDirtyAnswers();
+  }, [currentIndex, checkpointDirtyAnswers]);
+
+  // Checkpoint on page hide / beforeunload
+  useEffect(() => {
+    const handlePageHide = () => {
+      void checkpointDirtyAnswers();
     };
-  }, []);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("beforeunload", handlePageHide);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("beforeunload", handlePageHide);
+    };
+  }, [checkpointDirtyAnswers]);
 
   // Proctoring: Tab switch detection
   useEffect(() => {
@@ -494,7 +479,7 @@ export default function ExamTaker({
     };
   }, [emitProctorEvent]);
 
-  // Хариулт хадгалах (debounced)
+  // Хариулт хадгалах (localStorage-д шууд, Redis-д batch checkpoint-ээр)
   const handleAnswer = useCallback(
     (questionId: string, answer: string, questionType: string) => {
       const normalizedAnswer = normalizeDraftAnswer(questionType, answer);
@@ -507,10 +492,8 @@ export default function ExamTaker({
 
       answersRef.current = nextAnswers;
       setAnswers(nextAnswers);
-
-      queueSave(questionId, normalizedAnswer ?? "", questionType);
     },
-    [queueSave]
+    []
   );
 
   // Хугацааг формат хийх

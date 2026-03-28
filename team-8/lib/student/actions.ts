@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
+  examBurstRateLimit,
   proctorEventRateLimit,
   redis,
   startExamRateLimit,
@@ -253,39 +254,6 @@ async function replaceSessionDraftAnswers(
 
   await redis.hset(redisKey, Object.fromEntries(sanitizedEntries));
   await redis.expire(redisKey, 7200);
-}
-
-async function syncClientAnswersToDb(
-  supabase: SupabaseServerClient,
-  sessionId: string,
-  userId: string,
-  answers: Record<string, string>
-) {
-  const rows = Object.entries(answers)
-    .filter(
-      ([questionId, answer]) =>
-        questionId.trim() !== "" && String(answer ?? "").trim() !== ""
-    )
-    .map(([questionId, answer]) => ({
-      session_id: sessionId,
-      question_id: questionId,
-      user_id: userId,
-      answer: String(answer),
-    }));
-
-  if (rows.length === 0) {
-    return { success: true as const };
-  }
-
-  const { error } = await supabase.from("answers").upsert(rows, {
-    onConflict: "session_id,question_id",
-  });
-
-  if (error) {
-    return { error: error.message };
-  }
-
-  return { success: true as const };
 }
 
 async function getAssignedPublishedExamRows(
@@ -642,6 +610,29 @@ function getStudentSafeQuestions<
 
     return safeQuestion;
   });
+}
+
+/**
+ * Publish хийх үед Redis cache-д шалгалтын payload-г урьдчилан бэлтгэх (prewarm).
+ * Cache stampede-ээс сэргийлнэ: 500 сурагч нэгэн зэрэг ороход Redis-ээс авна.
+ */
+export async function prewarmExamCache(
+  examId: string,
+  snapshot: { exam: { end_time: string; duration_minutes: number }; questions: Array<{ correct_answer?: unknown; passage_id?: string | null }> }
+) {
+  const cacheKey = getQuestionCacheKey(examId);
+  const safeQuestions = getStudentSafeQuestions(snapshot.questions as Array<{ correct_answer?: unknown; passage_id?: string | null }>);
+  const cachePayload = {
+    examBase: snapshot.exam,
+    questions: safeQuestions,
+  };
+
+  const ttlSeconds = getExamPayloadCacheTtlSeconds({
+    end_time: snapshot.exam.end_time,
+    duration_minutes: snapshot.exam.duration_minutes,
+  });
+
+  await redis.set(cacheKey, JSON.stringify(cachePayload), { ex: ttlSeconds });
 }
 
 /**
@@ -1013,7 +1004,8 @@ async function finalizeSessionAttempt(
         notifyTeacherOfSubmission(
           examId,
           examRow.title,
-          profileRow?.full_name || "Сурагч"
+          profileRow?.full_name || "Сурагч",
+          sessionId
         ).catch(() => {});
       }
     }
@@ -1038,6 +1030,7 @@ async function startExamSessionForUser(
     Awaited<ReturnType<typeof getAssignedPublishedExamRecord>>
   >
 ) {
+  // Per-user rate limit
   const startLimit = await startExamRateLimit.limit(
     `start-exam:${userId}:${examId}`
   );
@@ -1045,6 +1038,144 @@ async function startExamSessionForUser(
     return { error: "Хэт олон эхлүүлэх оролдлого илгээлээ. Түр хүлээгээд дахин оролдоно уу." };
   }
 
+  // Exam-level burst smoothing: 500 сурагч нэгэн зэрэг дарахад burst-ийг зөөлрүүлнэ
+  const burstLimit = await examBurstRateLimit.limit(`exam-burst:${examId}`);
+  if (!burstLimit.success) {
+    return { error: "Олон сурагч нэгэн зэрэг эхлүүлж байна. 2-3 секунд хүлээгээд дахин оролдоно уу." };
+  }
+
+  // Atomic RPC: 6 DB round-trip → 1 call (assignment + time + session checks + INSERT)
+  const { data: rpcResult, error: rpcError } = await supabase.rpc(
+    "start_exam_session_atomic",
+    { p_exam_id: examId }
+  );
+
+  // RPC байхгүй бол fallback руу шилжих
+  if (rpcError && (rpcError.code === "42883" || rpcError.message?.includes("does not exist"))) {
+    return startExamSessionForUserFallback(supabase, userId, examId, assignedExam);
+  }
+
+  if (rpcError) {
+    return { error: rpcError.message };
+  }
+
+  const result = rpcResult as Record<string, unknown>;
+
+  // Хугацаа дууссан session-г app layer-ээс finalize хийнэ (Redis + grading шаардлагатай)
+  if (result.expired_session_id) {
+    const finalized = await finalizeSessionAttempt(supabase, {
+      sessionId: String(result.expired_session_id),
+      examId,
+      userId,
+      reason: "timeout",
+    });
+
+    if ("error" in finalized) {
+      return { error: finalized.error };
+    }
+
+    // Finalize хийсний дараа дахин RPC дуудаж шинэ session үүсгэх
+    const { data: retryResult, error: retryError } = await supabase.rpc(
+      "start_exam_session_atomic",
+      { p_exam_id: examId }
+    );
+
+    if (retryError) return { error: retryError.message };
+    const retry = retryResult as Record<string, unknown>;
+
+    if (retry.error) {
+      return mapRpcError(retry);
+    }
+
+    if (retry.session) {
+      const session = retry.session as Record<string, unknown>;
+      await cacheSessionMeta(String(session.id), userId, String(session.status));
+      return { session: session as { id: string; exam_id: string; status: string; started_at: string; attempt_number: number } };
+    }
+
+    return { error: "Шалгалтын session үүсгэж чадсангүй" };
+  }
+
+  // RPC алдаа буцаасан бол
+  if (result.error) {
+    // Өөр шалгалтад active session байгаа бол expire шалгах
+    if (result.error === "other_exam_active" && result.other_session_id) {
+      const otherExam = await getEffectiveExamAccessForStudent(
+        supabase,
+        userId,
+        String(result.other_exam_id)
+      );
+
+      if (
+        otherExam &&
+        isSessionExpiredForExam(
+          (result.other_started_at as string) ?? null,
+          otherExam,
+          Date.now()
+        )
+      ) {
+        const finalized = await finalizeSessionAttempt(supabase, {
+          sessionId: String(result.other_session_id),
+          examId: String(result.other_exam_id),
+          userId,
+          reason: "timeout",
+        });
+
+        if ("error" in finalized) {
+          return { error: finalized.error };
+        }
+
+        // Retry after finalizing other exam
+        return startExamSessionForUser(supabase, userId, examId, assignedExam);
+      }
+
+      return {
+        error: "Та одоо өөр шалгалт өгч байна. Эхлээд тэр шалгалтаа дуусгана уу.",
+      };
+    }
+
+    return mapRpcError(result);
+  }
+
+  // Session амжилттай буцсан
+  if (result.session) {
+    const session = result.session as Record<string, unknown>;
+    await cacheSessionMeta(String(session.id), userId, String(session.status));
+    return { session: session as { id: string; exam_id: string; status: string; started_at: string; attempt_number: number } };
+  }
+
+  return { error: "Шалгалтын session үүсгэж чадсангүй" };
+}
+
+function mapRpcError(result: Record<string, unknown>) {
+  const errorMap: Record<string, string> = {
+    not_assigned: "Энэ шалгалт танд оноогдоогүй байна",
+    excused: "Та энэ шалгалтаас чөлөөлөгдсөн байна",
+    exam_not_found: "Шалгалт олдсонгүй",
+    not_started: "Шалгалт хараахан нээгдээгүй байна",
+    window_closed: "Шалгалтыг эхлүүлэх нээлттэй цонх хаагдсан байна",
+    max_attempts_reached: "Шалгалтын оролдлогын эрх дууссан байна",
+    concurrent_creation: "Шалгалтыг эхлүүлж байна. Дахин оролдоно уу.",
+  };
+
+  const errorKey = String(result.error);
+  if (errorKey === "max_attempts_reached") {
+    return { error: errorMap[errorKey], redirectToResult: true };
+  }
+  return { error: errorMap[errorKey] ?? errorKey };
+}
+
+/**
+ * Fallback: RPC function deploy хийгдээгүй үед хуучин олон round-trip логик
+ */
+async function startExamSessionForUserFallback(
+  supabase: SupabaseServerClient,
+  userId: string,
+  examId: string,
+  assignedExam?: NonNullable<
+    Awaited<ReturnType<typeof getAssignedPublishedExamRecord>>
+  >
+) {
   const effectiveAssignedExam =
     assignedExam ??
     (await getAssignedPublishedExamRecord(supabase, userId, examId));
@@ -1359,12 +1490,11 @@ export async function prepareExamTakePayload(
 }
 
 /**
- * Хариулт хадгалах — Redis-д түр хадгалж, дараа нь DB руу batch
+ * Олон хариултыг нэг дор Redis-д хадгалах — batched checkpoint
  */
-export async function saveAnswer(
+export async function saveAnswersBatch(
   sessionId: string,
-  questionId: string,
-  answer: string
+  answers: Record<string, string>
 ) {
   const supabase = await createClient();
   const {
@@ -1373,31 +1503,36 @@ export async function saveAnswer(
   if (!user) return { error: "Нэвтрээгүй байна" };
 
   const session = await getSessionMeta(supabase, sessionId, user.id);
-
   if (!session) return { error: "Session олдсонгүй" };
   if (session.status !== "in_progress") {
     return { error: "Энэ шалгалтын session идэвхгүй байна" };
   }
 
-  // Redis-д түр хадгалах (хурдан)
   const redisKey = getSessionAnswersCacheKey(sessionId, user.id);
-  const existingAnswer = await redis.hget<string | null>(redisKey, questionId);
-  if ((existingAnswer ?? "") === answer) {
-    return { success: true, skipped: true };
-  }
 
-  if (answer === "") {
-    if (existingAnswer == null) {
-      return { success: true, skipped: true };
+  const toSet: Record<string, string> = {};
+  const toDelete: string[] = [];
+
+  for (const [questionId, answer] of Object.entries(answers)) {
+    if (answer === "") {
+      toDelete.push(questionId);
+    } else {
+      toSet[questionId] = answer;
     }
-
-    await redis.hdel(redisKey, questionId);
-    await redis.expire(redisKey, 7200);
-    return { success: true };
   }
 
-  await redis.hset(redisKey, { [questionId]: answer });
-  await redis.expire(redisKey, 7200); // 2 цаг
+  const ops: Promise<unknown>[] = [];
+  if (Object.keys(toSet).length > 0) {
+    ops.push(redis.hset(redisKey, toSet));
+  }
+  for (const qId of toDelete) {
+    ops.push(redis.hdel(redisKey, qId));
+  }
+  if (ops.length > 0) {
+    await Promise.all(ops);
+    await redis.expire(redisKey, 7200);
+  }
+
   return { success: true };
 }
 
@@ -1443,17 +1578,8 @@ export async function submitExam(
     };
   }
 
+  // Client-ийн хариултыг Redis-д шууд оруулна (DB бичилт зөвхөн finalizeSessionAttempt дотор)
   if (clientAnswers) {
-    const syncResult = await syncClientAnswersToDb(
-      supabase,
-      sessionId,
-      user.id,
-      clientAnswers
-    );
-    if ("error" in syncResult) {
-      return { error: `Хариултыг хадгалахад алдаа гарлаа: ${syncResult.error}` };
-    }
-
     await replaceSessionDraftAnswers(sessionId, user.id, clientAnswers);
   }
 
