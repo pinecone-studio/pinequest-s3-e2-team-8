@@ -6,9 +6,11 @@ import {
   getQuestionPassagesByExam,
   getQuestionsByExam,
 } from "@/lib/question/actions";
+import { getSampleExamContext } from "@/lib/ai/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import AddQuestionForm from "./_features/AddQuestionForm";
+import AIGenerateDialog from "./_features/AIGenerateDialog";
 import PassageManager from "./_features/PassageManager";
 import QuestionImportActions from "./_features/QuestionImportActions";
 import QuestionList from "./_features/QuestionList";
@@ -19,10 +21,11 @@ interface Props {
 
 export default async function ExamQuestionsPage({ params }: Props) {
   const { id } = await params;
-  const [exam, questions, passages] = await Promise.all([
+  const [exam, questions, passages, aiContext] = await Promise.all([
     getExamById(id),
     getQuestionsByExam(id),
     getQuestionPassagesByExam(id),
+    getSampleExamContext(id),
   ]);
 
   if (!exam) notFound();
@@ -85,7 +88,27 @@ export default async function ExamQuestionsPage({ params }: Props) {
             <AddQuestionForm examId={id} passages={passages} />
             <PassageManager examId={id} passages={passages} />
           </div>
-          <QuestionImportActions examId={id} />
+          <div className="flex items-center gap-3">
+            <QuestionImportActions examId={id} />
+          </div>
+          <div className="rounded-lg border border-purple-200 bg-purple-50/30 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1">
+                <h3 className="flex items-center gap-2 font-semibold text-purple-800">
+                  <span className="text-lg">✨</span> AI асуулт боловсруулагч
+                </h3>
+                <p className="text-sm text-purple-600">
+                  Жишиг шалгалтын агуулга дээр суурилан Gemini AI шинэ
+                  асуултууд автоматаар үүсгэнэ.
+                </p>
+              </div>
+              <AIGenerateDialog
+                examId={id}
+                subjectName={aiContext?.subjectName ?? ""}
+                sampleContext={aiContext?.sampleContext ?? ""}
+              />
+            </div>
+          </div>
         </div>
       )}
 

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import Logo from "@/app/_icons/Logo";
 import SideBarImage from "@/app/_icons/SideBarImage";
+import NotificationBell from "@/components/NotificationBell";
 
 interface NavItem {
   href: string;
@@ -100,6 +101,7 @@ export default function Sidebar() {
                 </Link>
               );
             })}
+            <NotificationBell variant="sidebar" isCollapsed={isCollapsed} />
           </nav>
         </div>
 

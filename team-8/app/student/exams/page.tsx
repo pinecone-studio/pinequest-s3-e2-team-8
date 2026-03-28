@@ -42,7 +42,7 @@ export default async function StudentExamsPage({
           {exams.map((exam) => {
             const lifecycle = String(exam.myLifecycleStatus ?? "");
             const persistedSessionStatus = String(exam.mySessionStatus ?? "");
-            const isResultAvailable =
+            const hasResultRecord =
               persistedSessionStatus === "submitted" ||
               persistedSessionStatus === "graded" ||
               persistedSessionStatus === "timed_out";
@@ -51,6 +51,8 @@ export default async function StudentExamsPage({
               lifecycle === "available" || lifecycle === "retake_available";
             const isUpcoming =
               lifecycle === "scheduled" || lifecycle === "retake_scheduled";
+            const isResultAvailable =
+              hasResultRecord && !isAvailable && !isUpcoming && !isInProgress;
             const isExcused = lifecycle === "excused";
             const isAbsent = lifecycle === "absent";
             const isTimedOut = lifecycle === "timed_out";

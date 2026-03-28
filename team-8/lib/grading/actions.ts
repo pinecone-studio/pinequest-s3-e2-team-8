@@ -12,6 +12,10 @@ import {
   isAdminUser,
 } from "@/lib/exam-scope";
 import { attachPassagesToAnswers } from "@/lib/question-passages";
+import {
+  notifyStudentOfGrading,
+  notifyParentOfGrading,
+} from "@/lib/notification/actions";
 
 function getRelationObject<T>(value: T | T[] | null | undefined) {
   if (Array.isArray(value)) {
@@ -385,6 +389,32 @@ export async function finalizeGrading(sessionId: string) {
     "graded"
   );
   if ("error" in totals) return { error: totals.error };
+
+  // Notify student + parent that grading is complete
+  const [{ data: examRow }, { data: studentProfile }] = await Promise.all([
+    supabase.from("exams").select("title").eq("id", session.exam_id).maybeSingle(),
+    supabase.from("profiles").select("full_name").eq("id", session.user_id).maybeSingle(),
+  ]);
+
+  if (examRow && totals.totalScore !== undefined) {
+    notifyStudentOfGrading(
+      sessionId,
+      session.user_id,
+      session.exam_id,
+      examRow.title,
+      totals.totalScore,
+      totals.maxScore ?? 0
+    ).catch(() => {});
+
+    // Notify parent
+    notifyParentOfGrading(
+      session.user_id,
+      studentProfile?.full_name || "Сурагч",
+      examRow.title,
+      totals.totalScore,
+      totals.maxScore ?? 0
+    ).catch(() => {});
+  }
 
   revalidateExamResultPaths(session.exam_id, sessionId);
   return { success: true, totalScore: totals.totalScore, maxScore: totals.maxScore };

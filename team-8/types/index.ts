@@ -6,6 +6,7 @@ export interface Profile {
   full_name: string;
   role: UserRole;
   avatar_url: string | null;
+  parent_email: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -251,6 +252,9 @@ export interface Answer {
   graded_at: string | null;
   feedback: string | null;
   submitted_at: string;
+  ai_score: number | null;
+  ai_feedback: string | null;
+  ai_graded_at: string | null;
 }
 
 export interface ExamSchedule {

@@ -12,7 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { formatDateTimeUB } from "@/lib/utils/date";
+import { formatDateLabelUB, formatDateTimeUB } from "@/lib/utils/date";
 
 type StudentExamRow = {
   id: string;
@@ -30,13 +30,7 @@ function groupByDate(exams: StudentExamRow[]) {
   const map = new Map<string, StudentExamRow[]>();
 
   for (const exam of exams) {
-    const key = new Intl.DateTimeFormat("mn-MN", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      weekday: "short",
-      timeZone: "Asia/Ulaanbaatar",
-    }).format(new Date(exam.start_time));
+    const key = formatDateLabelUB(exam.start_time);
 
     const existing = map.get(key) ?? [];
     existing.push(exam);

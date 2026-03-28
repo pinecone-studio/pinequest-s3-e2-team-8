@@ -100,6 +100,7 @@ export function deriveStudentExamLifecycle(
   const endMs = new Date(effectiveEndTime).getTime();
   const attemptsUsed = Number(input.latestAttemptNumber ?? 0);
   const hasRemainingAttempts = attemptsUsed < effectiveMaxAttempts;
+  const isRetakeFlow = hasRetakeOverride || attemptsUsed > 0;
   const sessionDeadlineMs = getSessionDeadlineMs(
     input.latestSessionStartedAt,
     input.exam
@@ -139,11 +140,11 @@ export function deriveStudentExamLifecycle(
     };
   }
 
-  if (hasRetakeOverride && hasRemainingAttempts) {
+  if (isRetakeFlow && hasRemainingAttempts) {
     if (!Number.isNaN(startMs) && nowMs < startMs) {
       return {
         key: "retake_scheduled",
-        label: "Нөхөн товлогдсон",
+        label: "Дахин оролдлого товлогдсон",
         isAvailable: false,
         isCompleted: false,
         isRetake: true,
@@ -153,7 +154,7 @@ export function deriveStudentExamLifecycle(
     if (!Number.isNaN(startMs) && !Number.isNaN(endMs) && nowMs <= endMs) {
       return {
         key: "retake_available",
-        label: "Нөхөн өгөх боломжтой",
+        label: "Дахин оролдох боломжтой",
         isAvailable: true,
         isCompleted: false,
         isRetake: true,

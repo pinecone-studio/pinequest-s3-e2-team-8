@@ -19,6 +19,10 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  parseUlaanbaatarDateTime,
+  splitDateTimeForUlaanbaatar,
+} from "@/lib/utils/date";
 import { cn } from "@/lib/utils";
 
 type ExamScheduleSectionProps = {
@@ -45,45 +49,12 @@ const durationPresets = [
   { minutes: 120, label: "2 цаг" },
 ];
 
-const timeHours = [
-  "12",
-  ...Array.from({ length: 11 }, (_, index) =>
-    String(index + 1).padStart(2, "0")
-  ),
-];
+const timeHours = Array.from({ length: 24 }, (_, index) =>
+  String(index).padStart(2, "0")
+);
 const timeMinutes = Array.from({ length: 12 }, (_, index) =>
   String(index * 5).padStart(2, "0")
 );
-const meridiems = ["AM", "PM"] as const;
-
-function splitIsoForUlaanbaatar(iso?: string | null) {
-  if (!iso) {
-    return { date: "", time: "" };
-  }
-
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return { date: "", time: "" };
-  }
-
-  const formatter = new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "Asia/Ulaanbaatar",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  });
-
-  const parts = formatter.formatToParts(date);
-  const partMap = new Map(parts.map((part) => [part.type, part.value]));
-
-  return {
-    date: `${partMap.get("year")}-${partMap.get("month")}-${partMap.get("day")}`,
-    time: `${partMap.get("hour")}:${partMap.get("minute")}`,
-  };
-}
 
 function joinDateTime(date: string, time: string) {
   if (!date || !time) return "";
@@ -100,55 +71,34 @@ function parseDateValue(value: string) {
 }
 
 function parseTimeValue(value: string): {
-  hour12: string;
+  hour: string;
   minute: string;
-  meridiem: (typeof meridiems)[number];
 } {
   const now = new Date();
   const fallbackHour = now.getHours();
-  const fallbackMinute = now.getMinutes();
+  const fallbackMinute = Math.floor(now.getMinutes() / 5) * 5;
 
   if (!/^\d{2}:\d{2}$/.test(value)) {
-    const meridiem = fallbackHour >= 12 ? "PM" : "AM";
-    const hour12 = fallbackHour % 12 || 12;
-
     return {
-      hour12: String(hour12).padStart(2, "0"),
+      hour: String(fallbackHour).padStart(2, "0"),
       minute: String(fallbackMinute).padStart(2, "0"),
-      meridiem,
     };
   }
 
   const [rawHour, rawMinute] = value.split(":").map(Number);
-  const meridiem = rawHour >= 12 ? "PM" : "AM";
-  const hour12 = rawHour % 12 || 12;
   const normalizedMinute = Math.floor(rawMinute / 5) * 5;
 
   return {
-    hour12: String(hour12).padStart(2, "0"),
+    hour: String(rawHour).padStart(2, "0"),
     minute: String(normalizedMinute).padStart(2, "0"),
-    meridiem,
   };
 }
 
 function formatDisplayTime(value: string) {
   if (!value) return "";
 
-  const { hour12, minute, meridiem } = parseTimeValue(value);
-  return `${hour12}:${minute} ${meridiem}`;
-}
-
-function to24HourTime(
-  hour12: string,
-  minute: string,
-  meridiem: (typeof meridiems)[number]
-) {
-  let hour = Number(hour12) % 12;
-  if (meridiem === "PM") {
-    hour += 12;
-  }
-
-  return `${String(hour).padStart(2, "0")}:${minute}`;
+  const { hour, minute } = parseTimeValue(value);
+  return `${hour}:${minute}`;
 }
 
 function cycleFromSelected(values: readonly string[], selected: string) {
@@ -186,7 +136,7 @@ function DatePickerField({
         >
           <span>
             {selectedDate
-              ? format(selectedDate, "MM/dd/yyyy", { locale: mn })
+              ? format(selectedDate, "yyyy.MM.dd", { locale: mn })
               : placeholder}
           </span>
           <CalendarDays className="h-4 w-4 text-zinc-500" />
@@ -224,7 +174,7 @@ function TimePickerField({
   onChange: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const { hour12, minute, meridiem } = parseTimeValue(value);
+  const { hour, minute } = parseTimeValue(value);
   const displayValue = formatDisplayTime(value);
 
   return (
@@ -249,35 +199,21 @@ function TimePickerField({
         align="start"
         sideOffset={8}
         avoidCollisions={false}
-        className="w-[220px] rounded-[18px] border-zinc-200 bg-white p-1.5 shadow-[0_16px_40px_-20px_rgba(15,23,42,0.28)]"
+        className="w-[178px] rounded-[18px] border-zinc-200 bg-white p-1.5 shadow-[0_16px_40px_-20px_rgba(15,23,42,0.28)]"
       >
-        <div className="grid grid-cols-[1fr_1fr_0.9fr] gap-1.5">
+        <div className="mb-2 rounded-[12px] bg-zinc-50 px-3 py-2 text-center text-xs font-medium text-zinc-500">
+          24 цагийн формат
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
           <TimePickerColumn
-            values={cycleFromSelected(timeHours, hour12)}
-            selected={hour12}
-            onSelect={(nextHour) =>
-              onChange(to24HourTime(nextHour, minute, meridiem))
-            }
+            values={cycleFromSelected(timeHours, hour)}
+            selected={hour}
+            onSelect={(nextHour) => onChange(`${nextHour}:${minute}`)}
           />
           <TimePickerColumn
             values={cycleFromSelected(timeMinutes, minute)}
             selected={minute}
-            onSelect={(nextMinute) =>
-              onChange(to24HourTime(hour12, nextMinute, meridiem))
-            }
-          />
-          <TimePickerColumn
-            values={cycleFromSelected(meridiems, meridiem)}
-            selected={meridiem}
-            onSelect={(nextMeridiem) =>
-              onChange(
-                to24HourTime(
-                  hour12,
-                  minute,
-                  nextMeridiem as (typeof meridiems)[number]
-                )
-              )
-            }
+            onSelect={(nextMinute) => onChange(`${hour}:${nextMinute}`)}
           />
         </div>
       </PopoverContent>
@@ -394,16 +330,16 @@ export function ExamScheduleSection({
   initialDurationMinutes,
 }: ExamScheduleSectionProps) {
   const [startDate, setStartDate] = useState(
-    splitIsoForUlaanbaatar(initialStartTime).date
+    splitDateTimeForUlaanbaatar(initialStartTime).date
   );
   const [startClock, setStartClock] = useState(
-    splitIsoForUlaanbaatar(initialStartTime).time
+    splitDateTimeForUlaanbaatar(initialStartTime).time
   );
   const [endDate, setEndDate] = useState(
-    splitIsoForUlaanbaatar(initialEndTime).date
+    splitDateTimeForUlaanbaatar(initialEndTime).date
   );
   const [endClock, setEndClock] = useState(
-    splitIsoForUlaanbaatar(initialEndTime).time
+    splitDateTimeForUlaanbaatar(initialEndTime).time
   );
   const [durationMinutes, setDurationMinutes] = useState(
     initialDurationMinutes ? String(initialDurationMinutes) : ""
@@ -414,13 +350,13 @@ export function ExamScheduleSection({
 
   const durationSummary = useMemo(() => {
     if (!startTime || !endTime) {
-      return "Сурагч эхлүүлснээс хойш дуусах хугацаа";
+      return "Нээгдэх болон хаагдах цагаа 24 цагийн форматаар тохируулна уу.";
     }
 
-    const start = new Date(`${startTime}+08:00`);
-    const end = new Date(`${endTime}+08:00`);
+    const start = parseUlaanbaatarDateTime(startTime);
+    const end = parseUlaanbaatarDateTime(endTime);
 
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    if (!start || !end) {
       return "Огноо эсвэл цаг буруу байна";
     }
 
@@ -429,7 +365,7 @@ export function ExamScheduleSection({
       return "Хаагдах хугацаа нээгдэхээс хойш байх ёстой";
     }
 
-    return "Сурагч эхлүүлснээс хойш дуусах хугацаа";
+    return "Хуваарь амжилттай тохируулагдлаа. Нийтлэгдсэний дараа яг энэ цаг 24 форматаар харагдана.";
   }, [endTime, startTime]);
 
   return (

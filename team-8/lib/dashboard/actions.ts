@@ -2,6 +2,11 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { deriveStudentExamLifecycle, getEffectiveExamAccess } from "@/lib/exam-session-lifecycle";
+import {
+  getAttemptPercentage,
+  pickBestAttempt,
+  pickLatestAttempt,
+} from "@/lib/exam-attempt-utils";
 
 function getRelationObject<T>(value: T | T[] | null | undefined) {
   if (Array.isArray(value)) return value[0] ?? null;
@@ -288,35 +293,44 @@ export async function getStudentStats() {
   const examMap = new Map<string, StudentDashboardExam>(
     ((examRows ?? []) as StudentDashboardExam[]).map((exam) => [String(exam.id), exam])
   );
-  const finishedSessions = sessions.filter((session) =>
-    ["submitted", "graded", "timed_out"].includes(String(session.status))
-  );
-  const completedSessions = sessions.filter((session) =>
-    ["submitted", "graded"].includes(String(session.status))
-  );
+  const sessionsByExam = new Map<string, typeof sessions>();
+  for (const session of sessions) {
+    const examSessions = sessionsByExam.get(String(session.exam_id)) ?? [];
+    examSessions.push(session);
+    sessionsByExam.set(String(session.exam_id), examSessions);
+  }
+
+  const bestSessionsByExam = Array.from(sessionsByExam.values())
+    .map((examSessions) =>
+      pickBestAttempt(
+        examSessions.filter((session) =>
+          ["submitted", "graded", "timed_out"].includes(String(session.status))
+        )
+      )
+    )
+    .filter((session): session is NonNullable<typeof session> => Boolean(session));
   let avgScore: number | null = null;
-  if (completedSessions.length > 0) {
-    const totalPct = completedSessions.reduce((sum, s) => {
-      if (s.max_score && s.max_score > 0) {
-        return sum + (s.total_score / s.max_score) * 100;
-      }
-      return sum;
-    }, 0);
-    avgScore = Math.round(totalPct / completedSessions.length);
+  if (bestSessionsByExam.length > 0) {
+    const totalPct = bestSessionsByExam.reduce(
+      (sum, session) => sum + getAttemptPercentage(session),
+      0
+    );
+    avgScore = Math.round(totalPct / bestSessionsByExam.length);
   }
 
   const latestSessionByExam = new Map<
     string,
     { status: string; attemptNumber: number; startedAt: string | null }
   >();
-  for (const session of sessions) {
-    if (!latestSessionByExam.has(session.exam_id as string)) {
-      latestSessionByExam.set(session.exam_id as string, {
-        status: String(session.status),
-        attemptNumber: Number(session.attempt_number ?? 0),
-        startedAt: (session.started_at as string | null) ?? null,
-      });
-    }
+  for (const [examId, examSessions] of sessionsByExam.entries()) {
+    const latestSession = pickLatestAttempt(examSessions);
+    if (!latestSession) continue;
+
+    latestSessionByExam.set(examId, {
+      status: String(latestSession.status),
+      attemptNumber: Number(latestSession.attempt_number ?? 0),
+      startedAt: (latestSession.started_at as string | null) ?? null,
+    });
   }
 
   const nowMs = new Date(now).getTime();
@@ -390,20 +404,17 @@ export async function getStudentStats() {
     )
     .slice(0, 5);
 
-  const recentResults = completedSessions
+  const recentResults = bestSessionsByExam
     .slice()
     .sort(
       (left, right) =>
-        new Date(right.submitted_at as string).getTime() -
-        new Date(left.submitted_at as string).getTime()
+        new Date(String(right.submitted_at ?? right.started_at ?? 0)).getTime() -
+        new Date(String(left.submitted_at ?? left.started_at ?? 0)).getTime()
     )
     .slice(0, 3)
     .map((session) => {
       const exam = getRelationObject(session.exams);
-      const percentage =
-        session.max_score && session.max_score > 0
-          ? Math.round((session.total_score / session.max_score) * 100)
-          : null;
+      const percentage = getAttemptPercentage(session);
 
       return {
         id: session.exam_id,
@@ -416,7 +427,7 @@ export async function getStudentStats() {
 
   return {
     activeExams,
-    completedExams: finishedSessions.length,
+    completedExams: bestSessionsByExam.length,
     avgScore,
     upcomingExams,
     recentResults,
