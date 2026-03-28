@@ -30,31 +30,26 @@ interface MatchingPair {
   right: string;
 }
 
-const questionTypes: { value: QuestionType; label: string; hint: string }[] = [
+const questionTypes: { value: QuestionType; label: string }[] = [
   {
     value: "multiple_choice",
     label: "Сонгох",
-    hint: "Нэг зөв хариулттай тест",
   },
   {
     value: "multiple_response",
-    label: "Олон сонголттой",
-    hint: "Хэд хэдэн зөв хариулттай тест",
+    label: "Олон зөв",
   },
   {
     value: "fill_blank",
     label: "Нөхөх",
-    hint: "Хоосон зайг бөглөх",
   },
   {
     value: "essay",
     label: "Задгай асуулт / Эссэ",
-    hint: "Багш гараар шалгана",
   },
   {
     value: "matching",
     label: "Холбох",
-    hint: "2 баганын харгалзуулах асуулт",
   },
 ];
 
@@ -346,9 +341,9 @@ export default function AddQuestionForm({ examId, passages }: Props) {
   const activeTargetValue = getActiveTargetValue().trim();
 
   return (
-      <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Асуулт нэмэх</CardTitle>
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Шинэ асуулт</CardTitle>
       </CardHeader>
       <CardContent>
         <form id="question-form" action={handleSubmit} className="space-y-4">
@@ -378,9 +373,6 @@ export default function AddQuestionForm({ examId, passages }: Props) {
                   {questionTypes.map((questionType) => (
                     <SelectItem key={questionType.value} value={questionType.value}>
                       {questionType.label}
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        — {questionType.hint}
-                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -417,15 +409,12 @@ export default function AddQuestionForm({ examId, passages }: Props) {
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">
-                Зураг, хүснэгт, текст эсвэл нэг өгөгдлөөс олон асуулт асуух үед энд холбоно.
-              </p>
             </div>
           )}
 
           {selectedPassage && (
             <div className="space-y-2 rounded-xl border border-dashed bg-muted/20 p-4">
-              <p className="text-sm font-medium">Сонгосон эх материал</p>
+              <p className="text-sm font-medium">Сонгосон материал</p>
               {selectedPassage.title && (
                 <p className="text-sm text-muted-foreground">{selectedPassage.title}</p>
               )}
@@ -451,14 +440,12 @@ export default function AddQuestionForm({ examId, passages }: Props) {
                 targetId={activeFormulaTarget.id}
                 targetLabel={activeFormulaTarget.label}
                 title="Томьёоны самбар"
-                description="Асуулт, сонголт, зөв хариулт эсвэл холбох мөр дээр дарж байгаад томьёогоо шууд оруулна."
+                description="Талбар дээр дараад томьёогоо оруулна."
               />
               {activeTargetValue && (
                 <div className="rounded-xl border bg-muted/10 p-4">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium">
-                      Идэвхтэй талбарын урьдчилан харах
-                    </p>
+                    <p className="text-sm font-medium">Урьдчилан харах</p>
                     <p className="text-xs text-muted-foreground">
                       {activeFormulaTarget.label}
                     </p>
@@ -484,7 +471,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
                 className="h-7 text-xs text-muted-foreground"
                 onClick={() => setIsFormulaToolOpen((prev) => !prev)}
               >
-                {isFormulaToolOpen ? "Томьёо ✕" : "𝑓(x) Томьёо"}
+                {isFormulaToolOpen ? "Томьёо нуух" : "Томьёо"}
               </Button>
             </div>
             <Textarea
@@ -499,7 +486,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
                   label: "Асуулт",
                 })
               }
-              placeholder="Асуултаа энд бичнэ үү... (paste хийвэл автомат таних)"
+              placeholder="Асуултаа бичнэ үү"
               rows={3}
               required
             />
@@ -507,7 +494,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
 
           {content.trim() && (
             <div className="rounded-lg border bg-muted/10 p-3">
-              <p className="mb-1 text-xs font-medium text-muted-foreground">Урьдчилсан харагдах байдал</p>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">Preview</p>
               <MathContent
                 text={content}
                 className="prose max-w-none text-sm leading-6 text-foreground"
@@ -594,7 +581,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
 
           {type === "essay" && (
             <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
-              Энэ төрлийн асуултыг багш дараа нь гараар шалгана.
+              Гараар шалгана.
             </div>
           )}
 

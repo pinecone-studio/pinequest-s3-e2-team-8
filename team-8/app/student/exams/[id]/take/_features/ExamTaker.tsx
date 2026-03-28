@@ -172,6 +172,7 @@ export default function ExamTaker({
       return savedAnswers;
     }
   });
+  const answersRef = useRef<Record<string, string>>(answers);
   const [timeLeft, setTimeLeft] = useState(initialTimeLeftSeconds);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
@@ -213,6 +214,10 @@ export default function ExamTaker({
   useEffect(() => {
     currentQuestionRef.current = currentQuestion;
   }, [currentQuestion]);
+
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
 
   useEffect(() => {
     currentIndexRef.current = currentIndex;
@@ -291,23 +296,29 @@ export default function ExamTaker({
   );
 
   const flushPendingAnswers = useCallback(async () => {
-    const pendingDirtyAnswers = { ...dirtyAnswersRef.current };
-
     for (const timerId of Object.values(saveTimersRef.current)) {
       clearTimeout(timerId);
     }
     saveTimersRef.current = {};
 
-    const pendingRequests = Object.entries(pendingDirtyAnswers).map(
-      ([questionId, answer]) =>
-        activeSavePromisesRef.current[questionId] ??
-        persistAnswer(questionId, answer)
-    );
+    while (true) {
+      const pendingDirtyAnswers = { ...dirtyAnswersRef.current };
+      const activeRequests = Object.values(activeSavePromisesRef.current);
+      const pendingRequests = Object.entries(pendingDirtyAnswers)
+        .filter(([questionId]) => {
+          const activeRequest = activeSavePromisesRef.current[questionId];
+          if (!activeRequest) return true;
 
-    await Promise.all([
-      ...Object.values(activeSavePromisesRef.current),
-      ...pendingRequests,
-    ]);
+          return false;
+        })
+        .map(([questionId, answer]) => persistAnswer(questionId, answer));
+
+      if (activeRequests.length === 0 && pendingRequests.length === 0) {
+        break;
+      }
+
+      await Promise.all([...activeRequests, ...pendingRequests]);
+    }
   }, [persistAnswer]);
 
   // Шалгалт дуусгах
@@ -317,7 +328,7 @@ export default function ExamTaker({
     setIsSubmitting(true);
 
     await flushPendingAnswers();
-    const result = await submitExam(sessionId);
+    const result = await submitExam(sessionId, { ...answersRef.current });
     if ("success" in result && result.success) {
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(draftStorageKey);
@@ -449,16 +460,15 @@ export default function ExamTaker({
   const handleAnswer = useCallback(
     (questionId: string, answer: string, questionType: string) => {
       const normalizedAnswer = normalizeDraftAnswer(questionType, answer);
+      const nextAnswers = { ...answersRef.current };
+      if (normalizedAnswer === null) {
+        delete nextAnswers[questionId];
+      } else {
+        nextAnswers[questionId] = normalizedAnswer;
+      }
 
-      setAnswers((prev) => {
-        const next = { ...prev };
-        if (normalizedAnswer === null) {
-          delete next[questionId];
-        } else {
-          next[questionId] = normalizedAnswer;
-        }
-        return next;
-      });
+      answersRef.current = nextAnswers;
+      setAnswers(nextAnswers);
 
       queueSave(questionId, normalizedAnswer ?? "", questionType);
     },
@@ -514,7 +524,7 @@ export default function ExamTaker({
               )}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Дуусгасны дараа хариултаа өөрчлөх боломжгүй.
+              Дуусгасны дараа засах боломжгүй.
             </p>
             <div className="mt-4 flex gap-2">
               <Button
@@ -540,25 +550,24 @@ export default function ExamTaker({
       )}
 
       {/* Header: Timer + Progress */}
-      <div className="sticky top-0 z-50 border-b bg-background px-4 py-3">
-        <div className="mx-auto flex max-w-4xl items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold">{exam.title as string}</h1>
+      <div className="sticky top-0 z-50 border-b bg-background/95 px-3 py-2 backdrop-blur">
+        <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <h1 className="line-clamp-1 text-base font-semibold sm:text-lg">
+              {exam.title as string}
+            </h1>
             <p className="text-sm text-muted-foreground">
               {answeredCount}/{displayQuestions.length} хариулсан
             </p>
-            <p className="text-xs text-muted-foreground">
-              Tab switch, copy/paste, right click үйлдлүүд логлогдоно.
-            </p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
             {tabSwitchCount > 0 && (
               <Badge variant="destructive">
-                Tab: {tabSwitchCount}/5
+                Tab {tabSwitchCount}/5
               </Badge>
             )}
             <div
-              className={`rounded-lg px-4 py-2 font-mono text-xl font-bold ${
+              className={`rounded-lg px-3 py-2 font-mono text-lg font-bold sm:text-xl ${
                 isTimeWarning
                   ? "animate-pulse bg-red-100 text-red-700"
                   : "bg-muted"
@@ -571,6 +580,7 @@ export default function ExamTaker({
               loading={isSubmitting}
               loadingText="Илгээж байна..."
               variant="destructive"
+              className="shrink-0"
             >
               Дуусгах
             </Button>
@@ -578,7 +588,7 @@ export default function ExamTaker({
         </div>
       </div>
 
-      <div className="mx-auto flex w-full max-w-4xl flex-1 gap-4 p-4">
+      <div className="mx-auto flex w-full max-w-4xl flex-1 gap-4 p-3 sm:p-4">
         {/* Question Navigator (sidebar) */}
         <div className="hidden w-48 shrink-0 md:block">
           <div className="sticky top-20 space-y-2">
@@ -612,8 +622,8 @@ export default function ExamTaker({
 
         {/* Question Content */}
         <div className="flex-1">
-          <Card>
-            <CardHeader>
+          <Card className="rounded-2xl">
+            <CardHeader className="pb-4">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">
                   Асуулт {currentIndex + 1}/{displayQuestions.length}
@@ -623,18 +633,15 @@ export default function ExamTaker({
                 </Badge>
               </div>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-5">
               {currentPassage && (
-                <div className="space-y-3 rounded-xl border border-dashed bg-muted/30 p-4">
+                <div className="space-y-3 rounded-xl border border-dashed bg-muted/30 p-3">
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary">Нийтлэг өгөгдөл</Badge>
                     {currentPassage.title && (
                       <span className="font-medium">{currentPassage.title}</span>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Энэ зураг, текст эсвэл өгөгдлийг ашиглаад доорх асуултад хариулна.
-                  </p>
                   <MathContent
                     html={currentPassage.content_html}
                     text={currentPassage.content}
@@ -690,7 +697,7 @@ export default function ExamTaker({
                             currentQuestion.type
                           )
                         }
-                        className={`flex w-full items-center gap-3 rounded-lg border p-4 text-left transition-colors ${
+                        className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
                           isSelected
                             ? "border-primary bg-primary/5"
                             : "hover:bg-muted/50"
@@ -741,7 +748,7 @@ export default function ExamTaker({
                             currentQuestion.type
                           );
                         }}
-                        className={`flex w-full items-center gap-3 rounded-lg border p-4 text-left transition-colors ${
+                        className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
                           isSelected
                             ? "border-primary bg-primary/5"
                             : "hover:bg-muted/50"
@@ -769,7 +776,7 @@ export default function ExamTaker({
               {/* Essay answer */}
               {currentQuestion.type === "essay" && (
                 <textarea
-                  className="min-h-[150px] w-full rounded-lg border p-3 focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="min-h-[140px] w-full rounded-lg border p-3 focus:outline-none focus:ring-2 focus:ring-primary"
                   placeholder="Хариултаа бичнэ үү..."
                   value={answers[currentQuestion.id] ?? ""}
                   onChange={(e) =>
@@ -843,24 +850,27 @@ export default function ExamTaker({
               )}
 
               {/* Navigation */}
-              <div className="flex justify-between pt-4">
+              <div className="flex gap-2 border-t pt-4">
                 <Button
                   variant="outline"
                   onClick={() => setCurrentIndex((p) => Math.max(0, p - 1))}
                   disabled={currentIndex === 0}
+                  className="flex-1"
                 >
                   Өмнөх
                 </Button>
-                <Button
-                  onClick={() =>
-                    setCurrentIndex((p) =>
-                      Math.min(displayQuestions.length - 1, p + 1)
-                    )
-                  }
-                  disabled={currentIndex === displayQuestions.length - 1}
-                >
-                  Дараах
-                </Button>
+                {currentIndex < displayQuestions.length - 1 && (
+                  <Button
+                    onClick={() =>
+                      setCurrentIndex((p) =>
+                        Math.min(displayQuestions.length - 1, p + 1)
+                      )
+                    }
+                    className="flex-1"
+                  >
+                    Дараах
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>

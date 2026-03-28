@@ -97,6 +97,7 @@ export type QuestionType =
   | "fill_blank"
   | "matching";
 export type Difficulty = "easy" | "medium" | "hard";
+export type DifficultyLevel = 1 | 2 | 3;
 export type QuestionBankVisibility =
   | "private"
   | "shared_subject"
@@ -133,6 +134,9 @@ export interface QuestionBank {
   correct_answer: string | null;
   points: number;
   difficulty: Difficulty;
+  difficulty_level: DifficultyLevel;
+  grade_level: number | null;
+  subtopic: string | null;
   tags: string[];
   explanation: string | null;
   usage_count: number;
@@ -151,6 +155,32 @@ export interface QuestionBankSummary {
   archived_count: number;
   total_usage_count: number;
   recently_used_count: number;
+}
+
+export interface SampleExam {
+  id: string;
+  title: string;
+  description: string | null;
+  subject_id: string;
+  grade_level: number;
+  subtopic: string | null;
+  difficulty_level: DifficultyLevel;
+  duration_minutes: number;
+  question_count: number;
+  total_points: number;
+  created_at: string;
+  updated_at: string;
+  subjects?: { name: string } | null;
+  sample_exam_items?: SampleExamItem[];
+}
+
+export interface SampleExamItem {
+  id: string;
+  sample_exam_id: string;
+  question_bank_id: string;
+  order_index: number;
+  created_at: string;
+  question_bank?: QuestionBank | null;
 }
 
 export interface QuestionImportMatchingPair {

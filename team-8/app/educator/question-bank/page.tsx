@@ -1,5 +1,5 @@
 import { getExamById } from "@/lib/exam/actions";
-import { getQuestionBankDashboardData } from "@/lib/question/actions";
+import { getQuestionBankCatalogData } from "@/lib/question/actions";
 import { getTeacherSubjects } from "@/lib/subject/actions";
 import type { Subject } from "@/types";
 import QuestionBankBrowser from "./_features/QuestionBankBrowser";
@@ -14,9 +14,9 @@ export default async function QuestionBankPage({
   searchParams,
 }: QuestionBankPageProps) {
   const { examId } = await searchParams;
-  const [{ questions, summary, viewerId, isAdmin }, subjects, targetExam] =
+  const [{ certifiedQuestions, sampleExams }, subjects, targetExam] =
     await Promise.all([
-      getQuestionBankDashboardData(),
+      getQuestionBankCatalogData(),
       getTeacherSubjects(),
       examId ? getExamById(examId) : Promise.resolve(null),
     ]);
@@ -25,7 +25,7 @@ export default async function QuestionBankPage({
     new Map(
       [
         ...subjects,
-        ...questions.flatMap((question) =>
+        ...certifiedQuestions.flatMap((question) =>
           question.subject_id && question.subjects?.name
             ? [
                 {
@@ -54,16 +54,11 @@ export default async function QuestionBankPage({
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Асуултын сан</h2>
-        <p className="text-muted-foreground">
-          Дахин ашиглах боломжтой асуултууд · Нийт {questions.length}
-        </p>
       </div>
 
       <QuestionBankBrowser
-        questions={questions}
-        summary={summary}
-        viewerId={viewerId}
-        isAdmin={isAdmin}
+        certifiedQuestions={certifiedQuestions}
+        sampleExams={sampleExams}
         subjects={mergedSubjects}
         examId={!importUnavailableMessage ? targetExam?.id : undefined}
         examTitle={!importUnavailableMessage ? targetExam?.title : undefined}

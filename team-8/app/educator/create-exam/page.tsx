@@ -8,15 +8,5 @@ export default async function CreateExamPage() {
     getExamCreationGroups(),
   ]);
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Шалгалт үүсгэх</h2>
-        <p className="text-muted-foreground">
-          Шалгалтын мэдээллийг оруулна уу. Дараа нь асуулт нэмэх боломжтой.
-        </p>
-      </div>
-      <ExamForm subjects={subjects} groups={groups} />
-    </div>
-  );
+  return <ExamForm subjects={subjects} groups={groups} />;
 }

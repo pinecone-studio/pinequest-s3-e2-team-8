@@ -10,6 +10,14 @@ import MathContent from "@/components/math/MathContent";
 import { gradeAnswer, finalizeGrading } from "@/lib/grading/actions";
 import { formatDateTimeUB } from "@/lib/utils/date";
 
+const questionTypeLabels: Record<string, string> = {
+  multiple_choice: "Сонгох",
+  multiple_response: "Олон зөв",
+  fill_blank: "Нөхөх",
+  essay: "Нээлттэй",
+  matching: "Холбох",
+};
+
 interface GradingFormProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   session: any;
@@ -279,13 +287,8 @@ export default function GradingForm({
                   </CardTitle>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline">
-                      {q?.type === "multiple_choice"
-                        ? "Олон сонголт"
-                        : q?.type === "true_false"
-                          ? "Үнэн/Худал"
-                          : q?.type === "essay"
-                            ? "Нээлттэй"
-                            : "Нөхөх"}
+                      {questionTypeLabels[String(q?.type ?? "")] ??
+                        String(q?.type ?? "Асуулт")}
                     </Badge>
                     <Badge>{maxPoints} оноо</Badge>
                   </div>

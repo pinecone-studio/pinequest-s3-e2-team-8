@@ -10,14 +10,10 @@ export default async function ExamsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Шалгалтууд</h2>
-          <p className="text-muted-foreground">Таны үүсгэсэн бүх шалгалтууд</p>
-        </div>
+        <h2 className="text-2xl font-bold tracking-tight">Шалгалтууд</h2>
         <Button
           asChild
           variant="secondary"
-          className="bg-indigo-100/70 text-indigo-700 hover:bg-indigo-100"
         >
           <Link href="/educator/create-exam">
             <PlusCircle className="mr-2 h-4 w-4" />

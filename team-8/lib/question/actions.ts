@@ -14,10 +14,12 @@ import {
 } from "@/lib/question-passages";
 import type {
   Difficulty,
+  DifficultyLevel,
   QuestionBank,
   QuestionImportDraft,
   QuestionBankSummary,
   QuestionBankVisibility,
+  SampleExam,
 } from "@/types";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -170,14 +172,64 @@ function buildQuestionBankSummary(
 function normalizeQuestionBankRecord(
   question: Partial<QuestionBank>
 ): QuestionBank {
+  const fallbackDifficultyLevel =
+    question.difficulty === "easy" ? 1 : question.difficulty === "hard" ? 3 : 2;
+  const parsedDifficultyLevel = Number(question.difficulty_level ?? fallbackDifficultyLevel);
+
   return {
     ...question,
     visibility:
       isQuestionBankVisibility(String(question.visibility ?? ""))
         ? (question.visibility as QuestionBankVisibility)
         : "private",
+    difficulty_level:
+      parsedDifficultyLevel === 1 || parsedDifficultyLevel === 2 || parsedDifficultyLevel === 3
+        ? (parsedDifficultyLevel as DifficultyLevel)
+        : 2,
+    grade_level:
+      typeof question.grade_level === "number"
+        ? question.grade_level
+        : question.grade_level
+          ? Number(question.grade_level)
+          : null,
+    subtopic: question.subtopic ? String(question.subtopic) : null,
     last_used_at: question.last_used_at ?? null,
   } as QuestionBank;
+}
+
+function normalizeSampleExamRecord(sampleExam: Partial<SampleExam>): SampleExam {
+  return {
+    ...sampleExam,
+    grade_level:
+      typeof sampleExam.grade_level === "number"
+        ? sampleExam.grade_level
+        : Number(sampleExam.grade_level ?? 0),
+    difficulty_level:
+      Number(sampleExam.difficulty_level) === 1 ||
+      Number(sampleExam.difficulty_level) === 2 ||
+      Number(sampleExam.difficulty_level) === 3
+        ? (Number(sampleExam.difficulty_level) as DifficultyLevel)
+        : 2,
+    duration_minutes:
+      typeof sampleExam.duration_minutes === "number"
+        ? sampleExam.duration_minutes
+        : Number(sampleExam.duration_minutes ?? 0),
+    question_count:
+      typeof sampleExam.question_count === "number"
+        ? sampleExam.question_count
+        : Number(sampleExam.question_count ?? 0),
+    total_points:
+      typeof sampleExam.total_points === "number"
+        ? sampleExam.total_points
+        : Number(sampleExam.total_points ?? 0),
+    subtopic: sampleExam.subtopic ? String(sampleExam.subtopic) : null,
+    sample_exam_items: (sampleExam.sample_exam_items ?? []).map((item) => ({
+      ...item,
+      question_bank: item?.question_bank
+        ? normalizeQuestionBankRecord(item.question_bank)
+        : null,
+    })),
+  } as SampleExam;
 }
 
 function getQuestionTypeMigrationHint(error: { code?: string; message?: string } | null) {
@@ -359,11 +411,6 @@ export async function addQuestion(examId: string, formData: FormData) {
   const correct_answer = (formData.get("correct_answer") as string) || null;
   const explanation = (formData.get("explanation") as string) || null;
   const image_url = (formData.get("image_url") as string)?.trim() || null;
-  const difficulty = (formData.get("difficulty") as string) || "medium";
-  const tags = ((formData.get("tags") as string) || "")
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
 
   const passageResolution = await resolvePassageId(
     supabase,
@@ -418,56 +465,7 @@ export async function addQuestion(examId: string, formData: FormData) {
     return { error: getQuestionTypeMigrationHint(error) ?? error.message };
   }
 
-  const { data: existingBankEntries } = await supabase
-    .from("question_bank")
-    .select("id, usage_count, correct_answer, image_url")
-    .eq("created_by", user.id)
-    .eq("type", type)
-    .eq("content", content);
-
-  const matchingBankEntry = (existingBankEntries ?? []).find(
-    (entry) =>
-      (entry.correct_answer ?? null) === questionPayload.correctAnswer &&
-      (entry.image_url ?? null) === image_url
-  );
-
-  if (matchingBankEntry) {
-    await supabase
-      .from("question_bank")
-      .update({
-        usage_count: Number(matchingBankEntry.usage_count ?? 0) + 1,
-        last_used_at: new Date().toISOString(),
-        points,
-        explanation,
-        content_html,
-        options: questionPayload.options,
-        correct_answer: questionPayload.correctAnswer,
-        image_url,
-        difficulty,
-        tags,
-      })
-      .eq("id", matchingBankEntry.id);
-  } else {
-    await supabase.from("question_bank").insert({
-      subject_id: exam.subject_id,
-      created_by: user.id,
-      type,
-      content,
-      content_html,
-      image_url,
-      options: questionPayload.options,
-      correct_answer: questionPayload.correctAnswer,
-      points,
-      difficulty,
-      tags,
-      explanation,
-      usage_count: 1,
-      last_used_at: new Date().toISOString(),
-    });
-  }
-
   revalidatePath(`/educator/exams/${examId}/questions`);
-  revalidatePath("/educator/question-bank");
   return { success: true };
 }
 
@@ -774,6 +772,74 @@ export async function getQuestionPassagesByExam(examId: string) {
   return loadQuestionPassagesByExam(supabase, examId);
 }
 
+export async function getQuestionBankCatalogData() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      certifiedQuestions: [] as QuestionBank[],
+      sampleExams: [] as SampleExam[],
+    };
+  }
+
+  const context = await getQuestionBankAccessContext(supabase, user.id);
+
+  if (!context.isAdmin && context.allowedSubjectIds.length === 0) {
+    return {
+      certifiedQuestions: [] as QuestionBank[],
+      sampleExams: [] as SampleExam[],
+    };
+  }
+
+  const certifiedQuery = context.isAdmin
+    ? supabase
+        .from("question_bank")
+        .select("*, subjects(name)")
+        .eq("visibility", "admin_curated")
+        .order("updated_at", { ascending: false })
+    : supabase
+        .from("question_bank")
+        .select("*, subjects(name)")
+        .eq("visibility", "admin_curated")
+        .in("subject_id", context.allowedSubjectIds)
+        .order("updated_at", { ascending: false });
+
+  const sampleExamQuery = context.isAdmin
+    ? supabase
+        .from("sample_exams")
+        .select(
+          "*, subjects(name), sample_exam_items(id, sample_exam_id, question_bank_id, order_index, created_at, question_bank:question_bank_id(*, subjects(name)))"
+        )
+        .order("updated_at", { ascending: false })
+    : supabase
+        .from("sample_exams")
+        .select(
+          "*, subjects(name), sample_exam_items(id, sample_exam_id, question_bank_id, order_index, created_at, question_bank:question_bank_id(*, subjects(name)))"
+        )
+        .in("subject_id", context.allowedSubjectIds)
+        .order("updated_at", { ascending: false });
+
+  const [{ data: certifiedRows }, sampleExamResult] = await Promise.all([
+    certifiedQuery,
+    sampleExamQuery,
+  ]);
+
+  return {
+    certifiedQuestions: (certifiedRows as Partial<QuestionBank>[]).map(
+      normalizeQuestionBankRecord
+    ),
+    sampleExams:
+      sampleExamResult.error?.code === "42P01"
+        ? []
+        : ((sampleExamResult.data as Partial<SampleExam>[] | null) ?? []).map(
+            normalizeSampleExamRecord
+          ),
+  };
+}
+
 export async function getQuestionBankDashboardData() {
   const supabase = await createClient();
   const {
@@ -863,8 +929,8 @@ export async function importQuestionFromBank(
   if (!canViewQuestionBankItem(bankQuestion, context)) {
     return { error: "Энэ асуултыг импортлох эрх байхгүй байна" };
   }
-  if (bankQuestion.visibility === "archived") {
-    return { error: "Архивласан асуултыг шалгалт руу оруулах боломжгүй" };
+  if (bankQuestion.visibility !== "admin_curated") {
+    return { error: "Зөвхөн баталгаажсан сангийн асуултыг оруулах боломжтой" };
   }
   if (
     exam.subject_id &&
@@ -921,6 +987,138 @@ export async function importQuestionFromBank(
     };
   }
 
+  return { success: true };
+}
+
+export async function importSampleExamToExam(
+  examId: string,
+  sampleExamId: string
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const { exam } = await getOwnedExam(examId, user.id);
+  if (!exam) return { error: "Шалгалт олдсонгүй" };
+  if (exam.is_published) {
+    return { error: "Нийтлэгдсэн шалгалтад жишиг шалгалт оруулах боломжгүй" };
+  }
+
+  const { data: sampleExam, error: sampleExamError } = await supabase
+    .from("sample_exams")
+    .select(
+      "id, subject_id, sample_exam_items(order_index, question_bank:question_bank_id(id, visibility, subject_id, type, content, content_html, image_url, options, correct_answer, points, explanation))"
+    )
+    .eq("id", sampleExamId)
+    .maybeSingle();
+
+  if (sampleExamError?.code === "42P01") {
+    return {
+      error: "Sample exam feature ашиглахын өмнө шинэ DB migration-аа apply хийнэ үү.",
+    };
+  }
+  if (!sampleExam) {
+    return { error: "Жишиг шалгалт олдсонгүй" };
+  }
+
+  if (exam.subject_id && sampleExam.subject_id !== exam.subject_id) {
+    return { error: "Өөр хичээлийн жишиг шалгалтыг энэ шалгалт руу оруулах боломжгүй" };
+  }
+
+  const sampleExamItems = (sampleExam.sample_exam_items ??
+    []) as Array<{
+    order_index: number;
+    question_bank:
+      | {
+          id: string;
+          visibility: string;
+          subject_id: string | null;
+          type: string;
+          content: string;
+          content_html: string | null;
+          image_url: string | null;
+          options: string[] | null;
+          correct_answer: string | null;
+          points: number;
+          explanation: string | null;
+        }
+      | null
+      | {
+          id: string;
+          visibility: string;
+          subject_id: string | null;
+          type: string;
+          content: string;
+          content_html: string | null;
+          image_url: string | null;
+          options: string[] | null;
+          correct_answer: string | null;
+          points: number;
+          explanation: string | null;
+        }[];
+  }>;
+
+  const bankQuestions = sampleExamItems
+    .sort((left, right) => left.order_index - right.order_index)
+    .map((item) =>
+      Array.isArray(item.question_bank) ? item.question_bank[0] : item.question_bank
+    )
+    .filter(
+      (
+        item
+      ): item is {
+        id: string;
+        visibility: string;
+        subject_id: string | null;
+        type: string;
+        content: string;
+        content_html: string | null;
+        image_url: string | null;
+        options: string[] | null;
+        correct_answer: string | null;
+        points: number;
+        explanation: string | null;
+      } =>
+        item != null && item.visibility === "admin_curated"
+    );
+
+  if (bankQuestions.length === 0) {
+    return { error: "Жишиг шалгалтад ашиглах баталгаажсан бодлого алга" };
+  }
+
+  const { data: existing } = await supabase
+    .from("questions")
+    .select("order_index")
+    .eq("exam_id", examId)
+    .order("order_index", { ascending: false })
+    .limit(1);
+
+  const startOrderIndex =
+    existing && existing.length > 0 ? existing[0].order_index + 1 : 0;
+
+  const insertPayload = bankQuestions.map((question, index) => ({
+    exam_id: examId,
+    type: question.type,
+    content: question.content,
+    content_html: question.content_html,
+    image_url: question.image_url,
+    options: question.options,
+    correct_answer: question.correct_answer,
+    points: question.points,
+    order_index: startOrderIndex + index,
+    explanation: question.explanation,
+    created_by: user.id,
+  }));
+
+  const { error: insertError } = await supabase.from("questions").insert(insertPayload);
+
+  if (insertError) {
+    return { error: insertError.message };
+  }
+
+  revalidatePath(`/educator/exams/${examId}/questions`);
   return { success: true };
 }
 

@@ -12,7 +12,7 @@ import EditQuestionDialog from "./EditQuestionDialog";
 
 const typeLabels: Record<string, string> = {
   multiple_choice: "Сонгох",
-  multiple_response: "Олон сонголттой",
+  multiple_response: "Олон зөв",
   essay: "Задгай / Эссэ",
   fill_blank: "Нөхөх",
   matching: "Холбох",
@@ -67,7 +67,7 @@ export default function QuestionList({
   if (questions.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
-        Асуулт байхгүй байна. Доороос асуулт нэмнэ үү.
+        Асуулт байхгүй байна.
       </div>
     );
   }
@@ -103,9 +103,6 @@ export default function QuestionList({
                       <span className="font-medium">{passage.title}</span>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Доорх асуултууд энэ текст, зураг, хүснэгт эсвэл өгөгдлийг хамт ашиглана.
-                  </p>
                   <MathContent
                     html={passage.content_html}
                     text={passage.content}
@@ -137,16 +134,6 @@ export default function QuestionList({
                   <div className="flex flex-wrap gap-2">
                     <Badge variant="outline">{typeLabels[q.type] ?? q.type}</Badge>
                     <Badge variant="outline">{q.points} оноо</Badge>
-                    {q.question_passages && (
-                      <Badge variant="secondary" className="text-xs">
-                        Эх материалд холбогдсон
-                      </Badge>
-                    )}
-                    {q.image_url && (
-                      <Badge variant="outline" className="text-xs">
-                        Зурагтай
-                      </Badge>
-                    )}
                     {formattedCorrectAnswer && (
                       <Badge variant="secondary" className="text-xs">
                         ✓ {formattedCorrectAnswer}

@@ -17,8 +17,22 @@ function parseStringArray(value: unknown) {
     const parsed = JSON.parse(String(value ?? "[]")) as string[];
     return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
   } catch {
-    return [];
+    return String(value ?? "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
   }
+}
+
+function normalizeTextValue(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function areArraysEqual(left: string[], right: string[]) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
 }
 
 function parseMatchingPairs(options: unknown) {
@@ -184,14 +198,103 @@ export default async function ExamResultPage({
   if (!data) redirect("/student/exams");
 
   const examMeta = Array.isArray(data.exams) ? data.exams[0] : data.exams;
-  const totalScore = data.total_score ?? 0;
-  const maxScore = data.max_score ?? 0;
+  const answers = data.answers ?? [];
+  const derivedAnswers = answers.map((answer) => {
+    const question = Array.isArray(answer.questions)
+      ? answer.questions[0]
+      : answer.questions;
+    if (!question) {
+      return {
+        ...answer,
+        derivedIsCorrect: answer.is_correct ?? null,
+        derivedScore: Number(answer.score ?? 0),
+      };
+    }
+
+    const type = String(question.type ?? "");
+    const points = Number(question.points ?? 0);
+
+    if (type === "multiple_choice" || type === "fill_blank") {
+      const isCorrect =
+        normalizeTextValue(answer.answer) ===
+        normalizeTextValue(question.correct_answer);
+      return {
+        ...answer,
+        derivedIsCorrect: isCorrect,
+        derivedScore: isCorrect ? points : 0,
+      };
+    }
+
+    if (type === "multiple_response") {
+      const submitted = parseStringArray(answer.answer)
+        .map((item) => normalizeTextValue(item))
+        .filter(Boolean)
+        .sort();
+      const expected = parseStringArray(question.correct_answer)
+        .map((item) => normalizeTextValue(item))
+        .filter(Boolean)
+        .sort();
+      const isCorrect =
+        submitted.length > 0 && areArraysEqual(submitted, expected);
+
+      return {
+        ...answer,
+        derivedIsCorrect: isCorrect,
+        derivedScore: isCorrect ? points : 0,
+      };
+    }
+
+    if (type === "matching") {
+      try {
+        const submitted = JSON.parse(String(answer.answer ?? "{}")) as Record<
+          string,
+          string
+        >;
+        const expected = parseMatchingPairs(question.options);
+        const isCorrect =
+          expected.length > 0 &&
+          expected.every(
+            (pair) =>
+              normalizeTextValue(submitted[pair.left]) ===
+              normalizeTextValue(pair.right)
+          );
+
+        return {
+          ...answer,
+          derivedIsCorrect: isCorrect,
+          derivedScore: isCorrect ? points : 0,
+        };
+      } catch {
+        return {
+          ...answer,
+          derivedIsCorrect: false,
+          derivedScore: 0,
+        };
+      }
+    }
+
+    return {
+      ...answer,
+      derivedIsCorrect: answer.is_correct ?? null,
+      derivedScore: Number(answer.score ?? 0),
+    };
+  });
+
+  const totalScore = derivedAnswers.reduce(
+    (sum, answer) => sum + Number(answer.derivedScore ?? 0),
+    0
+  );
+  const maxScore = derivedAnswers.reduce((sum, answer) => {
+    const question = Array.isArray(answer.questions)
+      ? answer.questions[0]
+      : answer.questions;
+    return sum + Number(question?.points ?? 0);
+  }, 0);
   const percentage =
     maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
   const passingScore = examMeta?.passing_score ?? 60;
   const passed = percentage >= passingScore;
-  const answers = data.answers ?? [];
-  const hasEssayAnswers = answers.some((answer) => {
+  const hasEssayAnswers = derivedAnswers.some((answer) => {
     const question = Array.isArray(answer.questions)
       ? answer.questions[0]
       : answer.questions;
@@ -255,19 +358,19 @@ export default async function ExamResultPage({
       </Card>
 
       {/* Асуулт бүрийн хариулт */}
-      {answers.length > 0 && (
+      {derivedAnswers.length > 0 && (
         <div className="space-y-3">
           <h3 className="font-semibold text-lg">Асуулт бүрийн дүн</h3>
           {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-          {(answers as any[]).map((ans, idx: number) => {
+          {(derivedAnswers as any[]).map((ans, idx: number) => {
             const q = Array.isArray(ans.questions)
               ? ans.questions[0]
               : ans.questions;
             if (!q) return null;
 
             const isEssay: boolean = q.type === "essay";
-            const isCorrect: boolean | null = ans.is_correct ?? null;
-            const score: number = Number(ans.score ?? 0);
+            const isCorrect: boolean | null = ans.derivedIsCorrect ?? ans.is_correct ?? null;
+            const score: number = Number(ans.derivedScore ?? ans.score ?? 0);
             const points: number = Number(q.points ?? 0);
 
             return (
