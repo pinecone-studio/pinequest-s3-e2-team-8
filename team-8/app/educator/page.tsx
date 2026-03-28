@@ -1,3 +1,4 @@
+import type React from "react";
 import Link from "next/link";
 import DashboardImage from "../_icons/DashboardImage";
 import { getEducatorStats } from "@/lib/dashboard/actions";
@@ -119,30 +120,270 @@ function StatCard({
   );
 }
 
-function MockPreview({ variant }: { variant: "create" | "grade" }) {
+function MockPreviewCreate() {
   return (
-    <div className="mb-3 flex h-16 items-center gap-2 rounded-xl border bg-muted/40 px-3">
-      {variant === "create" ? (
-        <>
-          <div className="h-10 w-8 flex-shrink-0 rounded-md bg-muted" />
-          <div className="flex flex-1 flex-col gap-1.5">
-            <div className="h-1.5 w-4/5 rounded bg-muted" />
-            <div className="h-1.5 w-3/5 rounded bg-muted" />
-            <div className="h-1.5 w-2/3 rounded bg-muted" />
+    <div
+      style={{
+        flex: 1,
+        background: "#EDF4FD",
+        borderRadius: 12,
+        padding: 14,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        marginBottom: 14,
+        minHeight: 180,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          background: "white",
+          border: "1.5px solid #93C5FD",
+          borderRadius: 999,
+          padding: "6px 16px",
+          fontSize: 12,
+          fontWeight: 500,
+          color: "#2563EB",
+        }}
+      >
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#3B82F6"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+        </svg>
+        Эхлэх - Үүсгэх
+      </div>
+
+      <div style={{ width: 1, height: 12, background: "#93C5FD" }} />
+
+      <div
+        style={{
+          width: "100%",
+          background: "white",
+          border: "1px solid #BFDBFE",
+          borderRadius: 10,
+          padding: 10,
+        }}
+      >
+        <div style={{ display: "flex", gap: 8 }}>
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              background: "#E5E7EB",
+              borderRadius: 6,
+              flexShrink: 0,
+            }}
+          />
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              gap: 5,
+              paddingTop: 2,
+            }}
+          >
+            <div
+              style={{
+                height: 8,
+                background: "#E5E7EB",
+                borderRadius: 4,
+                width: "100%",
+              }}
+            />
+            <div
+              style={{
+                height: 8,
+                background: "#E5E7EB",
+                borderRadius: 4,
+                width: "80%",
+              }}
+            />
+            <div
+              style={{
+                height: 8,
+                background: "#E5E7EB",
+                borderRadius: 4,
+                width: "60%",
+              }}
+            />
           </div>
-        </>
-      ) : (
-        <div className="flex flex-1 flex-col gap-1.5">
-          <div className="h-1.5 w-[90%] rounded bg-muted" />
-          <div className="h-1.5 w-3/4 rounded bg-muted" />
-          <div className="my-0.5 h-px w-full bg-border" />
-          <div className="h-1.5 w-[85%] rounded bg-muted" />
-          <div className="h-1.5 w-3/5 rounded bg-muted" />
         </div>
-      )}
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <div
+            style={{
+              height: 8,
+              background: "#E5E7EB",
+              borderRadius: 4,
+              width: "35%",
+            }}
+          />
+          <div
+            style={{
+              height: 8,
+              background: "#E5E7EB",
+              borderRadius: 4,
+              width: "25%",
+            }}
+          />
+        </div>
+      </div>
     </div>
   );
 }
+
+function MockPreviewGrade() {
+  return (
+    <div
+      style={{
+        flex: 1,
+        background: "#EDF4FD",
+        borderRadius: 12,
+        padding: 14,
+        marginBottom: 14,
+        minHeight: 180,
+        position: "relative",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          top: 10,
+          right: 10,
+          width: 28,
+          height: 28,
+          background: "white",
+          border: "0.5px solid #D1D5DB",
+          borderRadius: "50%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#6B7280"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+        </svg>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+          paddingTop: 4,
+        }}
+      >
+        <div
+          style={{
+            background: "white",
+            border: "1.5px solid #93C5FD",
+            borderRadius: 10,
+            padding: 10,
+          }}
+        >
+          <div
+            style={{
+              height: 8,
+              background: "#E5E7EB",
+              borderRadius: 4,
+              width: "100%",
+              marginBottom: 6,
+            }}
+          />
+          <div
+            style={{
+              height: 8,
+              background: "#E5E7EB",
+              borderRadius: 4,
+              width: "85%",
+              marginBottom: 6,
+            }}
+          />
+          <div
+            style={{
+              height: 8,
+              background: "#E5E7EB",
+              borderRadius: 4,
+              width: "70%",
+            }}
+          />
+        </div>
+        <div
+          style={{
+            background: "white",
+            border: "1.5px solid #93C5FD",
+            borderRadius: 10,
+            padding: 10,
+          }}
+        >
+          <div
+            style={{
+              height: 8,
+              background: "#E5E7EB",
+              borderRadius: 4,
+              width: "100%",
+              marginBottom: 6,
+            }}
+          />
+          <div
+            style={{
+              height: 8,
+              background: "#E5E7EB",
+              borderRadius: 4,
+              width: "60%",
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const cardStyle: React.CSSProperties = {
+  background: "white",
+  border: "1px solid #E5E7EB",
+  borderRadius: 16,
+  padding: 20,
+  display: "flex",
+  flexDirection: "column",
+};
+
+const btnStyle: React.CSSProperties = {
+  width: "100%",
+  background: "white",
+  border: "1px solid #E5E7EB",
+  borderRadius: 10,
+  padding: "10px 0",
+  fontSize: 12,
+  fontWeight: 500,
+  color: "#111827",
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 4,
+};
 
 function TimelineRow({ row }: { row: ScheduleRow }) {
   const start = getTimeDecimal(row.start_time);
@@ -152,7 +393,7 @@ function TimelineRow({ row }: { row: ScheduleRow }) {
     Math.max(0, Math.min(1, (start - TIMELINE_START_HOUR) / totalSpan)) * 100;
   const width = Math.max(
     2,
-    Math.min(1, (end - TIMELINE_START_HOUR) / totalSpan) * 100 - left
+    Math.min(1, (end - TIMELINE_START_HOUR) / totalSpan) * 100 - left,
   );
 
   const blockColors = ["#CFEED7", "#B8D8F7", "#FFE0C2", "#E8D5F5", "#FFD5D5"];
@@ -206,12 +447,12 @@ export default async function EducatorDashboard() {
     .filter((row) => isTodayInUB(row.start_time))
     .sort(
       (a, b) =>
-        new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+        new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
     );
 
   const timeLabels = Array.from(
     { length: TIMELINE_END_HOUR - TIMELINE_START_HOUR + 1 },
-    (_, i) => `${String(TIMELINE_START_HOUR + i).padStart(2, "0")}:00`
+    (_, i) => `${String(TIMELINE_START_HOUR + i).padStart(2, "0")}:00`,
   );
 
   return (
@@ -252,33 +493,57 @@ export default async function EducatorDashboard() {
           color="yellow"
         />
       </div>
-
+      <div className="w-[701px] h-[52px] flex flex-col justify-between">
+        <p className="text-[22px] font-medium text-black leading-none">
+          Эдгээр хэрэгтэй хэрэгслүүдийг ашиглаж эхэлцгээе
+        </p>
+        <p className="text-[14px] text-gray-400 leading-none">
+          Шалгалт үүсгэх, шалгалтын хариултад засахад ашиглаж болох манай
+          хэрэгслүүдийг судлаарай
+        </p>
+      </div>
       {/* ── Quick actions ── */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border bg-card p-5 shadow-sm">
-          <h3 className="mb-1 text-sm font-semibold">Шинэ шалгалт үүсгэх</h3>
-          <p className="mb-3 text-xs text-muted-foreground">
-            AI ашиглан эсвэл гараар шалгалт үүсгэнэ.
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ ...cardStyle, width: 472, height: 372 }}>
+          <p
+            style={{
+              margin: "0 0 4px",
+              fontSize: 14,
+              fontWeight: 600,
+              color: "#111827",
+            }}
+          >
+            Шинэ шалгалт үүсгэх
           </p>
-          <MockPreview variant="create" />
+          <p style={{ margin: "0 0 14px", fontSize: 12, color: "#6B7280" }}>
+            AI ашиглан шалгалтыг маш амархан үүсгэ!
+          </p>
+          <MockPreviewCreate />
           <Link href="/educator/create-exam">
-            <button className="w-full rounded-lg border bg-primary py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">
-              Шалгалт үүсгэх ↗
+            <button style={btnStyle}>
+              Шинэ шалгалт үүсгэх <span>↗</span>
             </button>
           </Link>
         </div>
 
-        <div className="rounded-2xl border bg-card p-5 shadow-sm">
-          <h3 className="mb-1 text-sm font-semibold">
+        <div style={{ ...cardStyle, width: 593, height: 372 }}>
+          <p
+            style={{
+              margin: "0 0 4px",
+              fontSize: 14,
+              fontWeight: 600,
+              color: "#111827",
+            }}
+          >
             Шалгалтын хариулт засах
-          </h3>
-          <p className="mb-3 text-xs text-muted-foreground">
-            Тексттэй асуултын хариуг хянан засна.
           </p>
-          <MockPreview variant="grade" />
+          <p style={{ margin: "0 0 14px", fontSize: 12, color: "#6B7280" }}>
+            Тексттэй шалгалтыг хянаж засах.
+          </p>
+          <MockPreviewGrade />
           <Link href="/educator/grading">
-            <button className="w-full rounded-lg border py-2 text-xs font-medium hover:bg-muted">
-              Шалгалт засах ↗
+            <button style={btnStyle}>
+              Шалгалт засах <span>↗</span>
             </button>
           </Link>
         </div>
