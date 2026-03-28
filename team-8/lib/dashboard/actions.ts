@@ -40,6 +40,7 @@ export async function getEducatorStats() {
       totalQuestions: 0,
       activeExams: 0,
       pendingGrading: 0,
+      totalParticipants: 0,
       upcomingExams: [],
       pendingItems: [],
     };
@@ -94,7 +95,13 @@ export async function getEducatorStats() {
 
   const scopeExamIds = [...teachingScopeExamIds];
 
-  const [questionsRes, activeRes, upcomingRes, submittedSessionsRes] = await Promise.all([
+  const [
+    questionsRes,
+    activeRes,
+    upcomingRes,
+    submittedSessionsRes,
+    participantRowsRes,
+  ] = await Promise.all([
     supabase
       .from("question_bank")
       .select("id", { count: "exact", head: true }),
@@ -125,6 +132,9 @@ export async function getEducatorStats() {
           .eq("status", "submitted")
           .in("exam_id", scopeExamIds)
           .order("submitted_at", { ascending: true })
+      : Promise.resolve({ data: [] }),
+    scopeExamIds.length > 0
+      ? supabase.from("exam_sessions").select("user_id").in("exam_id", scopeExamIds)
       : Promise.resolve({ data: [] }),
   ]);
 
@@ -194,11 +204,18 @@ export async function getEducatorStats() {
     };
   });
 
+  const participantIds = new Set(
+    (participantRowsRes.data ?? [])
+      .map((row) => row.user_id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+  );
+
   return {
     totalExams: ownExamIds.length,
     totalQuestions: questionsRes && "count" in questionsRes ? (questionsRes.count ?? 0) : 0,
     activeExams: "error" in activeRes ? 0 : (activeRes.count ?? 0),
     pendingGrading: filteredSubmittedSessions.length,
+    totalParticipants: participantIds.size,
     upcomingExams,
     pendingItems,
   };
