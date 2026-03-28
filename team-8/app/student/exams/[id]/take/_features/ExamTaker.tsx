@@ -11,6 +11,20 @@ import {
   saveAnswer,
   submitExam,
 } from "@/lib/student/actions";
+import { useCameraMonitor } from "@/hooks/useCameraMonitor";
+import { useGazeMonitor } from "@/hooks/useGazeMonitor";
+
+// ---------------------------------------------------------------------------
+// SEB (Safe Exam Browser) detection
+// ---------------------------------------------------------------------------
+// Set to true when you want to enforce SEB for all exams.
+// In Phase 2, replace this with a per-exam flag from the exams table.
+const REQUIRE_SEB = false;
+
+function isSEBBrowser(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return navigator.userAgent.includes("SEB");
+}
 
 interface QuestionItem {
   id: string;
@@ -187,6 +201,30 @@ export default function ExamTaker({
   const tabSwitchCountRef = useRef(0);
   const isSubmittingRef = useRef(false);
   const proctorThrottleRef = useRef<Record<string, number>>({});
+
+  // SEB detection (evaluated once per render; navigator.userAgent never changes).
+  const sebDetected = isSEBBrowser();
+  // Camera is only started when SEB is not required, or when SEB is detected.
+  const { cameraStatus, videoRef } = useCameraMonitor({
+    sessionId,
+    enabled: !REQUIRE_SEB || sebDetected,
+  });
+
+  // Gaze warning count — only stored in state for badge display.
+  // The ref inside useGazeMonitor is the authoritative counter.
+  const [gazeWarningCount, setGazeWarningCount] = useState(0);
+
+  useGazeMonitor({
+    sessionId,
+    videoRef,
+    enabled: cameraStatus === "granted",
+    onWarning: (total) => {
+      setGazeWarningCount(total);
+    },
+    onMaxWarnings: () => {
+      void handleSubmit();
+    },
+  });
 
   const currentQuestion = displayQuestions[currentIndex];
   const currentPassage = currentQuestion.question_passages;
@@ -487,6 +525,27 @@ export default function ExamTaker({
   ).length;
   const isTimeWarning = timeLeft < 300; // 5 минутаас бага
 
+  if (REQUIRE_SEB && !sebDetected) {
+    return (
+      <div className="mx-auto flex min-h-[60vh] max-w-2xl items-center justify-center p-6">
+        <Card className="w-full">
+          <CardHeader>
+            <CardTitle>Safe Exam Browser шаардлагатай</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Энэ шалгалтыг зөвхөн Safe Exam Browser (SEB) ашиглан нээх
+              боломжтой. Та SEB татаж аваад дахин нээнэ үү.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              safeexambrowser.org
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (displayQuestions.length === 0 || !currentQuestion) {
     return (
       <div className="mx-auto flex min-h-[60vh] max-w-2xl items-center justify-center p-6">
@@ -551,6 +610,13 @@ export default function ExamTaker({
 
       {/* Header: Timer + Progress */}
       <div className="sticky top-0 z-50 border-b bg-background/95 px-3 py-2 backdrop-blur">
+        {gazeWarningCount > 0 && (
+          <div className="border-b border-red-200 bg-red-50 px-3 py-1.5 text-center text-sm font-medium text-red-700">
+            {gazeWarningCount < 3
+              ? `Анхааруулга ${gazeWarningCount}/3: Та камерын өмнө шулуун харна уу. ${3 - gazeWarningCount} анхааруулга үлдсэн.`
+              : "Анхааруулга 3/3: Шалгалт дуусгагдаж байна..."}
+          </div>
+        )}
         <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <h1 className="line-clamp-1 text-base font-semibold sm:text-lg">
@@ -561,6 +627,14 @@ export default function ExamTaker({
             </p>
           </div>
           <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
+            {cameraStatus === "denied" && (
+              <Badge variant="destructive">Камер хаалттай</Badge>
+            )}
+            {gazeWarningCount > 0 && (
+              <Badge variant="destructive">
+                Анхааруулга {gazeWarningCount}/3
+              </Badge>
+            )}
             {tabSwitchCount > 0 && (
               <Badge variant="destructive">
                 Tab {tabSwitchCount}/5
@@ -876,6 +950,18 @@ export default function ExamTaker({
           </Card>
         </div>
       </div>
+
+      {/* Camera preview — always in DOM so videoRef is attached before stream resolves.
+          Hidden when camera is not yet granted. PiP-style fixed box bottom-right. */}
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        className={`fixed top-16 right-4 z-50 h-28 w-36 rounded-xl border-2 bg-black object-cover shadow-lg transition-opacity ${
+          cameraStatus === "granted" ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+      />
     </div>
   );
 }
