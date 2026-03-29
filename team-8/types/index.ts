@@ -118,6 +118,7 @@ export interface Question {
   points: number;
   order_index: number;
   explanation: string | null;
+  ai_variant_enabled: boolean;
   created_at: string;
   question_passages?: QuestionPassage | null;
 }
@@ -202,6 +203,7 @@ export interface QuestionImportDraft {
   correctAnswer: string;
   multipleCorrectAnswers: string[];
   matchingPairs: QuestionImportMatchingPair[];
+  warnings: string[];
   errors: string[];
 }
 

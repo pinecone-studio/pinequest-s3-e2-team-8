@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getModel } from "@/lib/ai/config";
 import { notifyTeacherOfAIGrading } from "@/lib/notification/actions";
+import { getSessionQuestionVariantMap } from "@/lib/question-variants";
 import type { QuestionType } from "@/types";
 
 // ─── AI Essay Grading ────────────────────────────────────────────────
@@ -71,7 +72,7 @@ export async function gradeEssayWithAI(answerId: string) {
 
   const { data: question } = await supabase
     .from("questions")
-    .select("content, points, type, exam_id")
+    .select("id, content, points, type, exam_id")
     .eq("id", answer.question_id)
     .maybeSingle();
 
@@ -81,8 +82,12 @@ export async function gradeEssayWithAI(answerId: string) {
   }
 
   try {
+    const questionVariantMap = await getSessionQuestionVariantMap(
+      supabase,
+      answer.session_id
+    );
     const aiResult = await callGeminiForGrading(
-      question.content,
+      questionVariantMap.get(answer.question_id)?.content ?? question.content,
       answer.answer,
       question.points
     );
@@ -139,6 +144,7 @@ export async function autoGradeSessionEssays(sessionId: string) {
 
   if (!questions) return { error: "Асуултууд олдсонгүй" };
 
+  const questionVariantMap = await getSessionQuestionVariantMap(supabase, sessionId);
   const questionMap = new Map(questions.map((q) => [q.id, q]));
   let gradedCount = 0;
   const errors: string[] = [];
@@ -151,7 +157,7 @@ export async function autoGradeSessionEssays(sessionId: string) {
 
     try {
       const aiResult = await callGeminiForGrading(
-        question.content,
+        questionVariantMap.get(answer.question_id)?.content ?? question.content,
         answer.answer,
         question.points
       );

@@ -120,29 +120,44 @@ export default function QuestionList({
               </Card>
             )}
 
-            <Card>
-              <CardContent className="flex items-start gap-4 pt-4">
+            <Card
+              className={
+                q.ai_variant_enabled
+                  ? "border-amber-200 bg-amber-50/30"
+                  : undefined
+              }
+            >
+              <CardContent className="grid grid-cols-[auto_minmax(0,1fr)_108px] items-start gap-4 pt-4">
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
                   {idx + 1}
                 </span>
-                <div className="flex-1 space-y-1">
+                <div className="min-w-0 space-y-1">
                   <MathContent
                     html={q.content_html}
                     text={q.content}
-                    className="prose prose-sm max-w-none text-foreground"
+                    className="prose prose-sm max-w-none break-words text-foreground"
                   />
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex min-w-0 flex-wrap gap-2">
                     <Badge variant="outline">{typeLabels[q.type] ?? q.type}</Badge>
                     <Badge variant="outline">{q.points} оноо</Badge>
+                    {q.ai_variant_enabled ? (
+                      <Badge className="border-amber-200 bg-amber-100 text-amber-950 hover:bg-amber-100">
+                        AI хувилбар
+                      </Badge>
+                    ) : null}
                     {formattedCorrectAnswer && (
-                      <Badge variant="secondary" className="text-xs">
+                      <Badge
+                        variant="secondary"
+                        className="max-w-full truncate text-xs"
+                        title={formattedCorrectAnswer}
+                      >
                         ✓ {formattedCorrectAnswer}
                       </Badge>
                     )}
                   </div>
                 </div>
                 {!isLocked && (
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex min-w-[108px] shrink-0 items-center justify-end gap-2 self-start">
                     <EditQuestionDialog
                       examId={examId}
                       question={q}
@@ -150,8 +165,8 @@ export default function QuestionList({
                     />
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="text-muted-foreground hover:text-destructive"
+                      size="icon-sm"
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
                       onClick={() => handleDelete(q.id)}
                     >
                       <Trash2 className="h-4 w-4" />

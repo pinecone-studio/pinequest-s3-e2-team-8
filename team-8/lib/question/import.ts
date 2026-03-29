@@ -366,6 +366,7 @@ export function buildQuestionImportDrafts(
                 right: pair.right,
               }))
             : [],
+        warnings: [],
         errors: [],
       };
 

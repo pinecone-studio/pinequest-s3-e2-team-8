@@ -17,6 +17,21 @@ interface MathContentProps {
   className?: string;
 }
 
+function stripHtmlTags(value: string) {
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasMathRenderError(element: Element) {
+  return Boolean(element.querySelector("mjx-merror, [data-mjx-error]"));
+}
+
 export default function MathContent({
   html,
   text,
@@ -28,7 +43,11 @@ export default function MathContent({
     message: string;
   } | null>(null);
   const signature = useMemo(() => `${html ?? ""}\u0000${text ?? ""}`, [html, text]);
-  const fallbackText = useMemo(() => text ?? "", [text]);
+  const fallbackText = useMemo(() => {
+    if (text) return text;
+    if (html) return stripHtmlTags(html);
+    return "";
+  }, [html, text]);
 
   useEffect(() => {
     const element = ref.current;
@@ -48,6 +67,21 @@ export default function MathContent({
         mathJax.typesetClear?.([ref.current]);
         void mathJax
           .typesetPromise([ref.current])
+          .then(() => {
+            if (cancelled || !ref.current) return;
+
+            if (hasMathRenderError(ref.current)) {
+              setTypesetError({
+                signature: currentSignature,
+                message: "Math render error",
+              });
+              return;
+            }
+
+            setTypesetError((currentError) =>
+              currentError?.signature === currentSignature ? null : currentError
+            );
+          })
           .catch((err: unknown) => {
             if (cancelled) return;
             const message =

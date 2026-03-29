@@ -1,6 +1,13 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type ChangeEvent,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -41,16 +48,17 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  AlertTriangle,
   ChevronDown,
-  File,
   FileSpreadsheet,
+  FileText,
   Loader2,
   PlusCircle,
   Trash2,
   Upload,
 } from "lucide-react";
 
-type FileImportType = "excel" | "csv";
+type FileImportType = "excel" | "word";
 
 interface SelectedImportFile {
   name: string;
@@ -62,10 +70,10 @@ interface QuestionImportActionsProps {
 }
 
 const questionTypes: { value: QuestionType; label: string }[] = [
-  { value: "multiple_choice", label: "Сонгох" },
-  { value: "multiple_response", label: "Олон зөв" },
+  { value: "multiple_choice", label: "Нэг сонголттой" },
+  { value: "multiple_response", label: "Олон сонголттой" },
   { value: "fill_blank", label: "Нөхөх" },
-  { value: "essay", label: "Задгай / Эссэ" },
+  { value: "essay", label: "Эссэ / задгай" },
   { value: "matching", label: "Холбох" },
 ];
 
@@ -85,11 +93,12 @@ const importTypeMeta: Record<
     hint: ".xlsx / .xls",
     icon: FileSpreadsheet,
   },
-  csv: {
-    accept: ".csv,text/csv",
-    label: "CSV",
-    hint: ".csv",
-    icon: File,
+  word: {
+    accept:
+      ".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    label: "Word",
+    hint: ".docx",
+    icon: FileText,
   },
 };
 
@@ -178,23 +187,36 @@ export default function QuestionImportActions({
   const [selectedFile, setSelectedFile] = useState<SelectedImportFile | null>(null);
   const [drafts, setDrafts] = useState<QuestionImportDraft[]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isParsing, startParsingTransition] = useTransition();
   const [isImporting, startImportTransition] = useTransition();
   const inputRefs = useRef<Record<FileImportType, HTMLInputElement | null>>({
     excel: null,
-    csv: null,
+    word: null,
   });
 
   const summary = useMemo(() => {
     const invalidCount = drafts.filter((draft) => draft.errors.length > 0).length;
+    const warningCount = drafts.filter((draft) => draft.warnings.length > 0).length;
 
     return {
       total: drafts.length,
       invalid: invalidCount,
+      warning: warningCount,
     };
   }, [drafts]);
+
+  useEffect(() => {
+    if (!successMessage) return;
+
+    const timeout = window.setTimeout(() => {
+      setSuccessMessage(null);
+    }, 2500);
+
+    return () => window.clearTimeout(timeout);
+  }, [successMessage]);
 
   function openPicker(type: FileImportType) {
     inputRefs.current[type]?.click();
@@ -203,6 +225,7 @@ export default function QuestionImportActions({
   function clearImportState(resetSuccessMessage = true) {
     setSelectedFile(null);
     setDrafts([]);
+    setParseWarnings([]);
     setError(null);
     if (resetSuccessMessage) {
       setSuccessMessage(null);
@@ -213,6 +236,7 @@ export default function QuestionImportActions({
   async function parseFile(file: File, type: FileImportType) {
     setError(null);
     setSuccessMessage(null);
+    setParseWarnings([]);
     setSelectedFile({
       name: file.name,
       type,
@@ -225,17 +249,19 @@ export default function QuestionImportActions({
     if (result?.error) {
       setDrafts([]);
       setPreviewOpen(false);
+      setParseWarnings([]);
       setError(result.error);
       return;
     }
 
     setDrafts(result.drafts ?? []);
+    setParseWarnings(result.warnings ?? []);
     setPreviewOpen(true);
   }
 
   function handleFileSelect(
     type: FileImportType,
-    event: React.ChangeEvent<HTMLInputElement>
+    event: ChangeEvent<HTMLInputElement>
   ) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -359,6 +385,7 @@ export default function QuestionImportActions({
         setDrafts(
           result.drafts.map((draft) => ({
             ...draft,
+            warnings: draft.warnings ?? [],
             errors: draft.errors.filter((item): item is string => Boolean(item)),
           }))
         );
@@ -420,7 +447,7 @@ export default function QuestionImportActions({
                   }
                   placeholder={`Сонголт ${index + 1}`}
                 />
-                {draft.options.length > 2 && (
+                {draft.options.length > 2 ? (
                   <Button
                     type="button"
                     variant="ghost"
@@ -429,7 +456,7 @@ export default function QuestionImportActions({
                   >
                     <Trash2 className="h-4 w-4 text-muted-foreground" />
                   </Button>
-                )}
+                ) : null}
               </div>
             );
           })}
@@ -491,7 +518,7 @@ export default function QuestionImportActions({
                 }
                 placeholder={`Баруун тал ${index + 1}`}
               />
-              {draft.matchingPairs.length > 2 && (
+              {draft.matchingPairs.length > 2 ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -500,7 +527,7 @@ export default function QuestionImportActions({
                 >
                   <Trash2 className="h-4 w-4 text-muted-foreground" />
                 </Button>
-              )}
+              ) : null}
             </div>
           ))}
         </div>
@@ -509,36 +536,35 @@ export default function QuestionImportActions({
 
     return (
       <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
-        Энэ асуулт зөв хариултгүйгээр essay хэлбэрээр импортлогдоно.
+        Энэ асуулт одоогоор эссэ хэлбэрээр импортлогдоно. Шаардлагатай бол төрлийг нь
+        өөрчилж засна уу.
       </div>
     );
   }
 
   return (
     <>
-      <div className="mt-10 rounded-lg border bg-muted/30 p-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1 sm:max-w-[60%]">
-            <h3 className="font-semibold">Асуултын сан ашиглах</h3>
-            <p className="text-sm text-muted-foreground">
-              Өмнө үүсгэсэн асуултуудаа сангаас эсвэл file-аар энэ шалгалт руу
-              оруулж болно.
+      <div className="space-y-3 rounded-[24px] border border-dashed border-zinc-200 bg-zinc-50/80 p-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-zinc-950">
+              Асуулт нэмэх хурдан сонголтууд
             </p>
           </div>
 
-          <div className="flex items-center gap-2 sm:flex-nowrap">
-            <Button asChild variant="outline" size="sm" className="shrink-0">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button asChild variant="outline" className="justify-between rounded-full px-5">
               <Link href={`/educator/question-bank?examId=${examId}`}>
-                Сангаас оруулах
+                Асуултын сангаас авах
               </Link>
             </Button>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
+                  type="button"
                   variant="outline"
-                  size="sm"
-                  className="shrink-0"
+                  className="justify-between rounded-full px-5"
                   disabled={isParsing || isImporting}
                 >
                   {isParsing ? (
@@ -546,7 +572,7 @@ export default function QuestionImportActions({
                   ) : (
                     <Upload className="mr-2 h-4 w-4" />
                   )}
-                  File оруулах
+                  Файл оруулах
                   <ChevronDown className="ml-2 h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -577,55 +603,68 @@ export default function QuestionImportActions({
           </div>
         </div>
 
-        {selectedFile && (
-          <div className="mt-3 flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
-            <div>
-              <span className="font-medium">Сонгосон файл:</span> {selectedFile.name}
-              <span className="ml-2 text-muted-foreground">
-                ({importTypeMeta[selectedFile.type].label})
-              </span>
-              {drafts.length > 0 && (
-                <span className="ml-2 text-muted-foreground">
-                  · {drafts.length} draft
-                </span>
-              )}
+        {selectedFile ? (
+          <div className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="font-medium text-zinc-950">
+                Сонгосон файл: {selectedFile.name}
+              </p>
+              <p className="text-zinc-500">
+                {importTypeMeta[selectedFile.type].label}
+                {drafts.length > 0 ? ` · ${drafts.length} draft` : ""}
+              </p>
             </div>
+
             <div className="flex items-center gap-2">
-              {drafts.length > 0 && (
+              {drafts.length > 0 ? (
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => setPreviewOpen(true)}
                 >
-                  Preview / Edit
+                  Preview / Засах
                 </Button>
-              )}
+              ) : null}
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="shrink-0 text-muted-foreground hover:text-destructive"
+                className="text-zinc-500 hover:text-red-600"
                 onClick={() => clearImportState()}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
-                Устгах
+                Цэвэрлэх
               </Button>
             </div>
           </div>
-        )}
+        ) : null}
 
-        {error && (
-          <div className="mt-3 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+        {parseWarnings.length > 0 ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <div className="mb-2 flex items-center gap-2 font-medium">
+              <AlertTriangle className="h-4 w-4" />
+              Parse анхааруулга
+            </div>
+            <ul className="list-disc pl-5">
+              {parseWarnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {error ? (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </div>
-        )}
+        ) : null}
 
-        {successMessage && (
-          <div className="mt-3 rounded-md bg-emerald-500/10 p-3 text-sm text-emerald-700">
+        {successMessage ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
             {successMessage}
           </div>
-        )}
+        ) : null}
 
         {(Object.entries(importTypeMeta) as [
           FileImportType,
@@ -649,8 +688,8 @@ export default function QuestionImportActions({
           <DialogHeader>
             <DialogTitle>Импортын preview</DialogTitle>
             <DialogDescription>
-              File-оос уншсан асуултуудыг шалгаад, шаардлагатайг нь зассаны дараа
-              batch-аар import хийнэ.
+              Файлаас таньсан асуултуудаа шалгаад, шаардлагатайг зассаны дараа
+              шалгалтдаа нэмнэ.
             </DialogDescription>
           </DialogHeader>
 
@@ -661,10 +700,27 @@ export default function QuestionImportActions({
                 ? `${summary.invalid} алдаатай`
                 : "Шууд импортлоход бэлэн"}
             </Badge>
-            {selectedFile && (
-              <Badge variant="ghost">{selectedFile.name}</Badge>
-            )}
+            {summary.warning > 0 ? (
+              <Badge variant="outline" className="border-amber-300 text-amber-700">
+                {summary.warning} анхааруулах мөр
+              </Badge>
+            ) : null}
+            {selectedFile ? <Badge variant="ghost">{selectedFile.name}</Badge> : null}
           </div>
+
+          {parseWarnings.length > 0 ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <div className="mb-2 flex items-center gap-2 font-medium">
+                <AlertTriangle className="h-4 w-4" />
+                Parse үеийн анхааруулга
+              </div>
+              <ul className="list-disc pl-5">
+                {parseWarnings.map((warning) => (
+                  <li key={`preview-${warning}`}>{warning}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           <div className="space-y-4">
             {drafts.length === 0 ? (
@@ -676,7 +732,7 @@ export default function QuestionImportActions({
                 <div key={draft.draftId} className="space-y-4 rounded-xl border p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline">Row {draft.sourceRow}</Badge>
+                      <Badge variant="outline">#{draft.sourceRow}</Badge>
                       <Badge
                         variant={draft.errors.length > 0 ? "destructive" : "secondary"}
                       >
@@ -695,7 +751,18 @@ export default function QuestionImportActions({
                     </Button>
                   </div>
 
-                  {draft.errors.length > 0 && (
+                  {draft.warnings.length > 0 ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                      <p className="font-medium">Анхаарах зүйл</p>
+                      <ul className="mt-2 list-disc pl-5">
+                        {draft.warnings.map((warning) => (
+                          <li key={`${draft.draftId}-${warning}`}>{warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {draft.errors.length > 0 ? (
                     <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
                       <p className="font-medium">Засах шаардлагатай</p>
                       <ul className="mt-2 list-disc pl-5">
@@ -704,7 +771,7 @@ export default function QuestionImportActions({
                         ))}
                       </ul>
                     </div>
-                  )}
+                  ) : null}
 
                   <div className="grid gap-4 md:grid-cols-[1fr_220px]">
                     <div className="space-y-2">

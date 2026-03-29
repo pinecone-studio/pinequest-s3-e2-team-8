@@ -25,6 +25,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Sparkles } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const questionTypes: { value: QuestionType; label: string }[] = [
   { value: "multiple_choice", label: "Сонгох" },
@@ -129,6 +131,9 @@ export default function EditQuestionDialog({
   const [matchingPairs, setMatchingPairs] = useState<MatchingPair[]>(() =>
     getMatchingPairs(question)
   );
+  const [aiVariantEnabled, setAiVariantEnabled] = useState(
+    Boolean(question.ai_variant_enabled)
+  );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -147,6 +152,7 @@ export default function EditQuestionDialog({
     setCorrectAnswer(question.correct_answer ?? "");
     setMultipleCorrectAnswers(getMultipleCorrectAnswers(question));
     setMatchingPairs(getMatchingPairs(question));
+    setAiVariantEnabled(Boolean(question.ai_variant_enabled));
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -265,6 +271,7 @@ export default function EditQuestionDialog({
       "passage_id",
       selectedPassageId === "__none" ? "" : selectedPassageId
     );
+    formData.set("ai_variant_enabled", aiVariantEnabled ? "on" : "off");
 
     if (type === "multiple_choice") {
       const validOptions = options.map((option) => option.trim()).filter(Boolean);
@@ -347,7 +354,12 @@ export default function EditQuestionDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button type="button" variant="outline" size="sm">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-[68px] justify-center"
+        >
           Засах
         </Button>
       </DialogTrigger>
@@ -411,6 +423,46 @@ export default function EditQuestionDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div
+            className={cn(
+              "space-y-3 rounded-xl border p-4 transition-colors",
+              aiVariantEnabled
+                ? "border-amber-200 bg-amber-50"
+                : "border-border bg-muted/20"
+            )}
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-foreground">
+                  AI-аар өгөгдөл солих
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Идэвхтэй үед сурагч бүр энэ асуултыг өөр өгөгдөлтэй
+                  хувилбараар харна.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className={cn(
+                  "h-10 rounded-full px-4 text-sm",
+                  aiVariantEnabled
+                    ? "border-amber-300 bg-amber-100 text-amber-950 hover:bg-amber-100"
+                    : ""
+                )}
+                onClick={() => setAiVariantEnabled((prev) => !prev)}
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                {aiVariantEnabled ? "AI хувилбар идэвхтэй" : "Идэвхжүүлэх"}
+              </Button>
+            </div>
+            <input
+              type="hidden"
+              name="ai_variant_enabled"
+              value={aiVariantEnabled ? "on" : "off"}
+            />
           </div>
 
           {selectedPassage && (

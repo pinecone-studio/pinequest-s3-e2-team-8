@@ -465,6 +465,7 @@ export function ExamSettingsSection(props: ExamSettingsSectionProps) {
 
   return (
     <div className="rounded-[28px] border border-zinc-100 bg-white p-6 shadow-[0_12px_40px_-18px_rgba(15,23,42,0.16)] md:p-8">
+      <input type="hidden" name="shuffle_questions" value="on" />
       <div className="divide-y divide-zinc-200">
         <SettingsRow
           icon={Trophy}
