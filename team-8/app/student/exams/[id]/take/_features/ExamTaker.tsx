@@ -166,7 +166,7 @@ export default function ExamTaker({
   const [displayQuestions] = useState(() =>
     getDisplayQuestions(
       questions,
-      Boolean(exam.shuffle_questions),
+      true,
       sessionId
     )
   );

@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, type ClipboardEvent } from "react";
-import { Check, ChevronDown, Plus, PlusCircle, Trash2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Plus,
+  PlusCircle,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { addQuestion } from "@/lib/question/actions";
 import { parsePastedQuestionText } from "@/lib/question/paste";
 import MathContent from "@/components/math/MathContent";
@@ -19,6 +26,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { QuestionPassage, QuestionType } from "@/types";
+import QuestionImportActions from "./QuestionImportActions";
 
 interface Props {
   examId: string;
@@ -67,6 +75,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
     createEmptyMatchingPair(),
   ]);
   const [points, setPoints] = useState(1);
+  const [aiVariantEnabled, setAiVariantEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -143,6 +152,18 @@ export default function AddQuestionForm({ examId, passages }: Props) {
       setCorrectAnswer(parsed.correctAnswer);
       setMultipleCorrectAnswers([]);
       setMatchingPairs([createEmptyMatchingPair(), createEmptyMatchingPair()]);
+      return true;
+    }
+
+    if (parsed.type === "matching") {
+      setOptions(defaultSelectionOptions);
+      setCorrectAnswer("");
+      setMultipleCorrectAnswers([]);
+      setMatchingPairs(
+        parsed.matchingPairs.length >= 2
+          ? parsed.matchingPairs
+          : [createEmptyMatchingPair(), createEmptyMatchingPair()]
+      );
       return true;
     }
 
@@ -242,6 +263,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
     formData.set("content_html", "");
     formData.set("image_url", "");
     formData.set("explanation", "");
+    formData.set("ai_variant_enabled", aiVariantEnabled ? "on" : "off");
     formData.set(
       "passage_id",
       selectedPassageId === "__none" ? "" : selectedPassageId
@@ -325,6 +347,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
     setIsFormulaToolOpen(false);
     setContent("");
     setPoints(1);
+    setAiVariantEnabled(false);
     setSelectedPassageId("__none");
 
     const form = document.getElementById("question-form") as HTMLFormElement | null;
@@ -339,6 +362,8 @@ export default function AddQuestionForm({ examId, passages }: Props) {
   return (
     <div className="rounded-[28px] border border-zinc-200 bg-white p-6 shadow-[0_12px_40px_-18px_rgba(15,23,42,0.16)] md:p-8">
       <form id="question-form" action={handleSubmit} className="space-y-6">
+        <QuestionImportActions examId={examId} />
+
         <div className="flex items-center gap-3 text-zinc-950">
           <Plus className="h-5 w-5" />
           <h2 className="text-2xl font-semibold tracking-tight">Шинэ асуулт</h2>
@@ -395,6 +420,52 @@ export default function AddQuestionForm({ examId, passages }: Props) {
               className="h-12 rounded-2xl border-zinc-200 bg-white px-4 text-center text-sm shadow-none focus-visible:ring-zinc-200"
             />
           </div>
+        </div>
+
+        <div
+          className={cn(
+            "space-y-3 rounded-[24px] border p-4 transition-colors",
+            aiVariantEnabled
+              ? "border-amber-200 bg-amber-50"
+              : "border-zinc-200 bg-zinc-50/70"
+          )}
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-zinc-950">
+                AI-аар өгөгдөл солих
+              </p>
+              <p className="text-sm text-zinc-500">
+                Идэвхжүүлбэл сурагч бүр энэ асуултыг өөр тоо, нэр, өгөгдөлтэй
+                хувилбараар авна.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className={cn(
+                "h-11 rounded-full px-4 text-sm",
+                aiVariantEnabled
+                  ? "border-amber-300 bg-amber-100 text-amber-950 hover:bg-amber-100"
+                  : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
+              )}
+              onClick={() => setAiVariantEnabled((prev) => !prev)}
+            >
+              <Sparkles className="mr-2 h-4 w-4" />
+              {aiVariantEnabled ? "AI хувилбар идэвхтэй" : "Идэвхжүүлэх"}
+            </Button>
+          </div>
+          <input
+            type="hidden"
+            name="ai_variant_enabled"
+            value={aiVariantEnabled ? "on" : "off"}
+          />
+          {aiVariantEnabled ? (
+            <p className="rounded-2xl bg-white/80 px-3 py-2 text-sm text-amber-900">
+              Session эхлэх үед AI зөвхөн асуултын өгөгдлийг хувиргаж, зөв
+              хариултыг нь шинэчилнэ.
+            </p>
+          ) : null}
         </div>
 
         {passages.length > 0 ? (

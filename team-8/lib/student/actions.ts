@@ -14,6 +14,13 @@ import {
   getStoredPublishedExamSnapshot,
 } from "@/lib/exam-snapshot";
 import {
+  applyStoredVariantToQuestion,
+  ensureSessionQuestionVariants,
+  getSessionQuestionVariantMap,
+  isQuestionVariantSchemaMissing,
+  type StoredQuestionVariant,
+} from "@/lib/question-variants";
+import {
   deriveStudentExamLifecycle,
   getEffectiveExamAccess,
   getSessionDeadlineMs,
@@ -26,6 +33,7 @@ import {
   pickLatestAttempt,
 } from "@/lib/exam-attempt-utils";
 import { attachPassagesToQuestions } from "@/lib/question-passages";
+import type { QuestionType } from "@/types";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 type ProctorEventType =
@@ -111,9 +119,25 @@ export type StudentSafeQuestion = {
   options: string[] | null;
   matching_prompts?: string[];
   matching_choices?: string[];
+  ai_variant_enabled?: boolean;
   points: number;
   order_index: number;
   question_passages?: StudentQuestionPassage | null;
+};
+
+type SessionQuestionSource = {
+  id: string;
+  passage_id?: string | null;
+  type: QuestionType;
+  content: string;
+  content_html: string | null;
+  image_url: string | null;
+  options: string[] | null;
+  correct_answer: string | null;
+  points: number;
+  order_index: number;
+  explanation: string | null;
+  ai_variant_enabled: boolean;
 };
 
 type PrepareExamTakePayloadResult =
@@ -431,6 +455,134 @@ async function loadStudentExamPayload(
   await redis.set(cacheKey, JSON.stringify(cachePayload), { ex: ttlSeconds });
 
   return result;
+}
+
+async function getExamQuestionSources(
+  supabase: SupabaseServerClient,
+  examId: string
+) {
+  const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
+
+  if (snapshot) {
+    return snapshot.questions.map(
+      (question) =>
+        ({
+          id: question.id,
+          passage_id: question.passage_id ?? null,
+          type: question.type,
+          content: question.content,
+          content_html: question.content_html ?? null,
+          image_url: question.image_url ?? null,
+          options: Array.isArray(question.options) ? question.options : null,
+          correct_answer: question.correct_answer ?? null,
+          points: Number(question.points ?? 0),
+          order_index: Number(question.order_index ?? 0),
+          explanation: question.explanation ?? null,
+          ai_variant_enabled: Boolean(question.ai_variant_enabled),
+        }) satisfies SessionQuestionSource
+    );
+  }
+
+  const baseSelect =
+    "id, passage_id, type, content, content_html, image_url, options, correct_answer, points, order_index, explanation";
+  const selectWithVariant = `${baseSelect}, ai_variant_enabled`;
+
+  const { data, error } = await supabase
+    .from("questions")
+    .select(selectWithVariant)
+    .eq("exam_id", examId)
+    .order("order_index", { ascending: true });
+
+  if (error) {
+    if (!isQuestionVariantSchemaMissing(error.code, error.message)) {
+      throw new Error(error.message);
+    }
+
+    const fallback = await supabase
+      .from("questions")
+      .select(baseSelect)
+      .eq("exam_id", examId)
+      .order("order_index", { ascending: true });
+
+    if (fallback.error) {
+      throw new Error(fallback.error.message);
+    }
+
+    return (fallback.data ?? []).map(
+      (question) =>
+        ({
+          id: String(question.id),
+          passage_id:
+            question.passage_id === undefined ? null : question.passage_id,
+          type: String(question.type) as QuestionType,
+          content: String(question.content ?? ""),
+          content_html: (question.content_html as string | null) ?? null,
+          image_url: (question.image_url as string | null) ?? null,
+          options: Array.isArray(question.options)
+            ? (question.options as string[])
+            : null,
+          correct_answer: (question.correct_answer as string | null) ?? null,
+          points: Number(question.points ?? 0),
+          order_index: Number(question.order_index ?? 0),
+          explanation: (question.explanation as string | null) ?? null,
+          ai_variant_enabled: false,
+        }) satisfies SessionQuestionSource
+    );
+  }
+
+  return (data ?? []).map(
+    (question) =>
+      ({
+        id: String(question.id),
+        passage_id: question.passage_id === undefined ? null : question.passage_id,
+        type: String(question.type) as QuestionType,
+        content: String(question.content ?? ""),
+        content_html: (question.content_html as string | null) ?? null,
+        image_url: (question.image_url as string | null) ?? null,
+        options: Array.isArray(question.options)
+          ? (question.options as string[])
+          : null,
+        correct_answer: (question.correct_answer as string | null) ?? null,
+        points: Number(question.points ?? 0),
+        order_index: Number(question.order_index ?? 0),
+        explanation: (question.explanation as string | null) ?? null,
+        ai_variant_enabled: Boolean(question.ai_variant_enabled),
+      }) satisfies SessionQuestionSource
+  );
+}
+
+function applyVariantToStudentSafeQuestion(
+  question: StudentSafeQuestion,
+  variant: StoredQuestionVariant | null | undefined
+) {
+  if (!variant) return question;
+
+  const nextQuestion: StudentSafeQuestion = {
+    ...question,
+    type: variant.type,
+    content: variant.content,
+    content_html: variant.content_html,
+    image_url: variant.image_url,
+    ai_variant_enabled: question.ai_variant_enabled,
+  };
+
+  if (variant.type === "matching") {
+    const matchingPairs = parseMatchingDisplayPairs(variant.options);
+
+    return {
+      ...nextQuestion,
+      options: null,
+      matching_prompts: matchingPairs.map((pair) => pair.left),
+      matching_choices: matchingPairs.map((pair) => pair.right),
+    };
+  }
+
+  return {
+    ...nextQuestion,
+    options: variant.options,
+    matching_prompts: undefined,
+    matching_choices: undefined,
+  };
 }
 
 async function getEffectiveExamAccessForStudent(
@@ -802,7 +954,8 @@ async function finalizeSessionAttempt(
     const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
     const snapshotQuestionMap = getSnapshotQuestionMap(snapshot);
 
-    const [{ data: answers }, { data: questions }] = await Promise.all([
+    const [{ data: answers }, { data: questions }, questionVariantMap] =
+      await Promise.all([
       supabase
         .from("answers")
         .select("session_id, question_id, user_id, answer, score")
@@ -812,15 +965,22 @@ async function finalizeSessionAttempt(
             data: snapshot.questions.map((question) => ({
               id: question.id,
               type: question.type,
+              content: question.content,
+              content_html: question.content_html,
+              image_url: question.image_url,
               points: question.points,
               correct_answer: question.correct_answer,
               options: question.options,
+              explanation: question.explanation,
             })),
           })
         : supabase
             .from("questions")
-            .select("id, type, points, correct_answer, options")
+            .select(
+              "id, type, content, content_html, image_url, points, correct_answer, options, explanation"
+            )
             .eq("exam_id", examId),
+      getSessionQuestionVariantMap(supabase, sessionId),
     ]);
 
     let totalScore = 0;
@@ -841,9 +1001,15 @@ async function finalizeSessionAttempt(
     }> = [];
 
     for (const ans of answers ?? []) {
-      const question =
+      const baseQuestion =
         snapshotQuestionMap.get(ans.question_id) ??
         (questions ?? []).find((item) => item.id === ans.question_id);
+      const question = baseQuestion
+        ? applyStoredVariantToQuestion(
+            baseQuestion,
+            questionVariantMap.get(String(ans.question_id))
+          )
+        : null;
       if (!question) continue;
 
       if (
@@ -1478,11 +1644,24 @@ export async function prepareExamTakePayload(
     return { redirectTo: `/student/exams/${examId}/result` } as const;
   }
 
+  const baseQuestions = await getExamQuestionSources(supabase, examId);
+  const questionVariantMap = await ensureSessionQuestionVariants(supabase, {
+    sessionId: session.id,
+    userId: user.id,
+    questions: baseQuestions,
+  });
+  const displayQuestions = examPayload.questions.map((question) =>
+    applyVariantToStudentSafeQuestion(
+      question,
+      questionVariantMap.get(question.id)
+    )
+  );
+
   const savedAnswers = await getSessionAnswersForUser(supabase, session.id, user.id);
 
   return {
     exam: examPayload.exam as StudentAssignedExam & Record<string, unknown>,
-    questions: examPayload.questions,
+    questions: displayQuestions,
     sessionId: session.id,
     savedAnswers,
     initialTimeLeftSeconds,
@@ -1746,7 +1925,8 @@ export async function getExamResult(examId: string) {
   const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
   const snapshotQuestionMap = getSnapshotQuestionMap(snapshot);
 
-  const [{ data: answers }, { data: questions }] = await Promise.all([
+  const [{ data: answers }, { data: questions }, questionVariantMap] =
+    await Promise.all([
     supabase
       .from("answers")
       .select(
@@ -1776,7 +1956,8 @@ export async function getExamResult(examId: string) {
           )
           .eq("exam_id", examId)
           .order("order_index", { ascending: true }),
-  ]);
+      getSessionQuestionVariantMap(supabase, bestSession.id),
+    ]);
 
   const answerMap = new Map<
     string,
@@ -1794,6 +1975,29 @@ export async function getExamResult(examId: string) {
   for (const answer of answers ?? []) {
     const questionId = String(answer.question_id);
     const snapshotQuestion = snapshotQuestionMap.get(questionId);
+    const baseQuestion =
+      ((snapshotQuestion as unknown) as Record<string, unknown> | null) ??
+      (getRelationObject(
+        answer.questions as
+          | Record<string, unknown>
+          | Record<string, unknown>[]
+          | null
+      ) as Record<string, unknown> | null);
+    const questionWithVariant = baseQuestion
+      ? (applyStoredVariantToQuestion(
+          baseQuestion as {
+            type: string;
+            content: string;
+            content_html: string | null;
+            image_url: string | null;
+            options: string[] | null;
+            correct_answer?: string | null;
+            explanation?: string | null;
+          },
+          questionVariantMap.get(questionId)
+        ) as unknown as Record<string, unknown>)
+      : null;
+
     answerMap.set(questionId, {
       id: String(answer.id),
       question_id: questionId,
@@ -1801,14 +2005,7 @@ export async function getExamResult(examId: string) {
       score: (answer.score as number | null) ?? null,
       is_correct: (answer.is_correct as boolean | null) ?? null,
       feedback: (answer.feedback as string | null) ?? null,
-      questions:
-        ((snapshotQuestion as unknown) as Record<string, unknown> | null) ??
-        (getRelationObject(
-          answer.questions as
-            | Record<string, unknown>
-            | Record<string, unknown>[]
-            | null
-        ) as Record<string, unknown> | null),
+      questions: questionWithVariant,
     });
   }
 
@@ -1827,11 +2024,20 @@ export async function getExamResult(examId: string) {
       score: 0,
       is_correct: null,
       feedback: null,
-      questions:
-        (((snapshotQuestionMap.get(questionId) ?? null) as unknown) as
+      questions: applyStoredVariantToQuestion(
+        ((((snapshotQuestionMap.get(questionId) ?? null) as unknown) as
           | Record<string, unknown>
-          | null) ??
-        ((question as unknown) as Record<string, unknown>),
+          | null) ?? ((question as unknown) as Record<string, unknown>)) as {
+          type: string;
+          content: string;
+          content_html: string | null;
+          image_url: string | null;
+          options: string[] | null;
+          correct_answer?: string | null;
+          explanation?: string | null;
+        },
+        questionVariantMap.get(questionId)
+      ) as unknown as Record<string, unknown>,
     };
   });
 

@@ -7,6 +7,10 @@ import {
   getStoredPublishedExamSnapshot,
 } from "@/lib/exam-snapshot";
 import {
+  applyStoredVariantToQuestion,
+  getSessionQuestionVariantMap,
+} from "@/lib/question-variants";
+import {
   canManageExamStudent,
   getExamManagementScope,
   isAdminUser,
@@ -247,7 +251,8 @@ export async function getSessionForGrading(sessionId: string) {
   const snapshot = await getStoredPublishedExamSnapshot(supabase, exam.id);
   const snapshotQuestionMap = getSnapshotQuestionMap(snapshot);
 
-  const [{ data: answers }, proctorEventsResult] = await Promise.all([
+  const [{ data: answers }, proctorEventsResult, questionVariantMap] =
+    await Promise.all([
     supabase
       .from("answers")
       .select("*, questions(*)")
@@ -258,7 +263,8 @@ export async function getSessionForGrading(sessionId: string) {
       .select("id, event_type, metadata, created_at")
       .eq("session_id", sessionId)
       .order("created_at", { ascending: false }),
-  ]);
+      getSessionQuestionVariantMap(supabase, sessionId),
+    ]);
 
   const proctorEvents =
     proctorEventsResult.error?.code === "42P01"
@@ -276,12 +282,53 @@ export async function getSessionForGrading(sessionId: string) {
           const snapshotQuestion = snapshotQuestionMap.get(questionId);
 
           return snapshotQuestion
-            ? { ...answer, questions: snapshotQuestion }
+            ? {
+                ...answer,
+                questions: applyStoredVariantToQuestion(
+                  snapshotQuestion,
+                  questionVariantMap.get(questionId)
+                ),
+              }
             : answer;
         })
       : await attachPassagesToAnswers(supabase, answers ?? []);
 
-  return { session, answers: passageAwareAnswers, proctorEvents };
+  const variantAwareAnswers =
+    snapshot && snapshotQuestionMap.size > 0
+      ? passageAwareAnswers
+      : passageAwareAnswers.map((answer) => {
+          const baseQuestion = getRelationObject(
+            answer.questions as
+              | Record<string, unknown>
+              | Record<string, unknown>[]
+              | null
+          );
+          const questionId = String(
+            Array.isArray(answer.questions)
+              ? answer.questions[0]?.id
+              : answer.questions?.id
+          );
+
+          return baseQuestion
+            ? {
+                ...answer,
+                questions: applyStoredVariantToQuestion(
+                  baseQuestion as {
+                    type: string;
+                    content: string;
+                    content_html: string | null;
+                    image_url: string | null;
+                    options: string[] | null;
+                    correct_answer?: string | null;
+                    explanation?: string | null;
+                  },
+                  questionVariantMap.get(questionId)
+                ),
+              }
+            : answer;
+        });
+
+  return { session, answers: variantAwareAnswers, proctorEvents };
 }
 
 export async function gradeAnswer(

@@ -2,12 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { isQuestionVariantSchemaMissing } from "@/lib/question-variants";
 import { getAllowedSubjectIds } from "@/lib/teacher/permissions";
 import {
   buildQuestionImportDrafts,
   draftToQuestionFormShape,
   validateQuestionImportDraft,
 } from "@/lib/question/import";
+import { buildQuestionImportDraftsFromWord } from "@/lib/question/word-import";
 import {
   attachPassagesToQuestions,
   getQuestionPassagesByExam as loadQuestionPassagesByExam,
@@ -41,6 +43,8 @@ const QUESTION_BANK_VISIBILITIES: QuestionBankVisibility[] = [
   "admin_curated",
   "archived",
 ];
+const QUESTION_VARIANT_MIGRATION_ERROR =
+  "AI хувилбар feature ашиглахын өмнө `024_ai_question_variants.sql` migration-аа apply хийж, schema cache-аа refresh хийнэ үү.";
 const QUESTION_BANK_GOVERNANCE_ERROR =
   "Question bank governance feature ашиглахын өмнө хамгийн сүүлийн DB migration-аа apply хийнэ үү.";
 const QUESTION_BANK_USAGE_TRACKING_WARNING =
@@ -411,6 +415,7 @@ export async function addQuestion(examId: string, formData: FormData) {
   const correct_answer = (formData.get("correct_answer") as string) || null;
   const explanation = (formData.get("explanation") as string) || null;
   const image_url = (formData.get("image_url") as string)?.trim() || null;
+  const ai_variant_enabled = formData.get("ai_variant_enabled") === "on";
 
   const passageResolution = await resolvePassageId(
     supabase,
@@ -455,6 +460,10 @@ export async function addQuestion(examId: string, formData: FormData) {
     created_by: user.id,
   };
 
+  if (ai_variant_enabled) {
+    insertPayload.ai_variant_enabled = true;
+  }
+
   if (passageResolution.passageId) {
     insertPayload.passage_id = passageResolution.passageId;
   }
@@ -462,6 +471,9 @@ export async function addQuestion(examId: string, formData: FormData) {
   const { error } = await supabase.from("questions").insert(insertPayload);
 
   if (error) {
+    if (isQuestionVariantSchemaMissing(error.code, error.message)) {
+      return { error: QUESTION_VARIANT_MIGRATION_ERROR };
+    }
     return { error: getQuestionTypeMigrationHint(error) ?? error.message };
   }
 
@@ -691,6 +703,7 @@ export async function updateQuestion(
     String(formData.get("correct_answer") || "").trim() || null;
   const explanation = String(formData.get("explanation") || "").trim() || null;
   const image_url = String(formData.get("image_url") || "").trim() || null;
+  const ai_variant_enabled = formData.get("ai_variant_enabled") === "on";
 
   if (!content && !content_html) {
     return { error: "Асуултын агуулгыг оруулна уу." };
@@ -715,22 +728,41 @@ export async function updateQuestion(
     return { error: questionPayload.error };
   }
 
-  const { error } = await supabase
+  const updatePayload: Record<string, unknown> = {
+    passage_id: passageResolution.passageId,
+    type,
+    content,
+    content_html,
+    image_url,
+    options: questionPayload.options,
+    correct_answer: questionPayload.correctAnswer,
+    points,
+    explanation,
+    ai_variant_enabled,
+  };
+
+  let { error } = await supabase
     .from("questions")
-    .update({
-      passage_id: passageResolution.passageId,
-      type,
-      content,
-      content_html,
-      image_url,
-      options: questionPayload.options,
-      correct_answer: questionPayload.correctAnswer,
-      points,
-      explanation,
-    })
+    .update(updatePayload)
     .eq("id", questionId)
     .eq("exam_id", examId)
     .eq("created_by", user.id);
+
+  if (error && isQuestionVariantSchemaMissing(error.code, error.message)) {
+    if (ai_variant_enabled) {
+      return { error: QUESTION_VARIANT_MIGRATION_ERROR };
+    }
+
+    const fallbackPayload = { ...updatePayload };
+    delete fallbackPayload.ai_variant_enabled;
+    const fallbackResult = await supabase
+      .from("questions")
+      .update(fallbackPayload)
+      .eq("id", questionId)
+      .eq("exam_id", examId)
+      .eq("created_by", user.id);
+    error = fallbackResult.error ?? null;
+  }
 
   if (error) {
     return { error: getQuestionTypeMigrationHint(error) ?? error.message };
@@ -894,6 +926,141 @@ export async function getQuestionBankDashboardData() {
 export async function getQuestionBank() {
   const data = await getQuestionBankDashboardData();
   return data.questions;
+}
+
+export async function importQuestionsFromBank(
+  examId: string,
+  bankQuestionIds: string[]
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const { exam } = await getOwnedExam(examId, user.id);
+  if (!exam) return { error: "Шалгалт олдсонгүй" };
+  if (exam.is_published) {
+    return { error: "Нийтлэгдсэн шалгалтад сангаас асуулт нэмэх боломжгүй" };
+  }
+
+  const uniqueQuestionIds = Array.from(
+    new Set(bankQuestionIds.map((item) => item.trim()).filter(Boolean))
+  );
+
+  if (uniqueQuestionIds.length === 0) {
+    return { error: "Оруулах асуултаа сонгоно уу." };
+  }
+
+  const context = await getQuestionBankAccessContext(supabase, user.id);
+  const { data: bankQuestionRows, error: bankQuestionError } = await supabase
+    .from("question_bank")
+    .select(
+      "id, subject_id, created_by, visibility, type, content, content_html, image_url, options, correct_answer, points, explanation, usage_count, last_used_at"
+    )
+    .in("id", uniqueQuestionIds);
+
+  if (bankQuestionError?.code === "42703") {
+    return { error: QUESTION_BANK_GOVERNANCE_ERROR };
+  }
+  if (!bankQuestionRows || bankQuestionRows.length === 0) {
+    return { error: "Асуултын сангийн бичлэг олдсонгүй" };
+  }
+
+  const bankQuestionById = new Map(
+    bankQuestionRows.map((question) => [question.id, question])
+  );
+  const orderedQuestions = uniqueQuestionIds
+    .map((id) => bankQuestionById.get(id))
+    .filter(
+      (
+        question
+      ): question is (typeof bankQuestionRows)[number] => Boolean(question)
+    );
+
+  if (orderedQuestions.length !== uniqueQuestionIds.length) {
+    return {
+      error:
+        uniqueQuestionIds.length === 1
+          ? "Асуултын сангийн бичлэг олдсонгүй"
+          : "Зарим сонгосон асуулт олдсонгүй тул дахин сонгоод үзнэ үү.",
+    };
+  }
+
+  for (const bankQuestion of orderedQuestions) {
+    if (!canViewQuestionBankItem(bankQuestion, context)) {
+      return { error: "Зарим сонгосон асуултыг оруулах эрх байхгүй байна." };
+    }
+
+    if (bankQuestion.visibility !== "admin_curated") {
+      return {
+        error:
+          "Зөвхөн баталгаажсан сангийн асуултуудыг шалгалт руу оруулж болно.",
+      };
+    }
+
+    if (
+      exam.subject_id &&
+      bankQuestion.subject_id &&
+      exam.subject_id !== bankQuestion.subject_id
+    ) {
+      return {
+        error: "Өөр хичээлийн асуултыг энэ шалгалт руу оруулах боломжгүй",
+      };
+    }
+  }
+
+  const { data: existing } = await supabase
+    .from("questions")
+    .select("order_index")
+    .eq("exam_id", examId)
+    .order("order_index", { ascending: false })
+    .limit(1);
+
+  const startOrderIndex =
+    existing && existing.length > 0 ? existing[0].order_index + 1 : 0;
+
+  const insertPayload = orderedQuestions.map((bankQuestion, index) => ({
+    exam_id: examId,
+    type: bankQuestion.type,
+    content: bankQuestion.content,
+    content_html: bankQuestion.content_html,
+    image_url: bankQuestion.image_url,
+    options: bankQuestion.options,
+    correct_answer: bankQuestion.correct_answer,
+    points: bankQuestion.points,
+    order_index: startOrderIndex + index,
+    explanation: bankQuestion.explanation,
+    created_by: user.id,
+  }));
+
+  const { error: insertError } = await supabase.from("questions").insert(insertPayload);
+  if (insertError) return { error: insertError.message };
+
+  const usageResults = await Promise.all(
+    orderedQuestions.map((question) =>
+      supabase.rpc("increment_bank_question_usage", {
+        p_item_id: question.id,
+      })
+    )
+  );
+  const usageError = usageResults.find((result) => result.error)?.error ?? null;
+
+  revalidatePath(`/educator/exams/${examId}/questions`);
+  revalidatePath("/educator/question-bank");
+
+  if (usageError) {
+    return {
+      success: true,
+      count: insertPayload.length,
+      warning:
+        usageError.code === "PGRST202" || usageError.code === "42883"
+          ? QUESTION_BANK_USAGE_TRACKING_WARNING
+          : `Асуулт импортлогдлоо, гэхдээ ашиглалтын тоо шинэчлэгдэхэд алдаа гарлаа: ${usageError.message}`,
+    };
+  }
+
+  return { success: true, count: insertPayload.length };
 }
 
 export async function importQuestionFromBank(
@@ -1381,7 +1548,7 @@ export async function parseImportedQuestionFile(
   const uploadedFile = file as File;
   const fileName = uploadedFile.name || "questions";
 
-  if (!/\.(xlsx|xls|csv)$/i.test(fileName)) {
+  if (!/\.(xlsx|xls|csv|docx)$/i.test(fileName)) {
     return {
       error:
         "Одоогоор зөвхөн Excel (.xlsx, .xls) болон CSV файл дэмжинэ.",
@@ -1390,12 +1557,18 @@ export async function parseImportedQuestionFile(
 
   try {
     const fileBuffer = await uploadedFile.arrayBuffer();
-    const drafts = buildQuestionImportDrafts(fileBuffer, fileName);
+    const parsedResult = /\.docx$/i.test(fileName)
+      ? await buildQuestionImportDraftsFromWord(fileBuffer, fileName)
+      : {
+          drafts: buildQuestionImportDrafts(fileBuffer, fileName),
+          warnings: [] as string[],
+        };
 
     return {
       success: true,
       fileName,
-      drafts,
+      drafts: parsedResult.drafts,
+      warnings: parsedResult.warnings,
     };
   } catch (error) {
     return {
@@ -1454,6 +1627,9 @@ export async function importParsedQuestions(
             left: String(pair?.left ?? ""),
             right: String(pair?.right ?? ""),
           }))
+        : [],
+      warnings: Array.isArray(draft.warnings)
+        ? draft.warnings.map((item) => String(item ?? ""))
         : [],
       errors: [],
     };

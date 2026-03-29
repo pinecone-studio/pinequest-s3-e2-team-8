@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { attachPassagesToQuestions, getQuestionPassagesByExam } from "@/lib/question-passages";
+import { isQuestionVariantSchemaMissing } from "@/lib/question-variants";
 import type { PublishedExamSnapshot, Question, QuestionPassage } from "@/types";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -17,6 +18,44 @@ function isSnapshotColumnMissing(errorCode?: string | null) {
 
 export function isSnapshotColumnMissingError(errorCode?: string | null) {
   return isSnapshotColumnMissing(errorCode);
+}
+
+async function loadSnapshotQuestions(
+  supabase: SupabaseServerClient,
+  examId: string
+) {
+  const baseSelect =
+    "id, exam_id, passage_id, type, content, content_html, image_url, options, correct_answer, points, order_index, explanation, created_at";
+  const selectWithVariant = `${baseSelect}, ai_variant_enabled`;
+
+  const initial = await supabase
+    .from("questions")
+    .select(selectWithVariant)
+    .eq("exam_id", examId)
+    .order("order_index", { ascending: true });
+
+  if (!initial.error) {
+    return (initial.data ?? []) as Question[];
+  }
+
+  if (!isQuestionVariantSchemaMissing(initial.error.code, initial.error.message)) {
+    throw new Error(initial.error.message);
+  }
+
+  const fallback = await supabase
+    .from("questions")
+    .select(baseSelect)
+    .eq("exam_id", examId)
+    .order("order_index", { ascending: true });
+
+  if (fallback.error) {
+    throw new Error(fallback.error.message);
+  }
+
+  return (fallback.data ?? []).map((question) => ({
+    ...question,
+    ai_variant_enabled: false,
+  })) as Question[];
 }
 
 async function loadAssignedGroups(
@@ -85,7 +124,7 @@ export async function buildPublishedExamSnapshot(
   supabase: SupabaseServerClient,
   examId: string
 ): Promise<PublishedExamSnapshot | null> {
-  const [{ data: exam }, { data: rawQuestions }, passages, assignmentSummary] =
+  const [{ data: exam }, rawQuestions, passages, assignmentSummary] =
     await Promise.all([
       supabase
         .from("exams")
@@ -94,13 +133,7 @@ export async function buildPublishedExamSnapshot(
         )
         .eq("id", examId)
         .maybeSingle(),
-      supabase
-        .from("questions")
-        .select(
-          "id, exam_id, passage_id, type, content, content_html, image_url, options, correct_answer, points, order_index, explanation, created_at"
-        )
-        .eq("exam_id", examId)
-        .order("order_index", { ascending: true }),
+      loadSnapshotQuestions(supabase, examId),
       getQuestionPassagesByExam(supabase, examId),
       loadAssignedGroups(supabase, examId),
     ]);
@@ -109,7 +142,7 @@ export async function buildPublishedExamSnapshot(
 
   const questions = (await attachPassagesToQuestions(
     supabase,
-    ((rawQuestions ?? []) as Question[]).map((question) => ({
+    (rawQuestions ?? []).map((question) => ({
       ...question,
       points: Number(question.points ?? 0),
     }))
