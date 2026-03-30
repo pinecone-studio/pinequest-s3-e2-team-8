@@ -24,7 +24,7 @@ interface NavItem {
 const ALL_NAV_ITEMS: NavItem[] = [
   { href: "/student", label: "Нүүр хуудас", icon: HomeIcon },
   { href: "/student/exams", label: "Шалгалт өгөх", icon: FileText },
-  { href: "/student/results", label: "Шалгалтын дүн харах", icon: ListCheck },
+  { href: "/student/results", label: "Миний шалгалтууд", icon: ListCheck },
 ];
 
 export default function Sidebar() {
