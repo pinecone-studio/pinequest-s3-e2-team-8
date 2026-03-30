@@ -124,24 +124,6 @@ function SearchIcon() {
   );
 }
 
-function SortIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M5 4l3-3 3 3" />
-      <path d="M5 12l3 3 3-3" />
-    </svg>
-  );
-}
-
 function ChevronLeftIcon() {
   return (
     <svg

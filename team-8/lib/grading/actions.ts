@@ -20,6 +20,7 @@ import {
   notifyStudentOfGrading,
   notifyParentOfGrading,
 } from "@/lib/notification/actions";
+import { recomputeStudentTopicMastery } from "@/lib/student-learning/actions";
 
 function getRelationObject<T>(value: T | T[] | null | undefined) {
   if (Array.isArray(value)) {
@@ -36,6 +37,7 @@ function revalidateExamResultPaths(examId: string, sessionId?: string | null) {
   revalidatePath("/student/exams");
   revalidatePath("/student/results");
   revalidatePath("/student/schedule");
+  revalidatePath("/student/learning");
   revalidatePath(`/student/exams/${examId}/result`);
 
   if (sessionId) {
@@ -360,7 +362,7 @@ export async function gradeAnswer(
 
   const { data: session } = await supabase
     .from("exam_sessions")
-    .select("user_id")
+    .select("user_id, status")
     .eq("id", answer.session_id)
     .maybeSingle();
 
@@ -397,6 +399,10 @@ export async function gradeAnswer(
   );
   if ("error" in totals) {
     return { error: totals.error };
+  }
+
+  if (session.status === "graded") {
+    await recomputeStudentTopicMastery(session.user_id).catch(() => {});
   }
 
   revalidateExamResultPaths(question.exam_id, answer.session_id);
@@ -463,6 +469,8 @@ export async function finalizeGrading(sessionId: string) {
       totals.maxScore ?? 0
     ).catch(() => {});
   }
+
+  await recomputeStudentTopicMastery(session.user_id).catch(() => {});
 
   revalidateExamResultPaths(session.exam_id, sessionId);
   return { success: true, totalScore: totals.totalScore, maxScore: totals.maxScore };

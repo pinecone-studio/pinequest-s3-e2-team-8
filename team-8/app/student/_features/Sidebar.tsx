@@ -6,6 +6,7 @@ import { useState } from "react";
 import { logout } from "@/lib/auth/actions";
 import {
   ChevronLeft,
+  GraduationCap,
   FileText,
   HomeIcon,
   ListCheck,
@@ -25,6 +26,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { href: "/student", label: "Нүүр хуудас", icon: HomeIcon },
   { href: "/student/exams", label: "Шалгалт өгөх", icon: FileText },
   { href: "/student/results", label: "Миний шалгалтууд", icon: ListCheck },
+  { href: "/student/learning", label: "Learning Hub", icon: GraduationCap },
 ];
 export default function Sidebar() {
   const pathname = usePathname();
