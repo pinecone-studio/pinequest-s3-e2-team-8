@@ -276,6 +276,47 @@ function parseMatchingPairs(rawValue: string) {
   }
 }
 
+function buildManualQuestionTopicPayload(subjectId: string | null) {
+  return {
+    subject_id: subjectId,
+    topic_label_source: "manual",
+  };
+}
+
+function buildBankQuestionTopicPayload(
+  examSubjectId: string | null,
+  question: {
+    id: string;
+    subject_id: string | null;
+    subtopic?: string | null;
+  }
+) {
+  return {
+    subject_id: question.subject_id ?? examSubjectId,
+    subtopic: question.subtopic ? String(question.subtopic).trim() : null,
+    source_question_bank_id: question.id,
+    topic_label_source: "bank_import",
+    topic_label_confidence: 1,
+  };
+}
+
+function buildSampleQuestionTopicPayload(
+  examSubjectId: string | null,
+  question: {
+    id: string;
+    subject_id: string | null;
+    subtopic?: string | null;
+  }
+) {
+  return {
+    subject_id: question.subject_id ?? examSubjectId,
+    subtopic: question.subtopic ? String(question.subtopic).trim() : null,
+    source_question_bank_id: question.id,
+    topic_label_source: "sample_import",
+    topic_label_confidence: 1,
+  };
+}
+
 function buildQuestionPayload(
   type: string,
   rawOptions: string,
@@ -458,6 +499,7 @@ export async function addQuestion(examId: string, formData: FormData) {
     order_index,
     explanation,
     created_by: user.id,
+    ...buildManualQuestionTopicPayload(exam.subject_id ?? null),
   };
 
   if (ai_variant_enabled) {
@@ -739,6 +781,7 @@ export async function updateQuestion(
     points,
     explanation,
     ai_variant_enabled,
+    subject_id: exam.subject_id ?? null,
   };
 
   let { error } = await supabase
@@ -1032,6 +1075,7 @@ export async function importQuestionsFromBank(
     order_index: startOrderIndex + index,
     explanation: bankQuestion.explanation,
     created_by: user.id,
+    ...buildBankQuestionTopicPayload(exam.subject_id ?? null, bankQuestion),
   }));
 
   const { error: insertError } = await supabase.from("questions").insert(insertPayload);
@@ -1084,7 +1128,7 @@ export async function importQuestionFromBank(
   const { data: bankQuestion, error: bankQuestionError } = await supabase
     .from("question_bank")
     .select(
-      "id, subject_id, created_by, visibility, type, content, content_html, image_url, options, correct_answer, points, explanation, usage_count, last_used_at"
+      "id, subject_id, created_by, visibility, type, content, content_html, image_url, options, correct_answer, points, explanation, usage_count, last_used_at, subtopic"
     )
     .eq("id", bankQuestionId)
     .maybeSingle();
@@ -1131,6 +1175,7 @@ export async function importQuestionFromBank(
     order_index,
     explanation: bankQuestion.explanation,
     created_by: user.id,
+    ...buildBankQuestionTopicPayload(exam.subject_id ?? null, bankQuestion),
   });
 
   if (insertError) return { error: insertError.message };
@@ -1176,7 +1221,7 @@ export async function importSampleExamToExam(
   const { data: sampleExam, error: sampleExamError } = await supabase
     .from("sample_exams")
     .select(
-      "id, subject_id, sample_exam_items(order_index, question_bank:question_bank_id(id, visibility, subject_id, type, content, content_html, image_url, options, correct_answer, points, explanation))"
+      "id, subject_id, sample_exam_items(order_index, question_bank:question_bank_id(id, visibility, subject_id, subtopic, type, content, content_html, image_url, options, correct_answer, points, explanation))"
     )
     .eq("id", sampleExamId)
     .maybeSingle();
@@ -1202,6 +1247,7 @@ export async function importSampleExamToExam(
           id: string;
           visibility: string;
           subject_id: string | null;
+          subtopic: string | null;
           type: string;
           content: string;
           content_html: string | null;
@@ -1216,6 +1262,7 @@ export async function importSampleExamToExam(
           id: string;
           visibility: string;
           subject_id: string | null;
+          subtopic: string | null;
           type: string;
           content: string;
           content_html: string | null;
@@ -1239,6 +1286,7 @@ export async function importSampleExamToExam(
         id: string;
         visibility: string;
         subject_id: string | null;
+        subtopic: string | null;
         type: string;
         content: string;
         content_html: string | null;
@@ -1277,6 +1325,7 @@ export async function importSampleExamToExam(
     order_index: startOrderIndex + index,
     explanation: question.explanation,
     created_by: user.id,
+    ...buildSampleQuestionTopicPayload(exam.subject_id ?? null, question),
   }));
 
   const { error: insertError } = await supabase.from("questions").insert(insertPayload);
@@ -1717,6 +1766,7 @@ export async function importParsedQuestions(
       order_index: nextOrderIndex++,
       explanation: normalized.explanation || null,
       created_by: user.id,
+      ...buildManualQuestionTopicPayload(exam.subject_id ?? null),
     });
   }
 

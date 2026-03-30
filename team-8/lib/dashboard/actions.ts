@@ -7,6 +7,7 @@ import {
   pickBestAttempt,
   pickLatestAttempt,
 } from "@/lib/exam-attempt-utils";
+import { getStudentLearningDashboardSummary } from "@/lib/student-learning/actions";
 
 function getRelationObject<T>(value: T | T[] | null | undefined) {
   if (Array.isArray(value)) return value[0] ?? null;
@@ -239,6 +240,10 @@ export async function getStudentStats() {
       avgScore: null,
       upcomingExams: [],
       recentResults: [],
+      learningSummary: {
+        weakSubjects: [],
+        weakTopics: [],
+      },
     };
   }
 
@@ -266,6 +271,10 @@ export async function getStudentStats() {
       avgScore: null,
       upcomingExams: [],
       recentResults: [],
+      learningSummary: {
+        weakSubjects: [],
+        weakTopics: [],
+      },
     };
   }
   const sessions = sessionsRes.data ?? [];
@@ -287,6 +296,10 @@ export async function getStudentStats() {
       avgScore: null,
       upcomingExams: [],
       recentResults: [],
+      learningSummary: {
+        weakSubjects: [],
+        weakTopics: [],
+      },
     };
   }
 
@@ -425,11 +438,14 @@ export async function getStudentStats() {
       };
     });
 
+  const learningSummary = await getStudentLearningDashboardSummary(user.id);
+
   return {
     activeExams,
     completedExams: bestSessionsByExam.length,
     avgScore,
     upcomingExams,
     recentResults,
+    learningSummary,
   };
 }

@@ -30,6 +30,7 @@ import {
   pickBestAttempt,
   pickLatestAttempt,
 } from "@/lib/exam-attempt-utils";
+import { recomputeStudentTopicMastery } from "@/lib/student-learning/actions";
 import { attachPassagesToQuestions } from "@/lib/question-passages";
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 type ProctorEventType =
@@ -1045,6 +1046,7 @@ async function finalizeSessionAttempt(
     revalidatePath("/student/exams");
     revalidatePath("/student/results");
     revalidatePath("/student/schedule");
+    revalidatePath("/student/learning");
     revalidatePath(`/student/exams/${examId}/result`);
 
     // Notify teacher of submission (fire-and-forget)
@@ -1061,6 +1063,10 @@ async function finalizeSessionAttempt(
           sessionId
         ).catch(() => {});
       }
+    }
+
+    if (finalStatus === "graded" || finalStatus === "timed_out") {
+      await recomputeStudentTopicMastery(userId).catch(() => {});
     }
 
     return {

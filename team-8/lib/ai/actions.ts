@@ -345,6 +345,8 @@ export async function generateQuestionsWithAI(input: AIGenerateQuestionsInput) {
     const insertRows = generated.map((q) => {
       const row = {
         exam_id: input.examId,
+        subject_id: exam.subject_id,
+        subtopic: input.subtopic ? input.subtopic.trim() : null,
         type: q.type,
         content: q.content,
         content_html: null,
@@ -355,6 +357,8 @@ export async function generateQuestionsWithAI(input: AIGenerateQuestionsInput) {
         order_index: orderIndex++,
         explanation: q.explanation,
         created_by: user.id,
+        topic_label_source: input.subtopic ? "ai_generated" : "unknown",
+        topic_label_confidence: input.subtopic ? 1 : null,
       };
       return row;
     });

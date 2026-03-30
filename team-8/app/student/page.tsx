@@ -54,6 +54,81 @@ export default async function StudentDashboard() {
         </Card>
       </div>
 
+      <Card className="rounded-2xl">
+        <CardHeader className="flex flex-row items-start justify-between gap-4">
+          <div>
+            <CardTitle className="text-lg">Learning Summary</CardTitle>
+            <CardDescription>
+              Сайжруулах шаардлагатай хичээл, сэдвүүдийн товч тойм
+            </CardDescription>
+          </div>
+          <Link href="/student/learning">
+            <Button variant="outline" size="sm">
+              Learning Hub
+            </Button>
+          </Link>
+        </CardHeader>
+        <CardContent>
+          {stats.learningSummary.weakSubjects.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Одоогоор mastery profile үүсгэх data хангалтгүй байна.
+            </p>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-foreground">Сайжруулах хичээлүүд</p>
+                {stats.learningSummary.weakSubjects.map((subject) => (
+                  <div
+                    key={subject.subject_id}
+                    className="rounded-xl border p-4"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold">{subject.subject_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {subject.weak_topic_count > 0
+                            ? `${subject.weak_topic_count} weak topic`
+                            : "Topic breakdown pending"}
+                        </p>
+                      </div>
+                      <Badge variant={subject.mastery_score < 60 ? "secondary" : "outline"}>
+                        {Math.round(subject.mastery_score)}%
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-foreground">Хамгийн сул сэдвүүд</p>
+                {stats.learningSummary.weakTopics.length === 0 ? (
+                  <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+                    Topic-level data хараахан бүрэн бэлэн болоогүй байна.
+                  </div>
+                ) : (
+                  stats.learningSummary.weakTopics.map((topic) => (
+                    <div
+                      key={`${topic.subject_id}:${topic.topic_key}`}
+                      className="rounded-xl border p-4"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold">{topic.topic_label}</p>
+                          <p className="text-xs text-muted-foreground">{topic.subject_name}</p>
+                        </div>
+                        <Badge variant={topic.mastery_score < 60 ? "secondary" : "outline"}>
+                          {Math.round(topic.mastery_score)}%
+                        </Badge>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-start justify-between gap-4">
