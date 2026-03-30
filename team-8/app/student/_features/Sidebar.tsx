@@ -36,7 +36,7 @@ export default function Sidebar() {
     <>
       <div className={`shrink-0 transition-all duration-200 ${widthClass}`} />
       <aside
-        className={`fixed inset-y-0 left-0 z-30 flex h-screen flex-col justify-between overflow-y-auto bg-white pt-6 shadow-xl transition-all duration-200 ${
+        className={`fixed inset-y-0 left-0 z-30 flex h-[100dvh] flex-col justify-between overflow-y-auto bg-white pt-6 shadow-xl transition-all duration-200 ${
           isCollapsed ? "px-2" : "px-4"
         } ${widthClass}`}
       >
