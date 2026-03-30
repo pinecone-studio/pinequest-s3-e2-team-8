@@ -16,9 +16,10 @@ export default async function StudentDashboard() {
   const stats = await getStudentStats();
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
+      {/* 1. The Background Card */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#ffffff] via-[#ffeac0] to-[#ffd474] px-8 py-6">
-        <div className="relative z-10 max-w-2xl space-y-2">
+        <div className="relative z-0 max-w-2xl space-y-2">
           <h2 className="text-2xl font-bold tracking-tight md:text-3xl">
             Сурагчын самбар
           </h2>
@@ -26,10 +27,14 @@ export default async function StudentDashboard() {
             Шалгалт, дүнгийн мэдээллээ нэг доороос хянаарай.
           </p>
         </div>
-        <div className="pointer-events-none absolute bottom-0 right-0 hidden h-full w-auto scale-125 origin-bottom-right md:block">
-          <DashboardImage />
-        </div>
       </div>
+
+      {/* 2. The Image Layer - Moved OUTSIDE the overflow-hidden div */}
+      <div className="pointer-events-none absolute -bottom-0 right-0 z-[60] hidden h-full w-auto scale-105 origin-bottom-right md:block">
+        <DashboardImage />
+      </div>
+
+      {/* 3. Bottom Content */}
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Хянах самбар</h2>
         <p className="text-muted-foreground">
