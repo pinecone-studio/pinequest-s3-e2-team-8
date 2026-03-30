@@ -31,10 +31,15 @@ import {
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -49,11 +54,13 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import {
   AlertTriangle,
+  BookOpen,
   ChevronDown,
   FileSpreadsheet,
   FileText,
   Loader2,
   PlusCircle,
+  Sparkles,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -67,6 +74,10 @@ interface SelectedImportFile {
 
 interface QuestionImportActionsProps {
   examId: string;
+  aiVariantEnabled: boolean;
+  onAiVariantEnabledChange: (value: boolean) => void;
+  formulaToolOpen: boolean;
+  onFormulaToolOpenChange: (value: boolean) => void;
 }
 
 const questionTypes: { value: QuestionType; label: string }[] = [
@@ -182,6 +193,10 @@ function resetDraftForType(
 
 export default function QuestionImportActions({
   examId,
+  aiVariantEnabled,
+  onAiVariantEnabledChange,
+  formulaToolOpen,
+  onFormulaToolOpenChange,
 }: QuestionImportActionsProps) {
   const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<SelectedImportFile | null>(null);
@@ -548,6 +563,122 @@ export default function QuestionImportActions({
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-1">
             <p className="text-sm font-semibold text-zinc-950">
+              Хурдан үйлдлүүд
+            </p>
+            <p className="text-sm text-zinc-500">
+              Асуултаа хаанаас оруулах болон ямар хэрэгсэл ашиглахаа эндээс сонгоно.
+            </p>
+          </div>
+
+          <div className="flex w-full flex-col gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:justify-end">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-between rounded-full px-5 sm:w-[190px]"
+                  disabled={isParsing || isImporting}
+                >
+                  <PlusCircle className="mr-2 h-4 w-4" />
+                  Асуулт нэмэх
+                  <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel>Эх сурвалж сонгох</DropdownMenuLabel>
+                <DropdownMenuItem asChild>
+                  <Link href={`/educator/question-bank?examId=${examId}`}>
+                    <BookOpen className="h-4 w-4" />
+                    Асуултын сан ашиглах
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Upload className="h-4 w-4" />
+                    Файл оруулах
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-56">
+                    {(
+                      Object.entries(importTypeMeta) as [
+                        FileImportType,
+                        (typeof importTypeMeta)[FileImportType],
+                      ][]
+                    ).map(([type, meta]) => {
+                      const Icon = meta.icon;
+
+                      return (
+                        <DropdownMenuItem
+                          key={`${type}-quick-action`}
+                          onSelect={() => openPicker(type)}
+                          disabled={isParsing || isImporting}
+                        >
+                          <Icon className="h-4 w-4" />
+                          {meta.label}
+                          <DropdownMenuShortcut>{meta.hint}</DropdownMenuShortcut>
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-between rounded-full px-5 sm:w-[190px]"
+                >
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Хэрэгслүүд
+                  <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel>Нээх хэрэгслүүд</DropdownMenuLabel>
+                <DropdownMenuCheckboxItem
+                  checked={aiVariantEnabled}
+                  onCheckedChange={(checked) =>
+                    onAiVariantEnabledChange(Boolean(checked))
+                  }
+                >
+                  <Sparkles className="h-4 w-4" />
+                  AI ашиглах
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={formulaToolOpen}
+                  onCheckedChange={(checked) =>
+                    onFormulaToolOpenChange(Boolean(checked))
+                  }
+                >
+                  f(x) Томьёо
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        {aiVariantEnabled || formulaToolOpen ? (
+          <div className="flex flex-wrap gap-2">
+            {aiVariantEnabled ? (
+              <Badge variant="outline" className="border-amber-300 text-amber-700">
+                AI ашиглах идэвхтэй
+              </Badge>
+            ) : null}
+            {formulaToolOpen ? (
+              <Badge variant="outline" className="border-zinc-300 text-zinc-700">
+                Томьёоны хэрэгсэл нээлттэй
+              </Badge>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="hidden">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-zinc-950">
               Асуулт нэмэх хурдан сонголтууд
             </p>
           </div>
@@ -601,6 +732,8 @@ export default function QuestionImportActions({
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+        </div>
+
         </div>
 
         {selectedFile ? (

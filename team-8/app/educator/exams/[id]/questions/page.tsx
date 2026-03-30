@@ -7,10 +7,15 @@ import {
   getQuestionsByExam,
 } from "@/lib/question/actions";
 import AddQuestionForm from "./_features/AddQuestionForm";
+import PublishExamButton from "./_features/PublishExamButton";
 import QuestionList from "./_features/QuestionList";
 
 interface Props {
   params: Promise<{ id: string }>;
+}
+
+function getNowMs() {
+  return Date.now();
 }
 
 export default async function ExamQuestionsPage({ params }: Props) {
@@ -23,12 +28,19 @@ export default async function ExamQuestionsPage({ params }: Props) {
 
   if (!exam) notFound();
 
-  const backHref = exam.is_published
-    ? "/educator/exams"
-    : `/educator/exams/${id}/edit?step=settings`;
-  const backLabel = exam.is_published
-    ? "Шалгалтын жагсаалт руу буцах"
-    : "Шалгалтын мэдээлэл рүү буцах";
+  const publishedStartMs = new Date(exam.start_time).getTime();
+  const canEditPublishedExam =
+    Boolean(exam.is_published) &&
+    !Number.isNaN(publishedStartMs) &&
+    publishedStartMs > getNowMs();
+  const backHref =
+    !exam.is_published || canEditPublishedExam
+      ? `/educator/exams/${id}/edit?step=settings`
+      : "/educator/exams";
+  const backLabel =
+    !exam.is_published || canEditPublishedExam
+      ? "Шалгалтын мэдээлэл рүү буцах"
+      : "Шалгалтын жагсаалт руу буцах";
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-2 md:px-4">
@@ -41,13 +53,20 @@ export default async function ExamQuestionsPage({ params }: Props) {
           {backLabel}
         </Link>
 
-        <div className="space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight text-zinc-950 md:text-4xl">
-            Шалгалтын асуултууд
-          </h1>
-          <p className="text-base text-zinc-500">
-            Асуултуудаа нэмж, зөв хариултыг сонгоно уу
-          </p>
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold tracking-tight text-zinc-950 md:text-4xl">
+              Шалгалтын асуултууд
+            </h1>
+            <p className="text-base text-zinc-500">
+              Асуултуудаа нэмж, зөв хариултыг сонгоно уу
+            </p>
+          </div>
+
+          <PublishExamButton
+            examId={id}
+            isPublished={Boolean(exam.is_published)}
+          />
         </div>
       </div>
 
