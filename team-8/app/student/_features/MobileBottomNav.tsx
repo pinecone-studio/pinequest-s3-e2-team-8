@@ -28,14 +28,14 @@ export default function MobileBottomNav() {
               href={item.href}
               className={`flex flex-col items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
                 isActive
-                  ? "text-[#4078C1]"
-                  : "text-[#7F7F7F] hover:text-[#4078C1]"
+                  ? "text-brand"
+                  : "text-[#7F7F7F] hover:text-brand"
               }`}
               aria-current={isActive ? "page" : undefined}
             >
               <span
                 className={`flex h-9 w-9 items-center justify-center rounded-full ${
-                  isActive ? "bg-[#ECF1F9]" : "bg-transparent"
+                  isActive ? "bg-brand-soft" : "bg-transparent"
                 }`}
               >
                 <Icon className="h-5 w-5" strokeWidth={isActive ? 2.5 : 2} />
