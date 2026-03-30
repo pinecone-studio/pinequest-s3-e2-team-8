@@ -101,7 +101,7 @@ export default function Sidebar() {
             >
               <LogOut className="h-7 w-7" />
               {!isCollapsed && (
-                <p className="text-[15px] font-semibold text-[#7F7F7F] group-hover:text-[#4078C1]">
+                <p className="text-[15px] font-semibold text-[#7F7F7F] group-hover:text-red-500">
                   Гарах
                 </p>
               )}
