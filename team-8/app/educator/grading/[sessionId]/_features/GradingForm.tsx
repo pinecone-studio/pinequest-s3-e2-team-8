@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import StudentIdentity from "@/components/profile/StudentIdentity";
 import MathContent from "@/components/math/MathContent";
 import { gradeAnswer, finalizeGrading } from "@/lib/grading/actions";
 import { gradeEssayWithAI, autoGradeSessionEssays } from "@/lib/ai/actions";
@@ -238,6 +239,14 @@ export default function GradingForm({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">{exam?.title}</h2>
+          <div className="mt-2">
+            <StudentIdentity
+              name={profile?.full_name || profile?.email || "Оюутан"}
+              email={profile?.email}
+              avatarUrl={profile?.avatar_url}
+              size="sm"
+            />
+          </div>
           <p className="text-muted-foreground">
             {profile?.full_name || profile?.email} | Илгээсэн:{" "}
             {session.submitted_at

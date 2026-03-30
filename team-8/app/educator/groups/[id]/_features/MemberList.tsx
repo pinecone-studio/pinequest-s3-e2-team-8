@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { removeMemberFromGroup } from "@/lib/group/actions";
+import StudentIdentity from "@/components/profile/StudentIdentity";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -12,6 +13,7 @@ interface Member {
     id: string;
     email: string;
     full_name: string;
+    avatar_url: string | null;
   } | null;
 }
 
@@ -21,7 +23,11 @@ interface MemberListProps {
   canManage: boolean;
 }
 
-export default function MemberList({ groupId, members, canManage }: MemberListProps) {
+export default function MemberList({
+  groupId,
+  members,
+  canManage,
+}: MemberListProps) {
   const [removingId, setRemovingId] = useState<string | null>(null);
 
   async function handleRemove(studentId: string) {
@@ -43,14 +49,13 @@ export default function MemberList({ groupId, members, canManage }: MemberListPr
       {members.map((member) => (
         <Card key={member.student_id}>
           <CardContent className="flex items-center justify-between gap-4 pt-4">
-            <div className="min-w-0">
-              <p className="font-medium">
-                {member.profiles?.full_name || "Нэргүй сурагч"}
-              </p>
-              <p className="truncate text-sm text-muted-foreground">
-                {member.profiles?.email || "Имэйлгүй"}
-              </p>
-            </div>
+            <StudentIdentity
+              name={member.profiles?.full_name || "Нэргүй сурагч"}
+              email={member.profiles?.email || "Имэйлгүй"}
+              avatarUrl={member.profiles?.avatar_url}
+              size="sm"
+              className="min-w-0 flex-1"
+            />
             {canManage && (
               <Button
                 type="button"

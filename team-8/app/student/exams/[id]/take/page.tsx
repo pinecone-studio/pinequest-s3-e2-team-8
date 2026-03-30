@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import {
   prepareExamTakePayload,
 } from "@/lib/student/actions";
-import ExamTaker from "./_features/ExamTaker";
+import ExamStartGate from "./_features/ExamStartGate";
 
 export default async function TakeExamPage({
   params,
@@ -21,7 +21,7 @@ export default async function TakeExamPage({
   }
 
   return (
-    <ExamTaker
+    <ExamStartGate
       exam={payload.exam}
       questions={payload.questions}
       sessionId={payload.sessionId}

@@ -118,11 +118,11 @@ export async function getPendingSubmissions() {
 
   if (admin) {
     // Admin sees all pending submissions
-    const { data } = await supabase
-      .from("exam_sessions")
-      .select("*, exams(title), profiles(full_name, email)")
-      .eq("status", "submitted")
-      .order("submitted_at", { ascending: true });
+      const { data } = await supabase
+        .from("exam_sessions")
+        .select("*, exams(title), profiles(full_name, email, avatar_url)")
+        .eq("status", "submitted")
+        .order("submitted_at", { ascending: true });
     return data ?? [];
   }
 
@@ -176,7 +176,7 @@ export async function getPendingSubmissions() {
 
   const { data } = await supabase
     .from("exam_sessions")
-    .select("*, exams(title), profiles(full_name, email)")
+    .select("*, exams(title), profiles(full_name, email, avatar_url)")
     .in("exam_id", examIds)
     .eq("status", "submitted")
     .order("submitted_at", { ascending: true });
@@ -235,7 +235,7 @@ export async function getSessionForGrading(sessionId: string) {
 
   const { data: session } = await supabase
     .from("exam_sessions")
-    .select("*, exams(id, title, created_by), profiles(full_name, email)")
+    .select("*, exams(id, title, created_by), profiles(full_name, email, avatar_url)")
     .eq("id", sessionId)
     .maybeSingle();
 

@@ -280,7 +280,7 @@ export async function getGroupMembers(groupId: string) {
 
   const { data } = await supabase
     .from("student_group_members")
-    .select("*, profiles!student_group_members_student_id_fkey(id, email, full_name)")
+    .select("*, profiles!student_group_members_student_id_fkey(id, email, full_name, avatar_url)")
     .eq("group_id", groupId)
     .order("joined_at", { ascending: false });
 

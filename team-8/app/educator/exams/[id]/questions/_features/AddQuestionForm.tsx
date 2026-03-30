@@ -362,7 +362,13 @@ export default function AddQuestionForm({ examId, passages }: Props) {
   return (
     <div className="rounded-[28px] border border-zinc-200 bg-white p-6 shadow-[0_12px_40px_-18px_rgba(15,23,42,0.16)] md:p-8">
       <form id="question-form" action={handleSubmit} className="space-y-6">
-        <QuestionImportActions examId={examId} />
+        <QuestionImportActions
+          examId={examId}
+          aiVariantEnabled={aiVariantEnabled}
+          onAiVariantEnabledChange={setAiVariantEnabled}
+          formulaToolOpen={isFormulaToolOpen}
+          onFormulaToolOpenChange={setIsFormulaToolOpen}
+        />
 
         <div className="flex items-center gap-3 text-zinc-950">
           <Plus className="h-5 w-5" />
@@ -422,6 +428,30 @@ export default function AddQuestionForm({ examId, passages }: Props) {
           </div>
         </div>
 
+        {aiVariantEnabled ? (
+          <div className="space-y-3 rounded-[24px] border border-amber-200 bg-amber-50 p-4">
+            <div className="flex items-start gap-3">
+              <div className="rounded-full bg-amber-100 p-2 text-amber-700">
+                <Sparkles className="h-4 w-4" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-zinc-950">
+                  AI ашиглах идэвхтэй
+                </p>
+                <p className="text-sm text-zinc-600">
+                  Идэвхжүүлсэн үед сурагч бүр энэ асуултыг өөр тоо, нэр,
+                  өгөгдөлтэй хувилбараар авна.
+                </p>
+              </div>
+            </div>
+            <p className="rounded-2xl bg-white/80 px-3 py-2 text-sm text-amber-900">
+              Session эхлэх үед AI зөвхөн асуултын өгөгдлийг хувиргаж, зөв
+              хариултыг нь шинэчилнэ.
+            </p>
+          </div>
+        ) : null}
+
+        <div className="hidden">
         <div
           className={cn(
             "space-y-3 rounded-[24px] border p-4 transition-colors",
@@ -466,6 +496,8 @@ export default function AddQuestionForm({ examId, passages }: Props) {
               хариултыг нь шинэчилнэ.
             </p>
           ) : null}
+        </div>
+
         </div>
 
         {passages.length > 0 ? (
@@ -515,6 +547,48 @@ export default function AddQuestionForm({ examId, passages }: Props) {
           </div>
         ) : null}
 
+        {isFormulaToolOpen ? (
+          <div className="space-y-3 rounded-[24px] border border-zinc-200 bg-zinc-50/80 p-4">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-zinc-950">
+                Томьёоны хэрэгсэл
+              </p>
+              <p className="text-sm text-zinc-500">
+                Идэвхтэй талбар дээр дарж байгаад томьёогоо шууд оруулна.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <LatexShortcutPanel
+                targetId={activeFormulaTarget.id}
+                targetLabel={activeFormulaTarget.label}
+                title="Томьёоны самбар"
+                description="Асуулт, хариулт эсвэл холбох мөр дээр дарж байгаад томьёогоо шууд оруулна."
+              />
+
+              {activeTargetValue ? (
+                <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-zinc-950">
+                      Идэвхтэй талбарын preview
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      {activeFormulaTarget.label}
+                    </p>
+                  </div>
+                  <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">
+                    <MathContent
+                      text={activeTargetValue}
+                      className="prose prose-sm max-w-none text-zinc-900"
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="hidden">
         <div className="space-y-3 rounded-[24px] border border-zinc-200 bg-zinc-50/80 p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1">
@@ -564,6 +638,8 @@ export default function AddQuestionForm({ examId, passages }: Props) {
               ) : null}
             </div>
           ) : null}
+        </div>
+
         </div>
 
         <div className="space-y-2.5">

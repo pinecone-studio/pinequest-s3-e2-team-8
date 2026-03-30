@@ -141,6 +141,10 @@ export default function ExamList({ exams }: Props) {
     };
   }
 
+  function canEditExam(exam: Exam, lifecycle: ExamLifecycleSummary) {
+    return !exam.is_published || lifecycle.key === "published";
+  }
+
   if (exams.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-16 text-center">
@@ -200,15 +204,15 @@ export default function ExamList({ exams }: Props) {
   ):
     | { href: string; label: string; variant?: "outline" | "secondary" }
     | null {
-    if (!exam.is_published) {
+    if (canEditExam(exam, lifecycle)) {
       return {
         href: `/educator/exams/${exam.id}/edit`,
         label: "Засах",
-        variant: "outline",
+        variant: exam.is_published ? "secondary" : "outline",
       };
     }
 
-    if (lifecycle.key === "finalized" || lifecycle.key === "grading") {
+    if (exam.is_published) {
       return {
         href: `/educator/exams/${exam.id}/results`,
         label: "Дүн",
@@ -283,91 +287,90 @@ export default function ExamList({ exams }: Props) {
               </div>
 
               <div className="divide-y">
-                {section.items.map(({ exam, lifecycle, questionCount, subjectName }) => (
-                  (() => {
-                    const primaryAction = getPrimaryAction(exam, lifecycle);
+                {section.items.map(({ exam, lifecycle, questionCount, subjectName }) => {
+                  const primaryAction = getPrimaryAction(exam, lifecycle);
 
-                    return (
-                      <div
-                        key={exam.id}
-                        className="flex items-center gap-3 px-4 py-3"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="truncate text-sm font-medium">{exam.title}</p>
-                            {groupMode === "subject" && (
-                              <Badge variant={lifecycle.variant}>{lifecycle.label}</Badge>
-                            )}
-                          </div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {groupMode === "status" ? `${subjectName} · ` : ""}
-                            {formatDateTimeUB(exam.start_time)} · {exam.duration_minutes} мин
-                            {" · "}
-                            {questionCount} асуулт
-                          </p>
+                  return (
+                    <div
+                      key={exam.id}
+                      className="flex items-center gap-3 px-4 py-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-medium">{exam.title}</p>
+                          {groupMode === "subject" && (
+                            <Badge variant={lifecycle.variant}>{lifecycle.label}</Badge>
+                          )}
                         </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {groupMode === "status" ? `${subjectName} · ` : ""}
+                          {formatDateTimeUB(exam.start_time)} · {exam.duration_minutes} мин
+                          {" · "}
+                          {questionCount} асуулт
+                        </p>
+                      </div>
 
-                        {primaryAction && (
-                          <Button
-                            asChild
-                            variant={primaryAction.variant ?? "outline"}
-                            size="sm"
-                          >
-                            <Link href={primaryAction.href}>{primaryAction.label}</Link>
+                      {primaryAction && (
+                        <Button
+                          asChild
+                          variant={primaryAction.variant ?? "outline"}
+                          size="sm"
+                        >
+                          <Link href={primaryAction.href}>{primaryAction.label}</Link>
+                        </Button>
+                      )}
+
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+                            <MoreVertical className="h-4 w-4" />
                           </Button>
-                        )}
-
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {canEditExam(exam, lifecycle) && (
                             <DropdownMenuItem asChild>
-                              <Link href={`/educator/exams/${exam.id}/questions`}>
-                                Асуулт
+                              <Link href={`/educator/exams/${exam.id}/edit`}>
+                                Засварлах
                               </Link>
                             </DropdownMenuItem>
-                            {exam.is_published ? (
-                              <DropdownMenuItem asChild>
-                                <Link href={`/educator/exams/${exam.id}/results`}>
-                                  <BarChart2 className="mr-2 h-4 w-4" />
-                                  Дүн
-                                </Link>
-                              </DropdownMenuItem>
-                            ) : (
-                              <DropdownMenuItem asChild>
-                                <Link href={`/educator/exams/${exam.id}/edit`}>
-                                  Засварлах
-                                </Link>
-                              </DropdownMenuItem>
-                            )}
-                            {!exam.is_published && questionCount > 0 && (
-                              <DropdownMenuItem onClick={() => handlePublish(exam.id)}>
-                                Нийтлэх
-                              </DropdownMenuItem>
-                            )}
-                            {!exam.is_published && questionCount === 0 && (
-                              <DropdownMenuItem disabled className="text-muted-foreground">
-                                Нийтлэх боломжгүй
-                              </DropdownMenuItem>
-                            )}
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              className="text-destructive"
-                              onClick={() =>
-                                setDeleteTarget({ id: exam.id, title: exam.title })
-                              }
-                            >
-                              Устгах
+                          )}
+                          <DropdownMenuItem asChild>
+                            <Link href={`/educator/exams/${exam.id}/questions`}>
+                              Асуулт
+                            </Link>
+                          </DropdownMenuItem>
+                          {exam.is_published && (
+                            <DropdownMenuItem asChild>
+                              <Link href={`/educator/exams/${exam.id}/results`}>
+                                <BarChart2 className="mr-2 h-4 w-4" />
+                                Дүн
+                              </Link>
                             </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    );
-                  })()
-                ))}
+                          )}
+                          {!exam.is_published && questionCount > 0 && (
+                            <DropdownMenuItem onClick={() => handlePublish(exam.id)}>
+                              Нийтлэх
+                            </DropdownMenuItem>
+                          )}
+                          {!exam.is_published && questionCount === 0 && (
+                            <DropdownMenuItem disabled className="text-muted-foreground">
+                              Нийтлэх боломжгүй
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() =>
+                              setDeleteTarget({ id: exam.id, title: exam.title })
+                            }
+                          >
+                            Устгах
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  );
+                })}
               </div>
             </Card>
           ))}

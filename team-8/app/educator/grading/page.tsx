@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import StudentIdentity from "@/components/profile/StudentIdentity";
 
 export default async function GradingPage() {
   const submissions = await getPendingSubmissions();
@@ -44,12 +45,17 @@ export default async function GradingPage() {
             return (
               <Card key={sub.id}>
                 <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="text-base">
-                        {profile?.full_name || profile?.email || "Оюутан"}
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <CardTitle>
+                        <StudentIdentity
+                          name={profile?.full_name || profile?.email || "Оюутан"}
+                          email={profile?.email}
+                          avatarUrl={profile?.avatar_url}
+                          size="sm"
+                        />
                       </CardTitle>
-                      <CardDescription>
+                      <CardDescription className="mt-2">
                         {exam?.title ?? "Шалгалт"} | Илгээсэн:{" "}
                         {sub.submitted_at
                           ? formatDateTimeUB(sub.submitted_at)
@@ -57,11 +63,7 @@ export default async function GradingPage() {
                       </CardDescription>
                     </div>
                     <div className="flex items-center gap-2">
-                      {pct !== null && (
-                        <Badge variant="outline">
-                          Авто: {pct}%
-                        </Badge>
-                      )}
+                      {pct !== null && <Badge variant="outline">Авто: {pct}%</Badge>}
                       <Link href={`/educator/grading/${sub.id}`}>
                         <Button size="sm">Шалгах</Button>
                       </Link>

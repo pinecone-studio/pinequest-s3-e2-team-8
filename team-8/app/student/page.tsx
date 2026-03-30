@@ -10,41 +10,48 @@ import { getStudentStats } from "@/lib/dashboard/actions";
 import { formatDateTimeUB } from "@/lib/utils/date";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CalendarX, FileText } from "lucide-react";
 
 export default async function StudentDashboard() {
   const stats = await getStudentStats();
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Хянах самбар</h2>
-        <p className="text-muted-foreground">
+      <div className="space-y-1">
+        <h2 className="text-xl font-bold tracking-tight sm:text-2xl">
+          Хянах самбар
+        </h2>
+        <p className="text-sm text-muted-foreground sm:text-base">
           Таны шалгалтууд болон үр дүнгийн хураангуй
         </p>
       </div>
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
+      <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
+        <Card className="ring-zinc-200/70">
           <CardHeader className="pb-2">
             <CardDescription>Идэвхтэй шалгалт</CardDescription>
-            <CardTitle className="text-3xl">{stats.activeExams}</CardTitle>
+            <CardTitle className="text-2xl sm:text-3xl">
+              {stats.activeExams}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">Одоо өгөх боломжтой</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="ring-zinc-200/70">
           <CardHeader className="pb-2">
             <CardDescription>Өгсөн шалгалт</CardDescription>
-            <CardTitle className="text-3xl">{stats.completedExams}</CardTitle>
+            <CardTitle className="text-2xl sm:text-3xl">
+              {stats.completedExams}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">Нийт</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="ring-zinc-200/70">
           <CardHeader className="pb-2">
             <CardDescription>Дундаж оноо</CardDescription>
-            <CardTitle className="text-3xl">
+            <CardTitle className="text-2xl sm:text-3xl">
               {stats.avgScore !== null ? `${stats.avgScore}%` : "—"}
             </CardTitle>
           </CardHeader>
@@ -130,40 +137,57 @@ export default async function StudentDashboard() {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-4">
+        <Card className="ring-zinc-200/70">
+          <CardHeader className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-start">
             <div>
-              <CardTitle className="text-lg">Дараагийн шалгалтууд</CardTitle>
+              <CardTitle className="text-base sm:text-lg">
+                Дараагийн шалгалтууд
+              </CardTitle>
               <CardDescription>
                 Эхлэх цаг болон үргэлжлэх хугацааг шалгана уу
               </CardDescription>
             </div>
             <Link href="/student/schedule">
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" className="w-full sm:w-auto">
                 Хуваарь харах
               </Button>
             </Link>
           </CardHeader>
           <CardContent>
             {stats.upcomingExams.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Одоогоор товлогдсон шалгалт алга.
-              </p>
+              <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-zinc-200/70 bg-muted/30 p-6 text-center">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-soft text-brand">
+                  <CalendarX className="h-5 w-5" />
+                </div>
+                <p className="text-sm font-medium">
+                  Одоогоор товлогдсон шалгалт алга.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Шалгалтын хуваарь нэмэгдмэгц энд харагдана.
+                </p>
+              </div>
             ) : (
               <div className="space-y-3">
                 {stats.upcomingExams.map((exam) => (
                   <div
                     key={exam.id}
-                    className="flex items-start justify-between gap-4 rounded-lg border p-3"
+                    className="flex flex-col items-start justify-between gap-3 rounded-lg border border-zinc-200/70 bg-white/70 p-3 sm:flex-row sm:items-start sm:bg-transparent"
                   >
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium">{exam.title}</p>
+                    <div className="min-w-0 space-y-1">
+                      <p className="line-clamp-2 text-sm font-medium">
+                        {exam.title}
+                      </p>
                       <p className="text-xs text-muted-foreground">
                         {formatDateTimeUB(exam.start_time)}
                       </p>
                     </div>
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      <Badge variant="outline">{exam.duration_minutes} мин</Badge>
+                    <div className="flex flex-wrap items-center justify-start gap-2 sm:justify-end">
+                      <Badge
+                        variant="outline"
+                        className="border-zinc-200/80 bg-white/90 text-[11px] text-zinc-700 shadow-sm sm:bg-transparent sm:text-xs sm:shadow-none"
+                      >
+                        {exam.duration_minutes} мин
+                      </Badge>
                       <Badge
                         variant={
                           exam.lifecycle_status === "available" ||
@@ -172,6 +196,7 @@ export default async function StudentDashboard() {
                             ? "secondary"
                             : "outline"
                         }
+                        className="text-[11px] shadow-sm sm:text-xs sm:shadow-none"
                       >
                         {exam.lifecycle_label}
                       </Badge>
@@ -183,45 +208,65 @@ export default async function StudentDashboard() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-4">
+        <Card className="ring-zinc-200/70">
+          <CardHeader className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-start">
             <div>
-              <CardTitle className="text-lg">Сүүлд шинэчлэгдсэн дүн</CardTitle>
+              <CardTitle className="text-base sm:text-lg">
+                Сүүлд шинэчлэгдсэн дүн
+              </CardTitle>
               <CardDescription>
                 Саяхан өгсөн шалгалтуудын төлөв
               </CardDescription>
             </div>
             <Link href="/student/results">
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" className="w-full sm:w-auto">
                 Үр дүн харах
               </Button>
             </Link>
           </CardHeader>
           <CardContent>
             {stats.recentResults.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Дүн гарсан шалгалт одоогоор алга.
-              </p>
+              <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-zinc-200/70 bg-muted/30 p-6 text-center">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-soft text-brand">
+                  <FileText className="h-5 w-5" />
+                </div>
+                <p className="text-sm font-medium">
+                  Дүн гарсан шалгалт одоогоор алга.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Шалгалтын дүн баталгаажмагц энд харагдана.
+                </p>
+              </div>
             ) : (
               <div className="space-y-3">
                 {stats.recentResults.map((result) => (
                   <div
                     key={`${result.id}-${result.submitted_at ?? "pending"}`}
-                    className="flex items-start justify-between gap-4 rounded-lg border p-3"
+                    className="flex flex-col items-start justify-between gap-3 rounded-lg border border-zinc-200/70 bg-white/70 p-3 sm:flex-row sm:items-start sm:bg-transparent"
                   >
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium">{result.exam_title}</p>
+                    <div className="min-w-0 space-y-1">
+                      <p className="line-clamp-2 text-sm font-medium">
+                        {result.exam_title}
+                      </p>
                       <p className="text-xs text-muted-foreground">
                         {result.submitted_at
                           ? formatDateTimeUB(result.submitted_at)
                           : "Хугацаа тодорхойгүй"}
                       </p>
                     </div>
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-start gap-2 sm:justify-end">
                       {result.percentage !== null && (
-                        <Badge variant="outline">{result.percentage}%</Badge>
+                        <Badge
+                          variant="outline"
+                          className="border-zinc-200/80 bg-white/90 text-[11px] text-zinc-700 shadow-sm sm:bg-transparent sm:text-xs sm:shadow-none"
+                        >
+                          {result.percentage}%
+                        </Badge>
                       )}
-                      <Badge variant={result.status === "graded" ? "secondary" : "outline"}>
+                      <Badge
+                        variant={result.status === "graded" ? "secondary" : "outline"}
+                        className="text-[11px] shadow-sm sm:text-xs sm:shadow-none"
+                      >
                         {result.status === "graded" ? "Дүн баталгаажсан" : "Шалгагдаж байна"}
                       </Badge>
                     </div>

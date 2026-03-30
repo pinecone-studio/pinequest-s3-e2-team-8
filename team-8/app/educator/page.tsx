@@ -3,59 +3,9 @@ import Link from "next/link";
 import DashboardImage from "../_icons/DashboardImage";
 import { getEducatorStats } from "@/lib/dashboard/actions";
 import { getExamSchedules } from "@/lib/schedule/actions";
+import ExamScheduleClient from "./_components/ExamScheduleClient";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
 const TIMEZONE = "Asia/Ulaanbaatar";
-const TIMELINE_START_HOUR = 8;
-const TIMELINE_END_HOUR = 18;
-
-type ScheduleRow = {
-  id: string;
-  title: string;
-  start_time: string;
-  end_time: string;
-  room: string | null;
-  groups: { id: string; name: string }[];
-};
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("mn-MN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: TIMEZONE,
-  });
-}
-
-function getTimeDecimal(iso: string) {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: TIMEZONE,
-  }).formatToParts(new Date(iso));
-  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
-  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
-  return hour + minute / 60;
-}
-
-function isTodayInUB(iso: string) {
-  const todayKey = new Date().toLocaleDateString("en-CA", {
-    timeZone: TIMEZONE,
-  });
-  const rowKey = new Date(iso).toLocaleDateString("en-CA", {
-    timeZone: TIMEZONE,
-  });
-  return todayKey === rowKey;
-}
-
-function getStableColorIndex(id: string, size: number) {
-  let hash = 0;
-  for (let i = 0; i < id.length; i += 1) {
-    hash = (hash * 31 + id.charCodeAt(i)) % 1_000_000;
-  }
-  return Math.abs(hash) % size;
-}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 function StatCard({
@@ -385,80 +335,21 @@ const btnStyle: React.CSSProperties = {
   gap: 4,
 };
 
-function TimelineRow({ row }: { row: ScheduleRow }) {
-  const start = getTimeDecimal(row.start_time);
-  const end = getTimeDecimal(row.end_time);
-  const totalSpan = TIMELINE_END_HOUR - TIMELINE_START_HOUR;
-  const left =
-    Math.max(0, Math.min(1, (start - TIMELINE_START_HOUR) / totalSpan)) * 100;
-  const width = Math.max(
-    2,
-    Math.min(1, (end - TIMELINE_START_HOUR) / totalSpan) * 100 - left,
-  );
-
-  const blockColors = ["#CFEED7", "#B8D8F7", "#FFE0C2", "#E8D5F5", "#FFD5D5"];
-  const colorIndex = getStableColorIndex(row.id, blockColors.length);
-
-  return (
-    <div
-      className="grid items-center gap-4"
-      style={{ gridTemplateColumns: "160px 1fr" }}
-    >
-      <div>
-        <p className="text-[11px] font-semibold text-foreground">{row.title}</p>
-        <p className="text-[10px] text-muted-foreground">
-          {formatTime(row.start_time)} – {formatTime(row.end_time)}
-        </p>
-        {row.groups.length > 0 && (
-          <p className="text-[10px] text-muted-foreground">
-            {row.groups.map((g) => g.name).join(", ")}
-          </p>
-        )}
-      </div>
-      <div className="relative h-8 overflow-hidden rounded-lg border bg-muted/20">
-        {/* grid lines */}
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage:
-              "repeating-linear-gradient(to right, rgba(148,163,184,0.25), rgba(148,163,184,0.25) 1px, transparent 1px, transparent calc(100% / 10))",
-          }}
-        />
-        {/* event block */}
-        <div
-          className="absolute top-1/2 h-4 -translate-y-1/2 rounded-md"
-          style={{
-            left: `${left}%`,
-            width: `${width}%`,
-            backgroundColor: blockColors[colorIndex],
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 export default async function EducatorDashboard() {
   const stats = await getEducatorStats();
-  const scheduleRows = (await getExamSchedules()) as ScheduleRow[];
-
-  const todayRows = scheduleRows
-    .filter((row) => isTodayInUB(row.start_time))
-    .sort(
-      (a, b) =>
-        new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
-    );
-
-  const timeLabels = Array.from(
-    { length: TIMELINE_END_HOUR - TIMELINE_START_HOUR + 1 },
-    (_, i) => `${String(TIMELINE_START_HOUR + i).padStart(2, "0")}:00`,
-  );
+  const scheduleRows = await getExamSchedules();
+  const today = new Date();
+  const todayKey = today.toLocaleDateString("en-CA", {
+    timeZone: TIMEZONE,
+  });
+  const [, month, day] = todayKey.split("-");
+  const dateLabel = `${Number(month)} сарын ${Number(day)}`;
 
   return (
     <div className="space-y-6">
       {/* ── Hero ── */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#FFD372] via-[#FFF7EE] to-[#ced8e6] px-8 py-6">
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#f9f9f9] via-[#cedbed] to-[#5787c8] px-8 py-6">
         <div className="relative z-10 max-w-2xl space-y-2">
           <h2 className="text-2xl font-bold tracking-tight md:text-3xl">
             Багшийн самбар
@@ -550,74 +441,11 @@ export default async function EducatorDashboard() {
       </div>
 
       {/* ── Schedule ── */}
-      <div className="rounded-2xl border bg-card p-5 shadow-sm">
-        <h3 className="mb-1 text-base font-semibold">Шалгалтын хуваарь</h3>
-        <p className="mb-4 text-xs text-muted-foreground">
-          Өнөөдрийн товлогдсон шалгалтуудын товч харагдац
-        </p>
-
-        {/* Header row */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <span>
-              {new Intl.DateTimeFormat("mn-MN", {
-                month: "long",
-                day: "numeric",
-                timeZone: TIMEZONE,
-              }).format(new Date())}
-            </span>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px]">
-              {todayRows.length} шалгалт
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            {["Хайх", "Ангилах"].map((label) => (
-              <div
-                key={label}
-                className="flex items-center gap-1 rounded-full border px-3 py-1 text-[11px]"
-              >
-                <span className="text-muted-foreground">{label}</span>
-              </div>
-            ))}
-            <button className="h-7 rounded-full border bg-muted px-3 text-[11px] font-medium text-foreground">
-              Одоо
-            </button>
-            <Link href="/educator/schedule">
-              <button className="h-7 rounded-full border px-3 text-[11px] hover:bg-muted">
-                Бүгд
-              </button>
-            </Link>
-          </div>
-        </div>
-
-        {/* Hour labels */}
-        <div
-          className="mb-2 grid text-[10px] text-muted-foreground"
-          style={{
-            gridTemplateColumns: `160px repeat(${timeLabels.length}, minmax(0, 1fr))`,
-          }}
-        >
-          <div />
-          {timeLabels.map((label) => (
-            <span key={label} className="text-right">
-              {label}
-            </span>
-          ))}
-        </div>
-
-        {/* Rows */}
-        {todayRows.length === 0 ? (
-          <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
-            Өнөөдөр товлогдсон шалгалт алга.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {todayRows.map((row) => (
-              <TimelineRow key={row.id} row={row} />
-            ))}
-          </div>
-        )}
-      </div>
+      <ExamScheduleClient
+        scheduleRows={scheduleRows}
+        dateLabel={dateLabel}
+        todayKey={todayKey}
+      />
     </div>
   );
 }
