@@ -35,10 +35,10 @@ export default async function StudentResultsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <h2 className="text-2xl font-bold tracking-tight">
+        <h2 className="text-2xl font-medium tracking-tight">
           Миний өгсөн шалгалтууд
         </h2>
-        <span className="flex h-7 min-w-[28px] items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
+        <span className="flex h-7 min-w-[28px] items-center justify-center rounded-full bg-[#0000001A] text-sm font-medium text-foreground">
           {results.length}
         </span>
       </div>
@@ -58,7 +58,7 @@ export default async function StudentResultsPage() {
             const exam = r.exams as any;
             const scoreColor = getScoreColor(pct);
             const dateLabel = formatDateOnly(
-              r.submitted_at ?? r.started_at ?? null
+              r.submitted_at ?? r.started_at ?? null,
             );
             const timeStart = formatTimeOnly(r.started_at ?? null);
             const timeEnd = formatTimeOnly(r.submitted_at ?? null);
@@ -100,13 +100,16 @@ export default async function StudentResultsPage() {
                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
                   <div
                     className="h-full rounded-full"
-                    style={{ width: `${Math.min(pct, 100)}%`, background: scoreColor }}
+                    style={{
+                      width: `${Math.min(pct, 100)}%`,
+                      background: scoreColor,
+                    }}
                   />
                 </div>
 
                 <div className="mt-4 flex justify-end">
                   <Link href={`/student/exams/${r.exam_id}/result`}>
-                    <button className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-xs font-semibold text-white">
+                    <button className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2.5 text-xs font-semibold text-white">
                       <Eye className="h-4 w-4" />
                       Үр дүн
                     </button>
