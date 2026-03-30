@@ -26,7 +26,6 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { href: "/student/exams", label: "Шалгалт өгөх", icon: FileText },
   { href: "/student/results", label: "Миний шалгалтууд", icon: ListCheck },
 ];
-
 export default function Sidebar() {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
