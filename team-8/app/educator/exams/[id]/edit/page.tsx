@@ -9,6 +9,10 @@ interface Props {
   searchParams: Promise<{ error?: string; step?: string }>;
 }
 
+function getNowMs() {
+  return Date.now();
+}
+
 export default async function EditExamPage({ params, searchParams }: Props) {
   const { id } = await params;
   const { error: pageError, step } = await searchParams;
@@ -19,7 +23,13 @@ export default async function EditExamPage({ params, searchParams }: Props) {
   ]);
 
   if (!exam) notFound();
-  if (exam.is_published) {
+  const publishedStartMs = new Date(exam.start_time).getTime();
+  const canEditPublishedExam =
+    Boolean(exam.is_published) &&
+    !Number.isNaN(publishedStartMs) &&
+    publishedStartMs > getNowMs();
+
+  if (exam.is_published && !canEditPublishedExam) {
     redirect(`/educator/exams/${id}/questions`);
   }
 
@@ -33,24 +43,33 @@ export default async function EditExamPage({ params, searchParams }: Props) {
   const initialStep = step === "settings" ? 2 : step === "schedule" ? 1 : 0;
 
   return (
-    <ExamForm
-      mode="edit"
-      examId={id}
-      initialStep={initialStep}
-      subjects={subjects}
-      groups={groups}
-      initialTitle={exam.title}
-      initialDescription={exam.description ?? ""}
-      initialSubjectId={exam.subject_id}
-      initialGroupIds={initialGroupIds}
-      initialStartTime={exam.start_time}
-      initialEndTime={exam.end_time}
-      initialDurationMinutes={exam.duration_minutes}
-      initialPassingScore={exam.passing_score ?? 60}
-      initialMaxAttempts={exam.max_attempts ?? 1}
-      initialShuffleQuestions={exam.shuffle_questions}
-      initialShuffleOptions={exam.shuffle_options}
-      initialError={pageError ?? null}
-    />
+    <div className="space-y-6">
+      {canEditPublishedExam ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Нийтлэгдсэн боловч хараахан эхлээгүй шалгалтын мэдээлэл, хуваарь,
+          assignment-ийг шинэчилж болно. Асуултууд нь түгжигдсэн хэвээр үлдэнэ.
+        </div>
+      ) : null}
+
+      <ExamForm
+        mode="edit"
+        examId={id}
+        initialStep={initialStep}
+        subjects={subjects}
+        groups={groups}
+        initialTitle={exam.title}
+        initialDescription={exam.description ?? ""}
+        initialSubjectId={exam.subject_id}
+        initialGroupIds={initialGroupIds}
+        initialStartTime={exam.start_time}
+        initialEndTime={exam.end_time}
+        initialDurationMinutes={exam.duration_minutes}
+        initialPassingScore={exam.passing_score ?? 60}
+        initialMaxAttempts={exam.max_attempts ?? 1}
+        initialShuffleQuestions={exam.shuffle_questions}
+        initialShuffleOptions={exam.shuffle_options}
+        initialError={pageError ?? null}
+      />
+    </div>
   );
 }

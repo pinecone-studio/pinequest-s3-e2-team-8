@@ -32,6 +32,7 @@ import {
   getAllowedGroupIds,
   getAllowedSubjectIds,
 } from "@/lib/teacher/permissions";
+import { redis } from "@/lib/redis";
 
 function toUlaanbaatarTimestamp(rawValue: FormDataEntryValue | null) {
   const value = String(rawValue ?? "").trim();
@@ -42,6 +43,10 @@ function toUlaanbaatarTimestamp(rawValue: FormDataEntryValue | null) {
 function parsePositiveInteger(rawValue: FormDataEntryValue | null) {
   const value = Number.parseInt(String(rawValue ?? "").trim(), 10);
   return Number.isFinite(value) ? value : null;
+}
+
+function getExamQuestionCacheKey(examId: string) {
+  return `exam:${examId}:questions`;
 }
 
 export async function createExam(formData: FormData) {
@@ -194,7 +199,7 @@ export async function createExam(formData: FormData) {
   redirect(`/educator/exams/${data.id}/questions`);
 }
 
-export async function updateExam(examId: string, formData: FormData) {
+async function legacyUpdateExam(examId: string, formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
@@ -202,7 +207,7 @@ export async function updateExam(examId: string, formData: FormData) {
   const { data: existingExam } = await supabase
     .from("exams")
     .select(
-      "id, title, description, subject_id, is_published, shuffle_questions, shuffle_options"
+      "id, title, description, subject_id, is_published, start_time, published_at, shuffle_questions, shuffle_options"
     )
     .eq("id", examId)
     .eq("created_by", user.id)
@@ -387,6 +392,292 @@ export async function updateExam(examId: string, formData: FormData) {
 
   revalidatePath("/educator");
   revalidatePath(`/educator/exams/${examId}`);
+  return { success: true };
+}
+
+export async function updateExam(examId: string, formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const { data: existingExam } = await supabase
+    .from("exams")
+    .select(
+      "id, title, description, subject_id, is_published, start_time, published_at, shuffle_questions, shuffle_options"
+    )
+    .eq("id", examId)
+    .eq("created_by", user.id)
+    .maybeSingle();
+
+  if (!existingExam) return { error: "Шалгалт олдсонгүй" };
+  if (!existingExam.is_published) {
+    return legacyUpdateExam(examId, formData);
+  }
+
+  const publishedStartMs = new Date(existingExam.start_time).getTime();
+  if (Number.isNaN(publishedStartMs) || publishedStartMs <= Date.now()) {
+    return {
+      error: "Нийтлэгдсэн шалгалтыг зөвхөн эхлэхээс өмнө өөрчлөх боломжтой",
+    };
+  }
+
+  const { count: sessionCount, error: sessionCountError } = await supabase
+    .from("exam_sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("exam_id", examId)
+    .in("status", ["in_progress", "submitted", "graded", "timed_out"]);
+
+  if (sessionCountError) {
+    return { error: sessionCountError.message };
+  }
+
+  if ((sessionCount ?? 0) > 0) {
+    return { error: "Энэ шалгалтад оролдлого эхэлсэн тул өөрчлөх боломжгүй" };
+  }
+
+  const start_time = toUlaanbaatarTimestamp(formData.get("start_time"));
+  const end_time = toUlaanbaatarTimestamp(formData.get("end_time"));
+  const subject_id = ((formData.get("subject_id") as string) || "").trim() || null;
+  const selectedGroupIds = Array.from(
+    new Set(
+      formData
+        .getAll("group_ids")
+        .map((value) => String(value).trim())
+        .filter(Boolean)
+    )
+  );
+  const legacyGroupId = ((formData.get("group_id") as string) || "").trim() || null;
+  const groupIds =
+    selectedGroupIds.length > 0
+      ? selectedGroupIds
+      : legacyGroupId
+        ? [legacyGroupId]
+        : [];
+
+  if (!start_time || !end_time) {
+    return { error: "Нээгдэх болон хаагдах хугацаагаа бүрэн оруулна уу" };
+  }
+
+  const startTimeMs = new Date(start_time).getTime();
+  const endTimeMs = new Date(end_time).getTime();
+  if (Number.isNaN(startTimeMs) || Number.isNaN(endTimeMs)) {
+    return { error: "Нээгдэх эсвэл хаагдах хугацаа буруу байна" };
+  }
+
+  if (startTimeMs >= endTimeMs) {
+    return { error: "Хаагдах хугацаа нь нээгдэх хугацаанаас хойш байх ёстой" };
+  }
+
+  const durationMinutes = parsePositiveInteger(formData.get("duration_minutes"));
+  if (!durationMinutes || durationMinutes <= 0) {
+    return { error: "Шалгалтын үргэлжлэх хугацаа 0-ээс их байх ёстой" };
+  }
+
+  const allowedIds = await getAllowedSubjectIds(supabase, user.id);
+  if (allowedIds !== null) {
+    if (!subject_id) {
+      return { error: "Хичээл заавал сонгоно уу" };
+    }
+
+    if (!allowedIds.includes(subject_id)) {
+      return {
+        error: "Энэ хичээлийн шалгалт үүсгэх эрх байхгүй байна",
+      };
+    }
+  }
+
+  if (groupIds.length > 0) {
+    if (allowedIds !== null) {
+      if (!subject_id) {
+        return { error: "Хичээл заавал сонгоно уу" };
+      }
+
+      const allowedGroupIds =
+        (await getAllowedGroupIds(supabase, user.id, subject_id)) ?? [];
+
+      const invalidGroupId = groupIds.find(
+        (groupId) => !allowedGroupIds.includes(groupId)
+      );
+      if (invalidGroupId) {
+        return {
+          error: "Энэ бүлэгт энэ хичээлийн шалгалт оноох эрх байхгүй байна",
+        };
+      }
+    }
+
+    const { data: groups } = await supabase
+      .from("student_groups")
+      .select("id")
+      .in("id", groupIds);
+
+    if ((groups ?? []).length !== groupIds.length) {
+      return { error: "Сонгосон бүлгийн зарим нь олдсонгүй" };
+    }
+  }
+
+  const title = String(formData.get("title") || "").trim();
+  if (!title) {
+    return { error: "Шалгалтын нэрээ бөглөнө үү" };
+  }
+
+  for (const groupId of groupIds) {
+    const conflictError = await getGroupAssignmentConflictError(
+      supabase,
+      groupId,
+      examId,
+      {
+        title: title || existingExam.title,
+        start_time,
+        end_time,
+        duration_minutes: durationMinutes,
+      }
+    );
+    if (conflictError) {
+      return { error: conflictError };
+    }
+  }
+
+  const { data: existingAssignments } = await supabase
+    .from("exam_assignments")
+    .select("group_id")
+    .eq("exam_id", examId);
+
+  const existingGroupIds = Array.from(
+    new Set((existingAssignments ?? []).map((row) => row.group_id))
+  );
+  const groupsToAdd = groupIds.filter(
+    (groupId) => !existingGroupIds.includes(groupId)
+  );
+  const groupsToRemove = existingGroupIds.filter(
+    (groupId) => !groupIds.includes(groupId)
+  );
+
+  const { data: previousRecipients } = await supabase
+    .from("exam_recipients")
+    .select("student_id")
+    .eq("exam_id", examId);
+  const previousRecipientIds = new Set(
+    (previousRecipients ?? []).map((row) => row.student_id)
+  );
+
+  const { error } = await supabase
+    .from("exams")
+    .update({
+      title,
+      description: formData.has("description")
+        ? String(formData.get("description") ?? "").trim() || null
+        : existingExam.description ?? null,
+      subject_id,
+      duration_minutes: durationMinutes,
+      start_time,
+      end_time,
+      passing_score: parseFloat(formData.get("passing_score") as string) || 60,
+      max_attempts: parseInt(formData.get("max_attempts") as string) || 1,
+      shuffle_questions: formData.has("shuffle_questions")
+        ? formData.get("shuffle_questions") === "on"
+        : existingExam.shuffle_questions,
+      shuffle_options: formData.has("shuffle_options")
+        ? formData.get("shuffle_options") === "on"
+        : existingExam.shuffle_options,
+    })
+    .eq("id", examId)
+    .eq("created_by", user.id);
+
+  if (error) return { error: error.message };
+
+  const addedGroupIds: string[] = [];
+  for (const groupId of groupsToAdd) {
+    const assignmentResult = await assignExamToGroupRecord(supabase, {
+      examId,
+      groupId,
+      assignedBy: user.id,
+    });
+
+    if ("error" in assignmentResult) {
+      if (addedGroupIds.length > 0) {
+        await supabase
+          .from("exam_assignments")
+          .delete()
+          .eq("exam_id", examId)
+          .in("group_id", addedGroupIds);
+      }
+      return { error: assignmentResult.error };
+    }
+
+    addedGroupIds.push(groupId);
+  }
+
+  if (groupsToRemove.length > 0) {
+    const { error: removeError } = await supabase
+      .from("exam_assignments")
+      .delete()
+      .eq("exam_id", examId)
+      .in("group_id", groupsToRemove);
+
+    if (removeError) {
+      return { error: removeError.message };
+    }
+  }
+
+  const syncResult = await syncExamRecipients(supabase, examId, user.id);
+  if (!syncResult.success) {
+    return { error: syncResult.error };
+  }
+
+  const snapshot = await buildPublishedExamSnapshot(supabase, examId);
+  if (!snapshot) {
+    return { error: "Шалгалтын snapshot шинэчилж чадсангүй" };
+  }
+
+  const publishedAt = existingExam.published_at ?? snapshot.exam.published_at;
+  const nextSnapshot = {
+    ...snapshot,
+    exam: {
+      ...snapshot.exam,
+      published_at: publishedAt,
+    },
+  };
+
+  const { error: snapshotError } = await supabase
+    .from("exams")
+    .update({
+      published_snapshot: nextSnapshot,
+      published_at: publishedAt,
+    })
+    .eq("id", examId)
+    .eq("created_by", user.id);
+
+  if (snapshotError && !isSnapshotColumnMissingError(snapshotError.code)) {
+    return { error: snapshotError.message };
+  }
+
+  await redis.del(getExamQuestionCacheKey(examId));
+
+  const { data: nextRecipients } = await supabase
+    .from("exam_recipients")
+    .select("student_id")
+    .eq("exam_id", examId);
+  const newStudentIds = (nextRecipients ?? [])
+    .map((row) => row.student_id)
+    .filter((studentId) => !previousRecipientIds.has(studentId));
+
+  if (newStudentIds.length > 0) {
+    notifyStudentsOfNewExam(examId, title, newStudentIds).catch(() => {});
+  }
+
+  revalidatePath("/educator");
+  revalidatePath(`/educator/exams/${examId}`);
+  revalidatePath(`/educator/exams/${examId}/edit`);
+  revalidatePath(`/educator/exams/${examId}/questions`);
+  revalidatePath("/student");
+  revalidatePath("/student/exams");
+  revalidatePath("/student/schedule");
+  revalidatePath("/student/results");
+  revalidatePath(`/student/exams/${examId}/take`);
+  revalidatePath(`/student/exams/${examId}/result`);
+
   return { success: true };
 }
 
