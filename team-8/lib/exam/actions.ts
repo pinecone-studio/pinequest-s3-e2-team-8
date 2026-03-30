@@ -888,13 +888,13 @@ export async function getExamResults(examId: string) {
     supabase
       .from("exam_recipients")
       .select(
-        "student_id, access_start_time, access_end_time, max_attempts_override, excused_at, status_note, profiles:profiles!exam_recipients_student_id_fkey(full_name, email)"
+        "student_id, access_start_time, access_end_time, max_attempts_override, excused_at, status_note, profiles:profiles!exam_recipients_student_id_fkey(full_name, email, avatar_url)"
       )
       .eq("exam_id", examId),
     supabase
       .from("exam_sessions")
       .select(
-        "id, user_id, status, total_score, max_score, submitted_at, started_at, attempt_number, profiles(full_name, email)"
+        "id, user_id, status, total_score, max_score, submitted_at, started_at, attempt_number, profiles(full_name, email, avatar_url)"
       )
       .eq("exam_id", examId)
       .in("status", ["in_progress", "submitted", "graded", "timed_out"])
@@ -960,10 +960,25 @@ export async function getExamResults(examId: string) {
 
   const passingScore = exam.passing_score ?? 60;
   const nowMs = Date.now();
+  const bestSessionIds = Array.from(
+    new Set(
+      Array.from(bestSessionByStudent.values())
+        .map((session) => session.id)
+        .filter(Boolean)
+    )
+  );
   const normalizeProfile = (
     profile:
-      | { full_name: string | null; email: string | null }
-      | Array<{ full_name: string | null; email: string | null }>
+      | {
+          full_name: string | null;
+          email: string | null;
+          avatar_url: string | null;
+        }
+      | Array<{
+          full_name: string | null;
+          email: string | null;
+          avatar_url: string | null;
+        }>
       | null
       | undefined
   ) => (Array.isArray(profile) ? profile[0] ?? null : profile ?? null);
@@ -1023,6 +1038,8 @@ export async function getExamResults(examId: string) {
         recipientProfile?.email ??
         sessionProfile?.email ??
         "—",
+      student_avatar_url:
+        recipientProfile?.avatar_url ?? sessionProfile?.avatar_url ?? null,
       total_score: isAttempted ? totalScore : null,
       max_score: isAttempted ? maxScore : null,
       percentage: isAttempted ? percentage : null,
@@ -1055,6 +1072,43 @@ export async function getExamResults(examId: string) {
         )
       : 0;
 
+  const [questionsResult, answersResult] = await Promise.all([
+    supabase
+      .from("questions")
+      .select("id, content, points, order_index, type")
+      .eq("exam_id", examId)
+      .order("order_index", { ascending: true }),
+    bestSessionIds.length > 0
+      ? supabase
+          .from("answers")
+          .select("session_id, question_id, answer, score, is_correct")
+          .in("session_id", bestSessionIds)
+      : Promise.resolve({
+          data: [] as Array<{
+            session_id: string;
+            question_id: string;
+            answer: string | null;
+            score: number | null;
+            is_correct: boolean | null;
+          }>,
+          error: null,
+        }),
+  ]);
+
+  if (questionsResult.error) {
+    console.error("Failed to load exam questions for results analytics", {
+      examId,
+      error: questionsResult.error,
+    });
+  }
+
+  if (answersResult.error) {
+    console.error("Failed to load exam answers for results analytics", {
+      examId,
+      error: answersResult.error,
+    });
+  }
+
   return {
     exam: {
       id: exam.id,
@@ -1078,6 +1132,23 @@ export async function getExamResults(examId: string) {
           ? Math.round((passCount / attemptedRows.length) * 100)
           : 0,
     },
+    questions:
+      (questionsResult.data ?? []).map((question) => ({
+        id: String(question.id),
+        content: String(question.content ?? ""),
+        points: Number(question.points ?? 0),
+        order_index: Number(question.order_index ?? 0),
+        type: String(question.type ?? ""),
+      })) ?? [],
+    answers:
+      (answersResult.data ?? []).map((answer) => ({
+        session_id: String(answer.session_id),
+        question_id: String(answer.question_id),
+        answer: answer.answer ?? null,
+        score: answer.score === null ? null : Number(answer.score),
+        is_correct:
+          typeof answer.is_correct === "boolean" ? answer.is_correct : null,
+      })) ?? [],
     groups: visibleGroups,
   };
 }
