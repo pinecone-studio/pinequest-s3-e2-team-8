@@ -34,6 +34,7 @@ import {
 } from "@/lib/proctoring";
 import { useCameraMonitor } from "@/hooks/useCameraMonitor";
 import { useGazeMonitor } from "@/hooks/useGazeMonitor";
+import type { ExamRuntimeReadiness } from "./runtime-readiness";
 
 const REQUIRE_SEB = false;
 
@@ -73,20 +74,6 @@ interface ExamTakerProps {
   runtimeReadiness: ExamRuntimeReadiness | null;
 }
 
-interface ExamRuntimeReadiness {
-  isDesktop: boolean;
-  deviceType: StudentDeviceType;
-  displayMode: ProctorDisplayMode;
-  orientation: "portrait" | "landscape";
-  isStandalonePwa: boolean;
-  platform: string;
-  fullscreenReady: boolean;
-  cameraReady: boolean;
-  identityVerified: boolean;
-  brightnessScore: number | null;
-  identityHash: string | null;
-}
-
 function getShuffleWeight(seed: string, questionId: string) {
   let hash = 2166136261;
   const value = `${seed}:${questionId}`;
@@ -123,6 +110,37 @@ function getDisplayOptions(
     (a, b) =>
       getShuffleWeight(seed, a) - getShuffleWeight(seed, b)
   );
+}
+
+function buildDirtyAnswerDelta(
+  currentAnswers: Record<string, string>,
+  lastCheckpoint: Record<string, string>,
+  currentAnalytics: Record<string, AnswerChangeAnalytics>
+) {
+  const answers: Record<string, string> = {};
+  const answerAnalytics: Record<string, AnswerChangeAnalytics> = {};
+
+  for (const [questionId, answer] of Object.entries(currentAnswers)) {
+    if (lastCheckpoint[questionId] !== answer) {
+      answers[questionId] = answer;
+      answerAnalytics[questionId] = currentAnalytics[questionId] ?? {
+        firstAnsweredAt: null,
+        lastChangedAt: null,
+        changeCount: 0,
+      };
+    }
+  }
+
+  for (const questionId of Object.keys(lastCheckpoint)) {
+    if (!(questionId in currentAnswers)) {
+      answers[questionId] = "";
+      if (currentAnalytics[questionId]) {
+        answerAnalytics[questionId] = currentAnalytics[questionId];
+      }
+    }
+  }
+
+  return { answers, answerAnalytics };
 }
 
 function parseStoredArray(value: string | undefined) {
@@ -655,27 +673,8 @@ export default function ExamTaker({
     const currentAnswers = answersRef.current;
     const lastCheckpoint = lastCheckpointRef.current;
     const currentAnalytics = answerAnalyticsRef.current;
-
-    const dirty: Record<string, string> = {};
-    const dirtyAnalytics: Record<string, AnswerChangeAnalytics> = {};
-    for (const [qId, answer] of Object.entries(currentAnswers)) {
-      if (lastCheckpoint[qId] !== answer) {
-        dirty[qId] = answer;
-        dirtyAnalytics[qId] = currentAnalytics[qId] ?? {
-          firstAnsweredAt: null,
-          lastChangedAt: null,
-          changeCount: 0,
-        };
-      }
-    }
-    for (const qId of Object.keys(lastCheckpoint)) {
-      if (!(qId in currentAnswers)) {
-        dirty[qId] = "";
-        if (currentAnalytics[qId]) {
-          dirtyAnalytics[qId] = currentAnalytics[qId];
-        }
-      }
-    }
+    const { answers: dirty, answerAnalytics: dirtyAnalytics } =
+      buildDirtyAnswerDelta(currentAnswers, lastCheckpoint, currentAnalytics);
 
     if (Object.keys(dirty).length === 0) return;
 
@@ -704,11 +703,19 @@ export default function ExamTaker({
     setIsSubmitting(true);
 
     await flushPendingAnswers();
-    const result = await submitExam(
-      sessionId,
+    const pendingDelta = buildDirtyAnswerDelta(
       { ...answersRef.current },
+      lastCheckpointRef.current,
       { ...answerAnalyticsRef.current }
     );
+    const result =
+      Object.keys(pendingDelta.answers).length > 0
+        ? await submitExam(
+            sessionId,
+            pendingDelta.answers,
+            pendingDelta.answerAnalytics
+          )
+        : await submitExam(sessionId);
     if ("success" in result && result.success) {
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(draftStorageKey);

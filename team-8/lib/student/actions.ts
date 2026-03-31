@@ -51,6 +51,7 @@ import {
   isStrictProctoredExam,
 } from "@/lib/proctoring";
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+type SupabaseActionClient = Pick<SupabaseServerClient, "from" | "rpc">;
 type ProctorEventMetadata = Record<
   string,
   string | number | boolean | null
@@ -157,6 +158,22 @@ type PrepareExamTakePayloadResult =
       sessionAlreadyStarted: boolean;
     };
 
+type ExamStartGatePayloadResult =
+  | { error: string }
+  | { redirectTo: string }
+  | {
+      exam: StudentAssignedExam & Record<string, unknown>;
+    };
+
+type StartExamAttemptResult =
+  | { error: string }
+  | { redirectTo: string }
+  | {
+      sessionId: string;
+      startedAt: string;
+      initialTimeLeftSeconds: number | null;
+    };
+
 export type StudentAssignedExam = StudentExamBase & {
   mySessionStatus: string | null;
   myLifecycleStatus: string;
@@ -241,8 +258,8 @@ function getStartSessionLockKey(examId: string, userId: string) {
   return `lock:exam-start:${examId}:user:${userId}`;
 }
 
-function getSubmitSessionLockKey(sessionId: string) {
-  return `lock:exam-submit:${sessionId}`;
+function getSubmitSessionLockKey(sessionId: string, userId: string) {
+  return `lock:exam-submit:${sessionId}:user:${userId}`;
 }
 
 function getExamPayloadCacheTtlSeconds(
@@ -280,8 +297,25 @@ async function getInProgressSession(
   return data;
 }
 
-async function getSessionMeta(
+async function getOwnedSessionById(
   supabase: SupabaseServerClient,
+  sessionId: string,
+  examId: string,
+  userId: string
+) {
+  const { data } = await supabase
+    .from("exam_sessions")
+    .select("id, started_at, status")
+    .eq("id", sessionId)
+    .eq("exam_id", examId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  return data;
+}
+
+async function getSessionMeta(
+  supabase: SupabaseActionClient,
   sessionId: string,
   userId: string
 ) {
@@ -319,46 +353,18 @@ async function cacheSessionMeta(sessionId: string, userId: string, status: strin
   );
 }
 
-async function replaceSessionDraftAnswers(
-  sessionId: string,
-  userId: string,
-  answers: Record<string, string>,
-  answerAnalytics: Record<string, AnswerChangeAnalytics> = {}
+function getInitialTimeLeftSeconds(
+  startedAt: string | null | undefined,
+  exam: Pick<StudentAssignedExam, "end_time" | "duration_minutes">
 ) {
-  const redisKey = getSessionAnswersCacheKey(sessionId, userId);
-  const analyticsKey = getSessionAnswerMetaCacheKey(sessionId, userId);
-  const sanitizedEntries = Object.entries(answers).filter(
-    ([questionId, answer]) =>
-      questionId.trim() !== "" && String(answer ?? "").trim() !== ""
-  );
-  const sanitizedAnalytics = Object.entries(answerAnalytics).filter(
-    ([questionId]) => questionId.trim() !== ""
-  );
+  const sessionDeadlineMs = getSessionDeadlineMs(startedAt, {
+    end_time: exam.end_time,
+    duration_minutes: Number(exam.duration_minutes ?? 0),
+  });
 
-  await redis.del(redisKey);
-  await redis.del(analyticsKey);
-
-  if (sanitizedEntries.length === 0) {
-    if (sanitizedAnalytics.length === 0) {
-      return;
-    }
-  } else {
-    await redis.hset(redisKey, Object.fromEntries(sanitizedEntries));
-    await redis.expire(redisKey, 7200);
-  }
-
-  if (sanitizedAnalytics.length > 0) {
-    await redis.hset(
-      analyticsKey,
-      Object.fromEntries(
-        sanitizedAnalytics.map(([questionId, analytics]) => [
-          questionId,
-          JSON.stringify(analytics),
-        ])
-      )
-    );
-    await redis.expire(analyticsKey, 7200);
-  }
+  return sessionDeadlineMs === null
+    ? null
+    : Math.max(Math.floor((sessionDeadlineMs - Date.now()) / 1000), 0);
 }
 
 async function getSessionAnswerAnalyticsForUser(
@@ -396,7 +402,7 @@ async function getSessionAnswerAnalyticsForUser(
 }
 
 async function getAssignedPublishedExamRows(
-  supabase: SupabaseServerClient,
+  supabase: SupabaseActionClient,
   userId: string,
   examId?: string
 ) {
@@ -486,7 +492,7 @@ function mergeAssignedExamAccess(
 }
 
 async function getAssignedPublishedExamRecord(
-  supabase: SupabaseServerClient,
+  supabase: SupabaseActionClient,
   userId: string,
   examId: string
 ) {
@@ -501,7 +507,7 @@ async function getAssignedPublishedExamRecord(
 }
 
 async function loadStudentExamPayload(
-  supabase: SupabaseServerClient,
+  supabase: SupabaseActionClient,
   examId: string,
   assignedExam: NonNullable<
     Awaited<ReturnType<typeof getAssignedPublishedExamRecord>>
@@ -531,7 +537,10 @@ async function loadStudentExamPayload(
     };
   }
 
-  const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
+  const snapshot = await getStoredPublishedExamSnapshot(
+    supabase as SupabaseServerClient,
+    examId
+  );
   if (snapshot) {
     const result = {
       exam: {
@@ -563,7 +572,7 @@ async function loadStudentExamPayload(
     >
   );
   const passageAwareQuestions = (await attachPassagesToQuestions(
-    supabase,
+    supabase as SupabaseServerClient,
     safeQuestions
   )) as StudentSafeQuestion[];
   const result = { exam, questions: passageAwareQuestions };
@@ -613,7 +622,7 @@ function applyVariantToStudentSafeQuestion(
 }
 
 async function getEffectiveExamAccessForStudent(
-  supabase: SupabaseServerClient,
+  supabase: SupabaseActionClient,
   userId: string,
   examId: string
 ) {
@@ -704,51 +713,6 @@ function canAttemptExamAgain(lifecycleStatus: string | null | undefined) {
   );
 }
 
-function normalizeTextAnswer(value: string | null | undefined) {
-  return String(value ?? "").trim().toLowerCase();
-}
-
-function parseAnswerArray(value: string | null | undefined) {
-  try {
-    const parsed = JSON.parse(String(value ?? "[]")) as string[];
-    return Array.isArray(parsed)
-      ? parsed.map((item) => normalizeTextAnswer(item)).filter(Boolean).sort()
-      : [];
-  } catch {
-    return String(value ?? "")
-      .split(",")
-      .map((item) => normalizeTextAnswer(item))
-      .filter(Boolean)
-      .sort();
-  }
-}
-
-function areArraysEqual(left: string[], right: string[]) {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
-  );
-}
-
-function parseMatchingPairs(options: unknown) {
-  if (!Array.isArray(options)) return [];
-
-  return options
-    .map((option) => {
-      const [left, ...rightParts] = String(option).split("|||");
-      const right = rightParts.join("|||");
-      if (!left || !right) return null;
-
-      return {
-        left,
-        right: normalizeTextAnswer(right),
-      };
-    })
-    .filter(
-      (item): item is { left: string; right: string } => Boolean(item)
-    );
-}
-
 function parseMatchingDisplayPairs(options: unknown) {
   if (!Array.isArray(options)) return [];
 
@@ -790,6 +754,185 @@ function getStudentSafeQuestions<
 
     return safeQuestion;
   });
+}
+
+function tryParseJson<T>(value: string | null | undefined) {
+  if (!value) return null;
+
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeTextAnswer(value: string | null | undefined) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function normalizeAnswerArray(value: string | null | undefined) {
+  const parsed = tryParseJson<unknown>(value);
+
+  if (Array.isArray(parsed)) {
+    return parsed
+      .map((entry) => normalizeTextAnswer(String(entry ?? "")))
+      .filter(Boolean)
+      .sort();
+  }
+
+  return String(value ?? "")
+    .split(",")
+    .map((entry) => normalizeTextAnswer(entry))
+    .filter(Boolean)
+    .sort();
+}
+
+function areArraysEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+
+  return true;
+}
+
+function isMatchingAnswerCorrect(
+  submittedAnswer: string | null | undefined,
+  options: string[] | null | undefined
+) {
+  const parsed = tryParseJson<Record<string, unknown>>(submittedAnswer);
+  if (!parsed || Array.isArray(parsed)) return false;
+
+  const matchingPairs = parseMatchingDisplayPairs(options);
+  if (matchingPairs.length === 0) return false;
+
+  return matchingPairs.every((pair) => {
+    const submittedValue = parsed[pair.left];
+    return (
+      normalizeTextAnswer(String(submittedValue ?? "")) ===
+      normalizeTextAnswer(pair.right)
+    );
+  });
+}
+
+function isFinalizeExamSessionAtomicMissing(error: {
+  code?: string | null;
+  message?: string | null;
+  details?: string | null;
+}) {
+  const normalized = `${String(error.message ?? "")} ${String(
+    error.details ?? ""
+  )}`.toLowerCase();
+
+  return (
+    error.code === "42883" ||
+    (normalized.includes("finalize_exam_session_atomic") &&
+      (normalized.includes("could not find the function") ||
+        normalized.includes("does not exist") ||
+        normalized.includes("schema cache")))
+  );
+}
+
+type FinalizeAnswerPayload = {
+  question_id: string;
+  answer: string;
+  first_answered_at: string | null;
+  last_changed_at: string | null;
+  change_count: number;
+};
+
+type FinalizeQuestionRecord = {
+  id: string;
+  type: string;
+  content: string;
+  content_html: string | null;
+  image_url: string | null;
+  options: string[] | null;
+  correct_answer: string | null;
+  explanation: string | null;
+  points: number;
+  order_index: number;
+};
+
+async function loadFinalizeQuestionContext(
+  supabase: SupabaseActionClient,
+  examId: string
+) {
+  const snapshot = await getStoredPublishedExamSnapshot(
+    supabase as SupabaseServerClient,
+    examId
+  );
+
+  if (snapshot) {
+    return {
+      questionMap: getSnapshotQuestionMap(snapshot) as Map<
+        string,
+        FinalizeQuestionRecord
+      >,
+      maxScore: Number(snapshot.stats.total_points ?? 0),
+      hasEssay: Boolean(snapshot.stats.has_essay_questions),
+    };
+  }
+
+  const { data: questions, error } = await supabase
+    .from("questions")
+    .select(
+      "id, type, content, content_html, image_url, options, correct_answer, explanation, points, order_index"
+    )
+    .eq("exam_id", examId)
+    .order("order_index", { ascending: true });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  const rows = (questions ?? []) as FinalizeQuestionRecord[];
+
+  return {
+    questionMap: new Map(rows.map((question) => [question.id, question])),
+    maxScore: rows.reduce(
+      (sum, question) => sum + Number(question.points ?? 0),
+      0
+    ),
+    hasEssay: rows.some((question) => question.type === "essay"),
+  };
+}
+
+function gradeAnswerForFinalize(
+  question: FinalizeQuestionRecord,
+  answer: string,
+  existingScore: number | null | undefined
+) {
+  const questionPoints = Number(question.points ?? 0);
+
+  if (question.type === "essay") {
+    return {
+      isCorrect: null,
+      score: Number(existingScore ?? 0),
+    };
+  }
+
+  if (question.type === "multiple_choice" || question.type === "fill_blank") {
+    const isCorrect =
+      normalizeTextAnswer(answer) === normalizeTextAnswer(question.correct_answer);
+    return { isCorrect, score: isCorrect ? questionPoints : 0 };
+  }
+
+  if (question.type === "multiple_response") {
+    const isCorrect = areArraysEqual(
+      normalizeAnswerArray(answer),
+      normalizeAnswerArray(question.correct_answer)
+    );
+    return { isCorrect, score: isCorrect ? questionPoints : 0 };
+  }
+
+  if (question.type === "matching") {
+    const isCorrect = isMatchingAnswerCorrect(answer, question.options);
+    return { isCorrect, score: isCorrect ? questionPoints : 0 };
+  }
+
+  return { isCorrect: false, score: 0 };
 }
 
 /**
@@ -888,21 +1031,23 @@ export async function getExamForStudent(examId: string) {
 
 type FinalizeSessionReason = "submit" | "timeout";
 
-async function finalizeSessionAttempt(
-  supabase: SupabaseServerClient,
+async function finalizeSessionAttemptFallback(
+  supabase: SupabaseActionClient,
   {
     sessionId,
     examId,
     userId,
     reason,
+    answersPayload,
   }: {
     sessionId: string;
     examId: string;
     userId: string;
     reason: FinalizeSessionReason;
+    answersPayload: FinalizeAnswerPayload[];
   }
 ) {
-  const lockKey = getSubmitSessionLockKey(sessionId);
+  const lockKey = getSubmitSessionLockKey(sessionId, userId);
   const lockAcquired = await redis.set(lockKey, "1", {
     ex: 30,
     nx: true,
@@ -917,340 +1062,334 @@ async function finalizeSessionAttempt(
       .maybeSingle();
 
     if (lockedSession && lockedSession.status !== "in_progress") {
-      await cacheSessionMeta(sessionId, userId, lockedSession.status);
       const totalScore = Number(lockedSession.total_score ?? 0);
       const maxScore = Number(lockedSession.max_score ?? 0);
-
       return {
         success: true as const,
-        finalStatus: lockedSession.status,
+        finalStatus: String(lockedSession.status),
         totalScore,
         maxScore,
         percentage: getPercentage(totalScore, maxScore),
       };
     }
 
-    return {
-      error:
-        reason === "timeout"
-          ? "Өмнөх шалгалтын төлөвийг шинэчилж байна. Түр хүлээгээд дахин оролдоно уу."
-          : "Шалгалтыг илгээж байна. Түр хүлээгээд дахин оролдоно уу.",
-    };
+    return { error: "Шалгалтыг илгээж байна. Дахин оролдоно уу." };
   }
 
   try {
-    const { data: currentSession } = await supabase
+    const { data: session, error: sessionError } = await supabase
       .from("exam_sessions")
-      .select("status, total_score, max_score")
+      .select("id, status, total_score, max_score")
       .eq("id", sessionId)
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (!currentSession) return { error: "Session олдсонгүй" };
+    if (sessionError) return { error: sessionError.message };
+    if (!session) return { error: "Session олдсонгүй" };
 
-    if (currentSession.status !== "in_progress") {
-      await cacheSessionMeta(sessionId, userId, currentSession.status);
-      const totalScore = Number(currentSession.total_score ?? 0);
-      const maxScore = Number(currentSession.max_score ?? 0);
-
+    if (session.status !== "in_progress") {
+      const totalScore = Number(session.total_score ?? 0);
+      const maxScore = Number(session.max_score ?? 0);
       return {
         success: true as const,
-        finalStatus: currentSession.status,
+        finalStatus: String(session.status),
         totalScore,
         maxScore,
         percentage: getPercentage(totalScore, maxScore),
       };
     }
 
-    const redisKey = getSessionAnswersCacheKey(sessionId, userId);
-    const analyticsKey = getSessionAnswerMetaCacheKey(sessionId, userId);
-    const [redisAnswers, redisAnswerMeta] = await Promise.all([
-      redis.hgetall(redisKey),
-      redis.hgetall(analyticsKey),
-    ]);
-    if (redisAnswers && Object.keys(redisAnswers).length > 0) {
-      const rows = Object.entries(redisAnswers).map(([questionId, answer]) => {
-        const rawAnalytics = redisAnswerMeta?.[questionId];
-        let parsedAnalytics: AnswerChangeAnalytics = {
-          firstAnsweredAt: null,
-          lastChangedAt: null,
-          changeCount: 0,
-        };
+    if (answersPayload.length > 0) {
+      const { error: answerUpsertError } = await supabase.from("answers").upsert(
+        answersPayload.map((answer) => ({
+          session_id: sessionId,
+          question_id: answer.question_id,
+          user_id: userId,
+          answer: answer.answer,
+          first_answered_at: answer.first_answered_at,
+          last_changed_at: answer.last_changed_at,
+          change_count: answer.change_count,
+        })),
+        { onConflict: "session_id,question_id" }
+      );
 
-        if (typeof rawAnalytics === "string") {
-          try {
-            const parsed = JSON.parse(rawAnalytics) as AnswerChangeAnalytics;
-            parsedAnalytics = {
-              firstAnsweredAt:
-                typeof parsed.firstAnsweredAt === "string"
-                  ? parsed.firstAnsweredAt
-                  : null,
-              lastChangedAt:
-                typeof parsed.lastChangedAt === "string"
-                  ? parsed.lastChangedAt
-                  : null,
-              changeCount: Number(parsed.changeCount ?? 0),
-            };
-          } catch {
-            parsedAnalytics = {
-              firstAnsweredAt: null,
-              lastChangedAt: null,
-              changeCount: 0,
-            };
-          }
-        }
+      if (answerUpsertError) return { error: answerUpsertError.message };
+    }
+
+    const [questionContext, answerRowsResult, questionVariantMap] =
+      await Promise.all([
+        loadFinalizeQuestionContext(supabase, examId),
+        supabase
+          .from("answers")
+          .select(
+            "question_id, answer, score, first_answered_at, last_changed_at, change_count"
+          )
+          .eq("session_id", sessionId),
+        getSessionQuestionVariantMap(supabase as SupabaseServerClient, sessionId),
+      ]);
+
+    if ("error" in questionContext) return { error: questionContext.error };
+    if (answerRowsResult.error) return { error: answerRowsResult.error.message };
+
+    let totalScore = 0;
+    const gradedAnswerRows = (answerRowsResult.data ?? [])
+      .map((answerRow) => {
+        const baseQuestion = questionContext.questionMap.get(
+          String(answerRow.question_id)
+        );
+        if (!baseQuestion) return null;
+
+        const effectiveQuestion = applyStoredVariantToQuestion(
+          baseQuestion,
+          questionVariantMap.get(String(answerRow.question_id))
+        );
+        const graded = gradeAnswerForFinalize(
+          effectiveQuestion,
+          String(answerRow.answer ?? ""),
+          Number(answerRow.score ?? 0)
+        );
+
+        totalScore += graded.score;
 
         return {
           session_id: sessionId,
-          question_id: questionId,
+          question_id: String(answerRow.question_id),
           user_id: userId,
-          answer: String(answer),
-          first_answered_at: parsedAnalytics.firstAnsweredAt,
-          last_changed_at: parsedAnalytics.lastChangedAt,
-          change_count: parsedAnalytics.changeCount,
+          answer: String(answerRow.answer ?? ""),
+          first_answered_at: answerRow.first_answered_at,
+          last_changed_at: answerRow.last_changed_at,
+          change_count: Number(answerRow.change_count ?? 0),
+          is_correct: graded.isCorrect,
+          score: graded.score,
         };
-      });
-
-      const { error: flushError } = await supabase.from("answers").upsert(rows, {
-        onConflict: "session_id,question_id",
-      });
-
-      if (flushError) return { error: flushError.message };
-    }
-
-    const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
-    const snapshotQuestionMap = getSnapshotQuestionMap(snapshot);
-
-    const [{ data: answers }, { data: questions }, questionVariantMap] =
-      await Promise.all([
-      supabase
-        .from("answers")
-        .select("session_id, question_id, user_id, answer, score")
-        .eq("session_id", sessionId),
-      snapshot
-        ? Promise.resolve({
-            data: snapshot.questions.map((question) => ({
-              id: question.id,
-              type: question.type,
-              content: question.content,
-              content_html: question.content_html,
-              image_url: question.image_url,
-              points: question.points,
-              correct_answer: question.correct_answer,
-              options: question.options,
-              explanation: question.explanation,
-            })),
-          })
-        : supabase
-            .from("questions")
-            .select(
-              "id, type, content, content_html, image_url, points, correct_answer, options, explanation"
-            )
-            .eq("exam_id", examId),
-      getSessionQuestionVariantMap(supabase, sessionId),
-    ]);
-
-    let totalScore = 0;
-    const maxScore =
-      snapshot?.stats.total_points ??
-      (questions ?? []).reduce(
-        (sum, question) => sum + Number(question.points ?? 0),
-        0
+      })
+      .filter(
+        (
+          row
+        ): row is {
+          session_id: string;
+          question_id: string;
+          user_id: string;
+          answer: string;
+          first_answered_at: string | null;
+          last_changed_at: string | null;
+          change_count: number;
+          is_correct: boolean | null;
+          score: number;
+        } => Boolean(row)
       );
 
-    const gradedAnswers: Array<{
-      session_id: string;
-      question_id: string;
-      user_id: string;
-      answer: string | null;
-      is_correct: boolean;
-      score: number;
-    }> = [];
+    if (gradedAnswerRows.length > 0) {
+      const { error: gradedUpsertError } = await supabase.from("answers").upsert(
+        gradedAnswerRows,
+        { onConflict: "session_id,question_id" }
+      );
 
-    for (const ans of answers ?? []) {
-      const baseQuestion =
-        snapshotQuestionMap.get(ans.question_id) ??
-        (questions ?? []).find((item) => item.id === ans.question_id);
-      const question = baseQuestion
-        ? applyStoredVariantToQuestion(
-            baseQuestion,
-            questionVariantMap.get(String(ans.question_id))
-          )
-        : null;
-      if (!question) continue;
-
-      if (
-        question.type === "multiple_choice" ||
-        question.type === "fill_blank"
-      ) {
-        const isCorrect =
-          normalizeTextAnswer(ans.answer) ===
-          normalizeTextAnswer(question.correct_answer);
-        const score = isCorrect ? Number(question.points ?? 0) : 0;
-        totalScore += score;
-        gradedAnswers.push({
-          session_id: String(ans.session_id),
-          question_id: String(ans.question_id),
-          user_id: String(ans.user_id),
-          answer: (ans.answer as string | null) ?? null,
-          is_correct: isCorrect,
-          score,
-        });
-      } else if (question.type === "multiple_response") {
-        const normalizedSubmittedAnswers = parseAnswerArray(ans.answer);
-        const isCorrect = areArraysEqual(
-          normalizedSubmittedAnswers,
-          parseAnswerArray(question.correct_answer)
-        );
-        const score = isCorrect ? Number(question.points ?? 0) : 0;
-        totalScore += score;
-        gradedAnswers.push({
-          session_id: String(ans.session_id),
-          question_id: String(ans.question_id),
-          user_id: String(ans.user_id),
-          answer:
-            normalizedSubmittedAnswers.length > 0
-              ? JSON.stringify(normalizedSubmittedAnswers)
-              : null,
-          is_correct: isCorrect,
-          score,
-        });
-      } else if (question.type === "matching") {
-        let submittedAnswer: Record<string, string> = {};
-
-        try {
-          submittedAnswer = JSON.parse(String(ans.answer ?? "{}")) as Record<
-            string,
-            string
-          >;
-        } catch {
-          submittedAnswer = {};
-        }
-
-        const expectedPairs = parseMatchingPairs(question.options);
-        const isCorrect =
-          expectedPairs.length > 0 &&
-          expectedPairs.every(
-            (pair) =>
-              normalizeTextAnswer(submittedAnswer[pair.left]) === pair.right
-          );
-        const score = isCorrect ? Number(question.points ?? 0) : 0;
-        totalScore += score;
-        gradedAnswers.push({
-          session_id: String(ans.session_id),
-          question_id: String(ans.question_id),
-          user_id: String(ans.user_id),
-          answer: (ans.answer as string | null) ?? null,
-          is_correct: isCorrect,
-          score,
-        });
-      } else {
-        totalScore += Number(ans.score ?? 0);
-      }
+      if (gradedUpsertError) return { error: gradedUpsertError.message };
     }
 
-    if (gradedAnswers.length > 0) {
-      const BATCH_SIZE = 50;
-      for (let i = 0; i < gradedAnswers.length; i += BATCH_SIZE) {
-        const batch = gradedAnswers.slice(i, i + BATCH_SIZE);
-        const { error: batchUpsertError } = await supabase
-          .from("answers")
-          .upsert(batch, {
-            onConflict: "session_id,question_id",
-          });
+    const finalStatus = questionContext.hasEssay
+      ? "submitted"
+      : reason === "timeout"
+        ? "timed_out"
+        : "graded";
 
-        if (batchUpsertError) {
-          return {
-            error: `Хариултын оноо хадгалахад алдаа: ${batchUpsertError.message}`,
-          };
-        }
-      }
-    }
-
-    const hasEssayQuestions =
-      snapshot?.stats.has_essay_questions ??
-      (questions ?? []).some((question) => question.type === "essay");
-    const finalStatus =
-      reason === "timeout"
-        ? hasEssayQuestions
-          ? "submitted"
-          : "timed_out"
-        : hasEssayQuestions
-          ? "submitted"
-          : "graded";
-
-    const { data: updatedRows, error: updateError } = await supabase
+    const { error: sessionUpdateError } = await supabase
       .from("exam_sessions")
       .update({
         status: finalStatus,
         submitted_at: new Date().toISOString(),
         total_score: totalScore,
-        max_score: maxScore,
+        max_score: questionContext.maxScore,
       })
       .eq("id", sessionId)
-      .eq("status", "in_progress")
-      .select("id, status, total_score, max_score");
+      .eq("status", "in_progress");
 
-    if (updateError) return { error: updateError.message };
+    if (sessionUpdateError) return { error: sessionUpdateError.message };
 
-    if (!updatedRows || updatedRows.length === 0) {
-      const { data: existingSession } = await supabase
-        .from("exam_sessions")
-        .select("status, total_score, max_score")
-        .eq("id", sessionId)
-        .eq("user_id", userId)
-        .maybeSingle();
+    return {
+      success: true as const,
+      finalStatus,
+      totalScore,
+      maxScore: questionContext.maxScore,
+      percentage: getPercentage(totalScore, questionContext.maxScore),
+    };
+  } finally {
+    await redis.del(lockKey);
+  }
+}
 
-      if (existingSession && existingSession.status !== "in_progress") {
-        await cacheSessionMeta(sessionId, userId, existingSession.status);
-        const totalScore = Number(existingSession.total_score ?? 0);
-        const maxScore = Number(existingSession.max_score ?? 0);
+async function finalizeSessionAttempt(
+  supabase: SupabaseActionClient,
+  {
+    sessionId,
+    examId,
+    userId,
+    reason,
+    skipPostFinalizeSideEffects = false,
+  }: {
+    sessionId: string;
+    examId: string;
+    userId: string;
+    reason: FinalizeSessionReason;
+    skipPostFinalizeSideEffects?: boolean;
+  }
+) {
+  // 1. Redis-аас хариултуудыг pipeline-аар авах
+  const redisKey = getSessionAnswersCacheKey(sessionId, userId);
+  const analyticsKey = getSessionAnswerMetaCacheKey(sessionId, userId);
 
-        return {
-          success: true as const,
-          finalStatus: existingSession.status,
-          totalScore,
-          maxScore,
-          percentage: getPercentage(totalScore, maxScore),
-        };
+  const fetchPipe = redis.pipeline();
+  fetchPipe.hgetall(redisKey);
+  fetchPipe.hgetall(analyticsKey);
+  const [redisAnswers, redisAnswerMeta] = (await fetchPipe.exec()) as [
+    Record<string, string> | null,
+    Record<string, string> | null,
+  ];
+
+  // 2. Хариултуудыг JSONB array болгох (RPC-д дамжуулахад бэлэн)
+  const answersPayload: FinalizeAnswerPayload[] = [];
+
+  if (redisAnswers && Object.keys(redisAnswers).length > 0) {
+    for (const [questionId, answer] of Object.entries(redisAnswers)) {
+      let firstAnsweredAt: string | null = null;
+      let lastChangedAt: string | null = null;
+      let changeCount = 0;
+
+      const rawAnalytics = redisAnswerMeta?.[questionId];
+      if (typeof rawAnalytics === "string") {
+        try {
+          const parsed = JSON.parse(rawAnalytics) as AnswerChangeAnalytics;
+          firstAnsweredAt =
+            typeof parsed.firstAnsweredAt === "string"
+              ? parsed.firstAnsweredAt
+              : null;
+          lastChangedAt =
+            typeof parsed.lastChangedAt === "string"
+              ? parsed.lastChangedAt
+              : null;
+          changeCount = Number(parsed.changeCount ?? 0);
+        } catch {
+          // ignore parse errors
+        }
       }
 
-      return { error: "Шалгалтын session шинэчлэгдсэнгүй. Дахин оролдоно уу." };
+      answersPayload.push({
+        question_id: questionId,
+        answer: String(answer),
+        first_answered_at: firstAnsweredAt,
+        last_changed_at: lastChangedAt,
+        change_count: changeCount,
+      });
     }
+  }
 
-    await Promise.all([redis.del(redisKey), redis.del(analyticsKey)]);
-    await cacheSessionMeta(sessionId, userId, finalStatus);
-
-    revalidatePath("/student");
-    revalidatePath("/student/exams");
-    revalidatePath("/student/results");
-    revalidatePath("/student/schedule");
-    revalidatePath("/student/learning");
-    revalidatePath(`/student/exams/${examId}/result`);
-
-    // Notify teacher of submission (fire-and-forget)
-    if (finalStatus === "submitted" || finalStatus === "graded") {
-      const [{ data: examRow }, { data: profileRow }] = await Promise.all([
-        supabase.from("exams").select("title").eq("id", examId).maybeSingle(),
-        supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle(),
-      ]);
-      if (examRow) {
-        notifyTeacherOfSubmission(
-          examId,
-          examRow.title,
-          profileRow?.full_name || "Сурагч",
-          sessionId
-        ).catch(() => {});
-      }
+  // 3. Нэг RPC дуудлагаар бүх зүйлийг хийх (lock + flush + grade + update)
+  const { data: rpcResult, error: rpcError } = await supabase.rpc(
+    "finalize_exam_session_atomic",
+    {
+      p_session_id: sessionId,
+      p_user_id: userId,
+      p_answers: answersPayload,
+      p_reason: reason === "timeout" ? "timed_out" : "submitted",
     }
+  );
 
-    if (finalStatus === "graded" || finalStatus === "timed_out") {
-      await enqueueStudentTopicMasteryRefresh(
+  if (rpcError) {
+    if (isFinalizeExamSessionAtomicMissing(rpcError)) {
+      const fallbackResult = await finalizeSessionAttemptFallback(supabase, {
+        sessionId,
+        examId,
         userId,
-        snapshot?.exam.subject_id ?? null
-      ).catch(() => {});
+        reason,
+        answersPayload,
+      });
+
+      if ("error" in fallbackResult) return fallbackResult;
+
+      const cleanupPipe = redis.pipeline();
+      cleanupPipe.del(redisKey);
+      cleanupPipe.del(analyticsKey);
+      cleanupPipe.set(
+        getSessionMetaCacheKey(sessionId, userId),
+        JSON.stringify({ id: sessionId, status: fallbackResult.finalStatus }),
+        { ex: 600 }
+      );
+      await cleanupPipe.exec();
+
+      if (skipPostFinalizeSideEffects) {
+        return fallbackResult;
+      }
+
+      revalidatePath("/student");
+      revalidatePath("/student/exams");
+      revalidatePath("/student/results");
+      revalidatePath("/student/schedule");
+      revalidatePath("/student/learning");
+      revalidatePath(`/student/exams/${examId}/result`);
+
+      if (
+        fallbackResult.finalStatus === "submitted" ||
+        fallbackResult.finalStatus === "graded"
+      ) {
+        const [{ data: examRow }, { data: profileRow }] = await Promise.all([
+          supabase.from("exams").select("title").eq("id", examId).maybeSingle(),
+          supabase
+            .from("profiles")
+            .select("full_name")
+            .eq("id", userId)
+            .maybeSingle(),
+        ]);
+        if (examRow) {
+          notifyTeacherOfSubmission(
+            examId,
+            examRow.title,
+            profileRow?.full_name || "Сурагч",
+            sessionId
+          ).catch(() => {});
+        }
+      }
+
+      if (
+        fallbackResult.finalStatus === "graded" ||
+        fallbackResult.finalStatus === "timed_out"
+      ) {
+        enqueueStudentTopicMasteryRefresh(userId, null).catch(() => {});
+      }
+
+      return fallbackResult;
     }
 
+    return { error: rpcError.message };
+  }
+
+  const result = rpcResult as {
+    success: boolean;
+    already_finalized?: boolean;
+    error?: string;
+    final_status: string;
+    total_score: number;
+    max_score: number;
+  };
+
+  if (!result.success) return { error: result.error ?? "Finalize амжилтгүй" };
+
+  const totalScore = Number(result.total_score ?? 0);
+  const maxScore = Number(result.max_score ?? 0);
+  const finalStatus = result.final_status;
+
+  // 4. Redis cleanup (pipeline)
+  const cleanupPipe = redis.pipeline();
+  cleanupPipe.del(redisKey);
+  cleanupPipe.del(analyticsKey);
+  cleanupPipe.set(
+    getSessionMetaCacheKey(sessionId, userId),
+    JSON.stringify({ id: sessionId, status: finalStatus }),
+    { ex: 600 }
+  );
+  await cleanupPipe.exec();
+
+  if (skipPostFinalizeSideEffects) {
     return {
       success: true as const,
       finalStatus,
@@ -1258,9 +1397,42 @@ async function finalizeSessionAttempt(
       maxScore,
       percentage: getPercentage(totalScore, maxScore),
     };
-  } finally {
-    await redis.del(lockKey);
   }
+
+  // 5. Side effects (fire-and-forget)
+  revalidatePath("/student");
+  revalidatePath("/student/exams");
+  revalidatePath("/student/results");
+  revalidatePath("/student/schedule");
+  revalidatePath("/student/learning");
+  revalidatePath(`/student/exams/${examId}/result`);
+
+  if (finalStatus === "submitted" || finalStatus === "graded") {
+    const [{ data: examRow }, { data: profileRow }] = await Promise.all([
+      supabase.from("exams").select("title").eq("id", examId).maybeSingle(),
+      supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle(),
+    ]);
+    if (examRow) {
+      notifyTeacherOfSubmission(
+        examId,
+        examRow.title,
+        profileRow?.full_name || "Сурагч",
+        sessionId
+      ).catch(() => {});
+    }
+  }
+
+  if (finalStatus === "graded" || finalStatus === "timed_out") {
+    enqueueStudentTopicMasteryRefresh(userId, null).catch(() => {});
+  }
+
+  return {
+    success: true as const,
+    finalStatus,
+    totalScore,
+    maxScore,
+    percentage: getPercentage(totalScore, maxScore),
+  };
 }
 
 async function startExamSessionForUser(
@@ -1626,7 +1798,10 @@ async function buildPreparedSessionState(
     id: string;
     started_at: string;
     status: string;
-  } | null
+  } | null,
+  options?: {
+    skipSavedStateReads?: boolean;
+  }
 ) {
   if (!examPayload) {
     return {
@@ -1650,14 +1825,10 @@ async function buildPreparedSessionState(
     };
   }
 
-  const sessionDeadlineMs = getSessionDeadlineMs(session.started_at, {
-    end_time: examPayload.exam.end_time,
-    duration_minutes: Number(examPayload.exam.duration_minutes ?? 0),
-  });
-  const initialTimeLeftSeconds =
-    sessionDeadlineMs === null
-      ? null
-      : Math.max(Math.floor((sessionDeadlineMs - Date.now()) / 1000), 0);
+  const initialTimeLeftSeconds = getInitialTimeLeftSeconds(
+    session.started_at,
+    examPayload.exam
+  );
 
   if (initialTimeLeftSeconds !== null && initialTimeLeftSeconds <= 0) {
     if (session.status === "in_progress") {
@@ -1678,6 +1849,17 @@ async function buildPreparedSessionState(
     return {
       redirectTo: `/student/exams/${examId}/result`,
     } as const;
+  }
+
+  if (options?.skipSavedStateReads) {
+    return {
+      sessionId: session.id,
+      savedAnswers: {},
+      answerAnalytics: {},
+      initialTimeLeftSeconds,
+      displayQuestions: examPayload.questions,
+      sessionAlreadyStarted: false,
+    };
   }
 
   const [questionVariantMap, savedAnswers, answerAnalytics] = await Promise.all([
@@ -1752,10 +1934,52 @@ async function validateExamReadiness(
   return null;
 }
 
+export async function getExamStartGatePayload(
+  examId: string
+): Promise<ExamStartGatePayloadResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const assignedExam = await getAssignedPublishedExamRecord(
+    supabase,
+    user.id,
+    examId
+  );
+  if (!assignedExam?.exam) {
+    return { redirectTo: "/student/exams?error=exam_not_found" };
+  }
+  if (assignedExam.row.excused_at) {
+    return { redirectTo: "/student/exams?error=exam_not_found" };
+  }
+
+  const inProgressSession = await getInProgressSession(supabase, examId, user.id);
+  if (inProgressSession?.id) {
+    return {
+      redirectTo: `/student/exams/${examId}/take/run?session=${encodeURIComponent(String(inProgressSession.id))}`,
+    };
+  }
+
+  const exam = assignedExam.exam;
+  const now = Date.now();
+  const startTime = new Date(exam.start_time as string).getTime();
+  if (now < startTime) {
+    return {
+      redirectTo: `/student/exams?error=time_window&exam=${encodeURIComponent(exam.title)}`,
+    };
+  }
+
+  return {
+    exam: exam as StudentAssignedExam & Record<string, unknown>,
+  };
+}
+
 export async function startExamAttempt(
   examId: string,
   readiness: StartExamReadinessPayload
-) {
+): Promise<StartExamAttemptResult> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -1784,77 +2008,94 @@ export async function startExamAttempt(
   );
 
   if ("error" in sessionResult) {
-    return sessionResult;
+    return {
+      error:
+        sessionResult.error ?? "Шалгалтын session эхлүүлж чадсангүй.",
+    };
   }
 
-  const examPayload = await loadStudentExamPayload(supabase, examId, assignedExam);
-  if (!examPayload) {
-    return { error: "Шалгалтын агуулгыг бэлтгэж чадсангүй." } as const;
-  }
-
-  const preparedState = await buildPreparedSessionState(
-    supabase,
-    user.id,
-    examId,
-    examPayload,
-    sessionResult.session
-      ? {
-          id: String(sessionResult.session.id),
-          started_at: String(sessionResult.session.started_at),
-          status: String(sessionResult.session.status),
-        }
-      : null
-  );
-
-  if ("redirectTo" in preparedState && typeof preparedState.redirectTo === "string") {
-    return preparedState;
-  }
-
-  if (!preparedState.sessionId) {
+  if (!sessionResult.session) {
     return { error: "Шалгалтын session эхлүүлж чадсангүй." } as const;
   }
 
+  return {
+    sessionId: String(sessionResult.session.id),
+    startedAt: String(sessionResult.session.started_at),
+    initialTimeLeftSeconds: getInitialTimeLeftSeconds(
+      String(sessionResult.session.started_at),
+      assignedExam.exam
+    ),
+  };
+}
+
+export async function persistExamStartTelemetry(
+  sessionId: string,
+  readiness: StartExamReadinessPayload
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const session = await getSessionMeta(supabase, sessionId, user.id);
+  if (!session) return { error: "Session олдсонгүй" };
+  if (session.status !== "in_progress") {
+    return { success: true, skipped: true };
+  }
+
+  const { data: examSession, error: sessionError } = await supabase
+    .from("exam_sessions")
+    .select("exam_id")
+    .eq("id", sessionId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (sessionError) return { error: sessionError.message };
+  if (!examSession?.exam_id) return { error: "Session олдсонгүй" };
+
+  const assignedExam = await getAssignedPublishedExamRecord(
+    supabase,
+    user.id,
+    String(examSession.exam_id)
+  );
   const browserBaselineRisk =
-    assignedExam.exam.proctoring_mode === "standard" &&
+    assignedExam?.exam?.proctoring_mode === "standard" &&
     readiness.deviceType === "mobile" &&
     !readiness.isStandalonePwa
       ? 4
       : 0;
 
-  await supabase
+  const { error: updateError } = await supabase
     .from("exam_sessions")
     .update({
       identity_verified_at: readiness.identityVerified
         ? new Date().toISOString()
         : null,
-      last_heartbeat_at: new Date().toISOString(),
       device_type: readiness.deviceType,
       display_mode: readiness.displayMode,
       platform: readiness.platform,
       risk_score: browserBaselineRisk,
       risk_level: deriveRiskLevel(browserBaselineRisk),
     })
-    .eq("id", preparedState.sessionId)
+    .eq("id", sessionId)
     .eq("user_id", user.id);
 
+  if (updateError) return { error: updateError.message };
+
   if (readiness.identityVerified) {
-    await logProctorEvent(preparedState.sessionId, "identity_verified", {
+    const logResult = await logProctorEvent(sessionId, "identity_verified", {
       brightness_score:
         typeof readiness.brightnessScore === "number"
           ? readiness.brightnessScore
           : null,
     });
+    if ("error" in logResult) {
+      return { error: logResult.error };
+    }
   }
 
-  return {
-    exam: examPayload.exam as StudentAssignedExam & Record<string, unknown>,
-    questions: preparedState.displayQuestions,
-    sessionId: preparedState.sessionId,
-    savedAnswers: preparedState.savedAnswers,
-    answerAnalytics: preparedState.answerAnalytics,
-    initialTimeLeftSeconds: preparedState.initialTimeLeftSeconds,
-    sessionAlreadyStarted: preparedState.sessionAlreadyStarted,
-  } as const;
+  return { success: true };
 }
 
 async function getSessionAnswersForUser(
@@ -1882,7 +2123,12 @@ async function getSessionAnswersForUser(
 }
 
 export async function prepareExamTakePayload(
-  examId: string
+  examId: string,
+  options?: {
+    sessionId?: string | null;
+    skipSavedStateReads?: boolean;
+    expectedStartedAt?: string | null;
+  }
 ): Promise<PrepareExamTakePayloadResult> {
   const supabase = await createClient();
   const {
@@ -1918,7 +2164,19 @@ export async function prepareExamTakePayload(
     return { redirectTo: "/student/exams?error=questions_not_ready" } as const;
   }
 
-  const inProgressSession = await getInProgressSession(supabase, examId, user.id);
+  const hintedSessionId = options?.sessionId?.trim();
+  const hintedSession = hintedSessionId
+    ? await getOwnedSessionById(supabase, hintedSessionId, examId, user.id)
+    : null;
+  const inProgressSession =
+    hintedSession ?? (await getInProgressSession(supabase, examId, user.id));
+  const canSkipSavedStateReads = Boolean(
+    options?.skipSavedStateReads &&
+      options?.expectedStartedAt &&
+      inProgressSession?.started_at &&
+      String(inProgressSession.started_at) === String(options.expectedStartedAt) &&
+      Date.now() - new Date(String(options.expectedStartedAt)).getTime() < 15000
+  );
   const preparedState = await buildPreparedSessionState(
     supabase,
     user.id,
@@ -1930,7 +2188,10 @@ export async function prepareExamTakePayload(
           started_at: String(inProgressSession.started_at),
           status: String(inProgressSession.status),
         }
-      : null
+      : null,
+    {
+      skipSavedStateReads: canSkipSavedStateReads,
+    }
   );
 
   if ("redirectTo" in preparedState && typeof preparedState.redirectTo === "string") {
@@ -1962,14 +2223,30 @@ export async function saveAnswersBatch(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
 
-  const session = await getSessionMeta(supabase, sessionId, user.id);
+  return saveAnswersBatchForUserClient(
+    supabase,
+    user.id,
+    sessionId,
+    answers,
+    answerAnalytics
+  );
+}
+
+export async function saveAnswersBatchForUserClient(
+  supabase: SupabaseActionClient,
+  userId: string,
+  sessionId: string,
+  answers: Record<string, string>,
+  answerAnalytics: Record<string, AnswerChangeAnalytics> = {}
+) {
+  const session = await getSessionMeta(supabase, sessionId, userId);
   if (!session) return { error: "Session олдсонгүй" };
   if (session.status !== "in_progress") {
     return { error: "Энэ шалгалтын session идэвхгүй байна" };
   }
 
-  const redisKey = getSessionAnswersCacheKey(sessionId, user.id);
-  const analyticsKey = getSessionAnswerMetaCacheKey(sessionId, user.id);
+  const redisKey = getSessionAnswersCacheKey(sessionId, userId);
+  const analyticsKey = getSessionAnswerMetaCacheKey(sessionId, userId);
 
   const toSet: Record<string, string> = {};
   const toDelete: string[] = [];
@@ -1987,20 +2264,25 @@ export async function saveAnswersBatch(
     analyticsToSet[questionId] = JSON.stringify(analytics);
   }
 
-  const ops: Promise<unknown>[] = [];
+  const pipeline = redis.pipeline();
+  let hasRedisMutations = false;
+
   if (Object.keys(toSet).length > 0) {
-    ops.push(redis.hset(redisKey, toSet));
+    pipeline.hset(redisKey, toSet);
+    hasRedisMutations = true;
   }
   if (Object.keys(analyticsToSet).length > 0) {
-    ops.push(redis.hset(analyticsKey, analyticsToSet));
-    ops.push(redis.expire(analyticsKey, 7200));
+    pipeline.hset(analyticsKey, analyticsToSet);
+    pipeline.expire(analyticsKey, 7200);
+    hasRedisMutations = true;
   }
   for (const qId of toDelete) {
-    ops.push(redis.hdel(redisKey, qId));
+    pipeline.hdel(redisKey, qId);
+    hasRedisMutations = true;
   }
-  if (ops.length > 0) {
-    await Promise.all(ops);
-    await redis.expire(redisKey, 7200);
+  if (hasRedisMutations) {
+    pipeline.expire(redisKey, 7200);
+    await pipeline.exec();
   }
 
   return { success: true };
@@ -2020,8 +2302,27 @@ export async function submitExam(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" };
 
+  return submitExamForUserClient(
+    supabase,
+    user.id,
+    sessionId,
+    clientAnswers,
+    clientAnswerAnalytics
+  );
+}
+
+export async function submitExamForUserClient(
+  supabase: SupabaseActionClient,
+  userId: string,
+  sessionId: string,
+  clientAnswers?: Record<string, string>,
+  clientAnswerAnalytics: Record<string, AnswerChangeAnalytics> = {},
+  options?: {
+    skipPostFinalizeSideEffects?: boolean;
+  }
+) {
   const submitLimit = await submitExamRateLimit.limit(
-    `submit-exam:${user.id}:${sessionId}`
+    `submit-exam:${userId}:${sessionId}`
   );
   if (!submitLimit.success) {
     return { error: "Хэт олон илгээх оролдлого байна. Түр хүлээгээд дахин оролдоно уу." };
@@ -2032,13 +2333,13 @@ export async function submitExam(
     .from("exam_sessions")
     .select("id, exam_id, status, total_score, max_score")
     .eq("id", sessionId)
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (!session) return { error: "Session олдсонгүй" };
 
   if (session.status !== "in_progress") {
-    await cacheSessionMeta(sessionId, user.id, session.status);
+    await cacheSessionMeta(sessionId, userId, session.status);
     const totalScore = Number(session.total_score ?? 0);
     const maxScore = Number(session.max_score ?? 0);
     return {
@@ -2049,21 +2350,28 @@ export async function submitExam(
     };
   }
 
-  // Client-ийн хариултыг Redis-д шууд оруулна (DB бичилт зөвхөн finalizeSessionAttempt дотор)
-  if (clientAnswers) {
-    await replaceSessionDraftAnswers(
+  // Canonical submit source нь Redis draft.
+  // Submit дээр зөвхөн unsaved delta ирсэн үед л fallback flush хийнэ.
+  if (clientAnswers && Object.keys(clientAnswers).length > 0) {
+    const batchResult = await saveAnswersBatchForUserClient(
+      supabase,
+      userId,
       sessionId,
-      user.id,
       clientAnswers,
       clientAnswerAnalytics
     );
+    if ("error" in batchResult) {
+      return batchResult;
+    }
   }
 
   return finalizeSessionAttempt(supabase, {
     sessionId,
     examId: session.exam_id,
-    userId: user.id,
+    userId,
     reason: "submit",
+    skipPostFinalizeSideEffects:
+      options?.skipPostFinalizeSideEffects ?? false,
   });
 }
 

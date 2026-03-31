@@ -26,7 +26,9 @@ import {
 import { getExamManagementScope } from "@/lib/exam-scope";
 import {
   buildPublishedExamSnapshot,
+  clearPublishedExamSnapshotCache,
   isSnapshotColumnMissingError,
+  primePublishedExamSnapshotCache,
 } from "@/lib/exam-snapshot";
 import {
   getAllowedGroupIds,
@@ -737,7 +739,12 @@ export async function updateExam(examId: string, formData: FormData) {
     return { error: snapshotError.message };
   }
 
+  await clearPublishedExamSnapshotCache(examId);
   await redis.del(getExamQuestionCacheKey(examId));
+  await Promise.allSettled([
+    primePublishedExamSnapshotCache(examId, nextSnapshot),
+    prewarmExamCache(examId, nextSnapshot),
+  ]);
 
   const { data: nextRecipients } = await supabase
     .from("exam_recipients")
@@ -838,6 +845,8 @@ export async function publishExam(examId: string) {
     revalidatePath(`/educator/exams/${examId}`);
     return { success: true, warning: "Snapshot migration apply хийгдээгүй тул publish fallback mode-оор үргэлжиллээ." };
   }
+
+  await primePublishedExamSnapshotCache(examId, snapshot);
 
   if (error) return { error: error.message };
 

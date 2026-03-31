@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "stress:setup": "node scripts/stress/setup-dataset.mjs",
+    "stress:sessions": "node scripts/stress/create-session-cache.mjs",
+    "stress:cleanup": "node scripts/stress/cleanup-dataset.mjs",
+    "stress:benchmark": "node scripts/stress/run-local-benchmark.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

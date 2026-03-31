@@ -26,22 +26,10 @@ import type {
   DevicePolicy,
   ProctorDisplayMode,
   ProctoringMode,
-  StudentDeviceType,
 } from "@/lib/proctoring";
+import type { ExamRuntimeReadiness } from "./runtime-readiness";
 
-type ReadinessPayload = {
-  isDesktop: boolean;
-  deviceType: StudentDeviceType;
-  displayMode: ProctorDisplayMode;
-  orientation: "portrait" | "landscape";
-  isStandalonePwa: boolean;
-  platform: string;
-  fullscreenReady: boolean;
-  cameraReady: boolean;
-  identityVerified: boolean;
-  brightnessScore: number | null;
-  identityHash: string | null;
-};
+type ReadinessPayload = ExamRuntimeReadiness;
 
 type CheckStatus = "checking" | "ok" | "warning" | "error";
 

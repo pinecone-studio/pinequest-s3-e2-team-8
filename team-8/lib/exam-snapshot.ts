@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { redis } from "@/lib/redis";
 import { attachPassagesToQuestions, getQuestionPassagesByExam } from "@/lib/question-passages";
 import { isQuestionVariantSchemaMissing } from "@/lib/question-variants";
 import type { PublishedExamSnapshot, Question, QuestionPassage } from "@/types";
@@ -14,6 +15,20 @@ function getRelationObject<T>(value: T | T[] | null | undefined) {
 
 function isSnapshotColumnMissing(errorCode?: string | null) {
   return Boolean(errorCode && SNAPSHOT_COLUMN_MISSING_CODES.has(errorCode));
+}
+
+function getExamSnapshotCacheKey(examId: string) {
+  return `exam:${examId}:snapshot`;
+}
+
+function getSnapshotCacheTtlSeconds(snapshot: PublishedExamSnapshot) {
+  const closeTimeMs = new Date(snapshot.exam.end_time).getTime();
+  if (Number.isNaN(closeTimeMs)) {
+    return 3600;
+  }
+
+  const remainingSeconds = Math.ceil((closeTimeMs - Date.now()) / 1000);
+  return Math.max(3600, Math.min(7 * 24 * 60 * 60, remainingSeconds + 3600));
 }
 
 export function isSnapshotColumnMissingError(errorCode?: string | null) {
@@ -198,6 +213,15 @@ export async function getStoredPublishedExamSnapshot(
   supabase: SupabaseServerClient,
   examId: string
 ) {
+  const cacheKey = getExamSnapshotCacheKey(examId);
+  const cached = await redis.get<PublishedExamSnapshot | string>(cacheKey);
+  if (cached) {
+    if (typeof cached === "string") {
+      return JSON.parse(cached) as PublishedExamSnapshot;
+    }
+    return cached as PublishedExamSnapshot;
+  }
+
   const { data, error } = await supabase
     .from("exams")
     .select("published_snapshot")
@@ -211,7 +235,27 @@ export async function getStoredPublishedExamSnapshot(
     throw new Error(error.message);
   }
 
-  return (data?.published_snapshot ?? null) as PublishedExamSnapshot | null;
+  const snapshot = (data?.published_snapshot ?? null) as PublishedExamSnapshot | null;
+  if (snapshot) {
+    await redis.set(cacheKey, JSON.stringify(snapshot), {
+      ex: getSnapshotCacheTtlSeconds(snapshot),
+    });
+  }
+
+  return snapshot;
+}
+
+export async function primePublishedExamSnapshotCache(
+  examId: string,
+  snapshot: PublishedExamSnapshot
+) {
+  await redis.set(getExamSnapshotCacheKey(examId), JSON.stringify(snapshot), {
+    ex: getSnapshotCacheTtlSeconds(snapshot),
+  });
+}
+
+export async function clearPublishedExamSnapshotCache(examId: string) {
+  await redis.del(getExamSnapshotCacheKey(examId));
 }
 
 export function getSnapshotQuestionMap(snapshot: PublishedExamSnapshot | null) {
