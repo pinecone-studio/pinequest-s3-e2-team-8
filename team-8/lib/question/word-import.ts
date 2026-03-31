@@ -884,7 +884,7 @@ export async function buildQuestionImportDraftsFromWord(
     buffer: Buffer.from(fileBuffer),
   });
 
-  const globalWarnings = result.messages.map((message) =>
+  const globalWarnings = result.messages.map((message: MammothMessage) =>
     message.type === "error"
       ? `Word parse: ${message.message}`
       : `Word parse анхааруулга: ${message.message}`

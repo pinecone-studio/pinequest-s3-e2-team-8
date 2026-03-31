@@ -8,9 +8,23 @@ import { Badge } from "@/components/ui/badge";
 import MathContent from "@/components/math/MathContent";
 import {
   logProctorEvent,
-  saveAnswer,
+  saveAnswersBatch,
   submitExam,
 } from "@/lib/student/actions";
+import { useCameraMonitor } from "@/hooks/useCameraMonitor";
+import { useGazeMonitor } from "@/hooks/useGazeMonitor";
+
+// ---------------------------------------------------------------------------
+// SEB (Safe Exam Browser) detection
+// ---------------------------------------------------------------------------
+// Set to true when you want to enforce SEB for all exams.
+// In Phase 2, replace this with a per-exam flag from the exams table.
+const REQUIRE_SEB = false;
+
+function isSEBBrowser(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return navigator.userAgent.includes("SEB");
+}
 
 interface QuestionItem {
   id: string;
@@ -177,9 +191,8 @@ export default function ExamTaker({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
-  const saveTimersRef = useRef<Record<string, number>>({});
-  const dirtyAnswersRef = useRef<Record<string, string>>({});
-  const activeSavePromisesRef = useRef<Record<string, Promise<unknown>>>({});
+  const lastCheckpointRef = useRef<Record<string, string>>(savedAnswers);
+  const isCheckpointingRef = useRef(false);
   const currentQuestionRef = useRef<QuestionItem | null>(
     displayQuestions[0] ?? null
   );
@@ -187,6 +200,30 @@ export default function ExamTaker({
   const tabSwitchCountRef = useRef(0);
   const isSubmittingRef = useRef(false);
   const proctorThrottleRef = useRef<Record<string, number>>({});
+
+  // SEB detection (evaluated once per render; navigator.userAgent never changes).
+  const sebDetected = isSEBBrowser();
+  // Camera is only started when SEB is not required, or when SEB is detected.
+  const { cameraStatus, videoRef } = useCameraMonitor({
+    sessionId,
+    enabled: !REQUIRE_SEB || sebDetected,
+  });
+
+  // Gaze warning count — only stored in state for badge display.
+  // The ref inside useGazeMonitor is the authoritative counter.
+  const [gazeWarningCount, setGazeWarningCount] = useState(0);
+
+  useGazeMonitor({
+    sessionId,
+    videoRef,
+    enabled: cameraStatus === "granted",
+    onWarning: (total) => {
+      setGazeWarningCount(total);
+    },
+    onMaxWarnings: () => {
+      void handleSubmit();
+    },
+  });
 
   const currentQuestion = displayQuestions[currentIndex];
   const currentPassage = currentQuestion.question_passages;
@@ -251,75 +288,43 @@ export default function ExamTaker({
     [sessionId]
   );
 
-  const persistAnswer = useCallback(
-    (questionId: string, answer: string) => {
-      const request = saveAnswer(sessionId, questionId, answer).finally(() => {
-        if (dirtyAnswersRef.current[questionId] === answer) {
-          delete dirtyAnswersRef.current[questionId];
-        }
+  const checkpointDirtyAnswers = useCallback(async () => {
+    if (isCheckpointingRef.current || isSubmittingRef.current) return;
 
-        if (activeSavePromisesRef.current[questionId] === request) {
-          delete activeSavePromisesRef.current[questionId];
-        }
-      });
+    const currentAnswers = answersRef.current;
+    const lastCheckpoint = lastCheckpointRef.current;
 
-      activeSavePromisesRef.current[questionId] = request;
-      return request;
-    },
-    [sessionId]
-  );
-
-  const queueSave = useCallback(
-    (questionId: string, answer: string, questionType: string) => {
-      dirtyAnswersRef.current[questionId] = answer;
-
-      const existingTimer = saveTimersRef.current[questionId];
-      if (existingTimer) {
-        clearTimeout(existingTimer);
+    const dirty: Record<string, string> = {};
+    for (const [qId, answer] of Object.entries(currentAnswers)) {
+      if (lastCheckpoint[qId] !== answer) {
+        dirty[qId] = answer;
       }
-
-      const delay =
-        questionType === "essay" || questionType === "fill_blank" ? 700 : 0;
-
-      if (delay === 0) {
-        delete saveTimersRef.current[questionId];
-        void persistAnswer(questionId, answer);
-        return;
+    }
+    for (const qId of Object.keys(lastCheckpoint)) {
+      if (!(qId in currentAnswers)) {
+        dirty[qId] = "";
       }
+    }
 
-      saveTimersRef.current[questionId] = window.setTimeout(() => {
-        delete saveTimersRef.current[questionId];
-        void persistAnswer(questionId, answer);
-      }, delay);
-    },
-    [persistAnswer]
-  );
+    if (Object.keys(dirty).length === 0) return;
+
+    isCheckpointingRef.current = true;
+    try {
+      const result = await saveAnswersBatch(sessionId, dirty);
+      // Алдаа буцаасан бол lastCheckpoint шинэчлэхгүй — дараагийн checkpoint дахин оролдоно
+      if (!result || "error" in result) return;
+      lastCheckpointRef.current = { ...currentAnswers };
+    } finally {
+      isCheckpointingRef.current = false;
+    }
+  }, [sessionId]);
 
   const flushPendingAnswers = useCallback(async () => {
-    for (const timerId of Object.values(saveTimersRef.current)) {
-      clearTimeout(timerId);
+    while (isCheckpointingRef.current) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    saveTimersRef.current = {};
-
-    while (true) {
-      const pendingDirtyAnswers = { ...dirtyAnswersRef.current };
-      const activeRequests = Object.values(activeSavePromisesRef.current);
-      const pendingRequests = Object.entries(pendingDirtyAnswers)
-        .filter(([questionId]) => {
-          const activeRequest = activeSavePromisesRef.current[questionId];
-          if (!activeRequest) return true;
-
-          return false;
-        })
-        .map(([questionId, answer]) => persistAnswer(questionId, answer));
-
-      if (activeRequests.length === 0 && pendingRequests.length === 0) {
-        break;
-      }
-
-      await Promise.all([...activeRequests, ...pendingRequests]);
-    }
-  }, [persistAnswer]);
+    await checkpointDirtyAnswers();
+  }, [checkpointDirtyAnswers]);
 
   // Шалгалт дуусгах
   const handleSubmit = useCallback(async () => {
@@ -367,13 +372,31 @@ export default function ExamTaker({
     window.localStorage.setItem(draftStorageKey, JSON.stringify(answers));
   }, [answers, draftStorageKey]);
 
+  // Batched checkpoint: flush dirty answers every 5 seconds
   useEffect(() => {
-    return () => {
-      for (const timerId of Object.values(saveTimersRef.current)) {
-        clearTimeout(timerId);
-      }
+    const interval = setInterval(() => {
+      void checkpointDirtyAnswers();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [checkpointDirtyAnswers]);
+
+  // Checkpoint on question navigation
+  useEffect(() => {
+    void checkpointDirtyAnswers();
+  }, [currentIndex, checkpointDirtyAnswers]);
+
+  // Checkpoint on page hide / beforeunload
+  useEffect(() => {
+    const handlePageHide = () => {
+      void checkpointDirtyAnswers();
     };
-  }, []);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("beforeunload", handlePageHide);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("beforeunload", handlePageHide);
+    };
+  }, [checkpointDirtyAnswers]);
 
   // Proctoring: Tab switch detection
   useEffect(() => {
@@ -456,7 +479,7 @@ export default function ExamTaker({
     };
   }, [emitProctorEvent]);
 
-  // Хариулт хадгалах (debounced)
+  // Хариулт хадгалах (localStorage-д шууд, Redis-д batch checkpoint-ээр)
   const handleAnswer = useCallback(
     (questionId: string, answer: string, questionType: string) => {
       const normalizedAnswer = normalizeDraftAnswer(questionType, answer);
@@ -469,10 +492,8 @@ export default function ExamTaker({
 
       answersRef.current = nextAnswers;
       setAnswers(nextAnswers);
-
-      queueSave(questionId, normalizedAnswer ?? "", questionType);
     },
-    [queueSave]
+    []
   );
 
   // Хугацааг формат хийх
@@ -486,6 +507,27 @@ export default function ExamTaker({
     isQuestionAnswered(question, answers[question.id])
   ).length;
   const isTimeWarning = timeLeft < 300; // 5 минутаас бага
+
+  if (REQUIRE_SEB && !sebDetected) {
+    return (
+      <div className="mx-auto flex min-h-[60vh] max-w-2xl items-center justify-center p-6">
+        <Card className="w-full">
+          <CardHeader>
+            <CardTitle>Safe Exam Browser шаардлагатай</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Энэ шалгалтыг зөвхөн Safe Exam Browser (SEB) ашиглан нээх
+              боломжтой. Та SEB татаж аваад дахин нээнэ үү.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              safeexambrowser.org
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (displayQuestions.length === 0 || !currentQuestion) {
     return (
@@ -551,6 +593,13 @@ export default function ExamTaker({
 
       {/* Header: Timer + Progress */}
       <div className="sticky top-0 z-50 border-b bg-background/95 px-3 py-2 backdrop-blur">
+        {gazeWarningCount > 0 && (
+          <div className="border-b border-red-200 bg-red-50 px-3 py-1.5 text-center text-sm font-medium text-red-700">
+            {gazeWarningCount < 3
+              ? `Анхааруулга ${gazeWarningCount}/3: Та камерын өмнө шулуун харна уу. ${3 - gazeWarningCount} анхааруулга үлдсэн.`
+              : "Анхааруулга 3/3: Шалгалт дуусгагдаж байна..."}
+          </div>
+        )}
         <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <h1 className="line-clamp-1 text-base font-semibold sm:text-lg">
@@ -561,6 +610,14 @@ export default function ExamTaker({
             </p>
           </div>
           <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
+            {cameraStatus === "denied" && (
+              <Badge variant="destructive">Камер хаалттай</Badge>
+            )}
+            {gazeWarningCount > 0 && (
+              <Badge variant="destructive">
+                Анхааруулга {gazeWarningCount}/3
+              </Badge>
+            )}
             {tabSwitchCount > 0 && (
               <Badge variant="destructive">
                 Tab {tabSwitchCount}/5
@@ -876,6 +933,18 @@ export default function ExamTaker({
           </Card>
         </div>
       </div>
+
+      {/* Camera preview — always in DOM so videoRef is attached before stream resolves.
+          Hidden when camera is not yet granted. PiP-style fixed box bottom-right. */}
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        className={`fixed top-16 right-4 z-50 h-28 w-36 rounded-xl border-2 bg-black object-cover shadow-lg transition-opacity ${
+          cameraStatus === "granted" ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+      />
     </div>
   );
 }

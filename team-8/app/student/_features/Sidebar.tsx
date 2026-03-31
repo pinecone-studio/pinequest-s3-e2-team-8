@@ -6,6 +6,8 @@ import { useState } from "react";
 import { logout } from "@/lib/auth/actions";
 import {
   ChevronLeft,
+  GraduationCap,
+  FileText,
   HomeIcon,
   ListCheck,
   LogOut,
@@ -22,9 +24,10 @@ interface NavItem {
 
 const allNavItems: NavItem[] = [
   { href: "/student", label: "Нүүр хуудас", icon: HomeIcon },
+  { href: "/student/exams", label: "Шалгалт өгөх", icon: FileText },
   { href: "/student/results", label: "Миний шалгалтууд", icon: ListCheck },
+  { href: "/student/learning", label: "Learning Hub", icon: GraduationCap },
 ];
-
 export default function Sidebar() {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -34,7 +37,7 @@ export default function Sidebar() {
     <>
       <div className={`shrink-0 transition-all duration-200 ${widthClass}`} />
       <aside
-        className={`fixed inset-y-0 left-0 z-30 flex h-screen flex-col justify-between overflow-y-auto bg-white pt-6 shadow-xl transition-all duration-200 ${
+        className={`fixed inset-y-0 left-0 z-30 flex h-[100dvh] flex-col justify-between overflow-y-auto bg-white pt-6 shadow-xl transition-all duration-200 ${
           isCollapsed ? "px-2" : "px-4"
         } ${widthClass}`}
       >
@@ -45,7 +48,7 @@ export default function Sidebar() {
               type="button"
               aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               onClick={() => setIsCollapsed((prev) => !prev)}
-              className="rounded-lg p-1 text-gray-600 transition-colors hover:text-[#4078C1]"
+              className="rounded-lg p-1 text-gray-600 transition-colors hover:text-[#7e32f5]"
             >
               <ChevronLeft
                 size={28}
@@ -69,8 +72,8 @@ export default function Sidebar() {
                   href={item.href}
                   className={`group flex items-center rounded-[12px] px-4 py-2 text-[15px] font-semibold transition-all duration-200 ${
                     isActive
-                      ? "border-2 border-[#4078C1] bg-[#ECF1F9] text-[#4078C1] shadow-sm"
-                      : "text-[#7F7F7F] hover:bg-[#F4F6FA] hover:text-[#4078C1]"
+                      ? "border-2 border-[#d0b1fd] bg-[#ede1fe] text-[#7e32f5] shadow-sm"
+                      : "text-[#7F7F7F] hover:bg-[#F4F6FA] hover:text-[#7e32f5]"
                   } ${isCollapsed ? "justify-center gap-0 px-3" : "gap-4"}`}
                 >
                   <Icon
@@ -78,8 +81,8 @@ export default function Sidebar() {
                     strokeWidth={isActive ? 2.5 : 2}
                     className={
                       isActive
-                        ? "text-[#4078C1]"
-                        : "text-[#575555] group-hover:text-[#4078C1]"
+                        ? "text-[#7e32f5]"
+                        : "text-[#575555] group-hover:text-[#7e32f5]"
                     }
                   />
                   {!isCollapsed && <span>{item.label}</span>}
@@ -100,7 +103,7 @@ export default function Sidebar() {
             >
               <LogOut className="h-7 w-7" />
               {!isCollapsed && (
-                <p className="text-[15px] font-semibold text-[#7F7F7F] group-hover:text-[#4078C1]">
+                <p className="text-[15px] font-semibold text-[#7F7F7F] group-hover:text-red-500">
                   Гарах
                 </p>
               )}

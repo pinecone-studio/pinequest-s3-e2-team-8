@@ -13,7 +13,61 @@ import {
   getGroupMemberConflictError,
 } from "@/lib/exam-conflicts";
 import { assignExamToGroupRecord } from "@/lib/exam-assignments";
+import { notifyStudentsOfNewExam } from "@/lib/notification/actions";
 import { getAllowedGroupIds, getAllTeachingGroupIds, isAdminUser } from "@/lib/teacher/permissions";
+
+async function notifyStudentAboutPublishedExamsInGroup(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  groupId: string,
+  studentId: string
+) {
+  const { examIds } = await getPublishedAssignedExamIdsForGroup(supabase, groupId);
+  if (examIds.length === 0) return;
+
+  const { data: exams, error } = await supabase
+    .from("exams")
+    .select("id, title, start_time, duration_minutes")
+    .in("id", examIds)
+    .eq("is_published", true);
+
+  if (error || !exams) return;
+
+  await Promise.all(
+    exams.map((exam) =>
+      notifyStudentsOfNewExam(exam.id, exam.title, [studentId], {
+        startTime: exam.start_time,
+        durationMinutes: exam.duration_minutes,
+      })
+    )
+  );
+}
+
+async function notifyGroupMembersAboutPublishedExamAssignment(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  groupId: string,
+  exam: {
+    id: string;
+    title: string;
+    start_time: string | null;
+    duration_minutes: number | null;
+  }
+) {
+  const { data: members, error } = await supabase
+    .from("student_group_members")
+    .select("student_id")
+    .eq("group_id", groupId);
+
+  if (error || !members || members.length === 0) return;
+
+  const studentIds = Array.from(
+    new Set(members.map((member) => String(member.student_id)))
+  );
+
+  await notifyStudentsOfNewExam(exam.id, exam.title, studentIds, {
+    startTime: exam.start_time,
+    durationMinutes: exam.duration_minutes,
+  });
+}
 
 // ==========================================
 // БҮЛЭГ CRUD
@@ -282,6 +336,8 @@ export async function addMemberToGroup(groupId: string, studentEmail: string) {
   );
   if (!syncResult.success) return { error: syncResult.error };
 
+  await notifyStudentAboutPublishedExamsInGroup(supabase, groupId, student.id);
+
   revalidatePath(`/educator/groups/${groupId}`);
   return { success: true, student };
 }
@@ -339,7 +395,7 @@ export async function assignExamToGroup(groupId: string, examId: string) {
 
   const { data: exam } = await supabase
     .from("exams")
-    .select("id, is_published, subject_id")
+    .select("id, title, start_time, duration_minutes, is_published, subject_id")
     .eq("id", examId)
     .eq("created_by", user.id)
     .maybeSingle();
@@ -382,6 +438,7 @@ export async function assignExamToGroup(groupId: string, examId: string) {
   if (exam.is_published) {
     const syncResult = await syncExamRecipients(supabase, examId, user.id);
     if (!syncResult.success) return { error: syncResult.error };
+    await notifyGroupMembersAboutPublishedExamAssignment(supabase, groupId, exam);
   }
 
   revalidatePath(`/educator/groups/${groupId}`);

@@ -10,12 +10,29 @@ import { getStudentStats } from "@/lib/dashboard/actions";
 import { formatDateTimeUB } from "@/lib/utils/date";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import DashboardImage from "../_icons/DashboardImage";
 
 export default async function StudentDashboard() {
   const stats = await getStudentStats();
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
+      {/* 1. The Background Card */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#ffffff] via-[#ffeac0] to-[#ffd474] px-8 py-6">
+        <div className="relative z-0 max-w-2xl space-y-2">
+          <h2 className="text-2xl font-bold tracking-tight md:text-3xl">
+            Сурагчын самбар
+          </h2>
+          <p className="text-sm text-muted-foreground md:text-base">
+            Шалгалт, дүнгийн мэдээллээ нэг доороос хянаарай.
+          </p>
+        </div>
+      </div>
+
+      {/* 2. The Image Layer - Moved OUTSIDE the overflow-hidden div */}
+      <div className="pointer-events-none absolute -bottom-0 right-0 z-[60] hidden h-full w-auto scale-105 origin-bottom-right md:block">
+        <DashboardImage />
+      </div>
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Хянах самбар</h2>
         <p className="text-muted-foreground">
@@ -54,6 +71,81 @@ export default async function StudentDashboard() {
         </Card>
       </div>
 
+      <Card className="rounded-2xl">
+        <CardHeader className="flex flex-row items-start justify-between gap-4">
+          <div>
+            <CardTitle className="text-lg">Learning Summary</CardTitle>
+            <CardDescription>
+              Сайжруулах шаардлагатай хичээл, сэдвүүдийн товч тойм
+            </CardDescription>
+          </div>
+          <Link href="/student/learning">
+            <Button variant="outline" size="sm">
+              Learning Hub
+            </Button>
+          </Link>
+        </CardHeader>
+        <CardContent>
+          {stats.learningSummary.weakSubjects.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Одоогоор mastery profile үүсгэх data хангалтгүй байна.
+            </p>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-foreground">Сайжруулах хичээлүүд</p>
+                {stats.learningSummary.weakSubjects.map((subject) => (
+                  <div
+                    key={subject.subject_id}
+                    className="rounded-xl border p-4"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold">{subject.subject_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {subject.weak_topic_count > 0
+                            ? `${subject.weak_topic_count} weak topic`
+                            : "Topic breakdown pending"}
+                        </p>
+                      </div>
+                      <Badge variant={subject.mastery_score < 60 ? "secondary" : "outline"}>
+                        {Math.round(subject.mastery_score)}%
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-foreground">Хамгийн сул сэдвүүд</p>
+                {stats.learningSummary.weakTopics.length === 0 ? (
+                  <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+                    Topic-level data хараахан бүрэн бэлэн болоогүй байна.
+                  </div>
+                ) : (
+                  stats.learningSummary.weakTopics.map((topic) => (
+                    <div
+                      key={`${topic.subject_id}:${topic.topic_key}`}
+                      className="rounded-xl border p-4"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold">{topic.topic_label}</p>
+                          <p className="text-xs text-muted-foreground">{topic.subject_name}</p>
+                        </div>
+                        <Badge variant={topic.mastery_score < 60 ? "secondary" : "outline"}>
+                          {Math.round(topic.mastery_score)}%
+                        </Badge>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-start justify-between gap-4">
@@ -88,7 +180,9 @@ export default async function StudentDashboard() {
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center justify-end gap-2">
-                      <Badge variant="outline">{exam.duration_minutes} мин</Badge>
+                      <Badge variant="outline">
+                        {exam.duration_minutes} мин
+                      </Badge>
                       <Badge
                         variant={
                           exam.lifecycle_status === "available" ||
@@ -112,9 +206,7 @@ export default async function StudentDashboard() {
           <CardHeader className="flex flex-row items-start justify-between gap-4">
             <div>
               <CardTitle className="text-lg">Сүүлд шинэчлэгдсэн дүн</CardTitle>
-              <CardDescription>
-                Саяхан өгсөн шалгалтуудын төлөв
-              </CardDescription>
+              <CardDescription>Саяхан өгсөн шалгалтуудын төлөв</CardDescription>
             </div>
             <Link href="/student/results">
               <Button variant="outline" size="sm">
@@ -146,8 +238,14 @@ export default async function StudentDashboard() {
                       {result.percentage !== null && (
                         <Badge variant="outline">{result.percentage}%</Badge>
                       )}
-                      <Badge variant={result.status === "graded" ? "secondary" : "outline"}>
-                        {result.status === "graded" ? "Дүн баталгаажсан" : "Шалгагдаж байна"}
+                      <Badge
+                        variant={
+                          result.status === "graded" ? "secondary" : "outline"
+                        }
+                      >
+                        {result.status === "graded"
+                          ? "Дүн баталгаажсан"
+                          : "Шалгагдаж байна"}
                       </Badge>
                     </div>
                   </div>

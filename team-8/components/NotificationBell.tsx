@@ -118,14 +118,14 @@ export default function NotificationBell({
         <PopoverTrigger asChild>
           <button
             type="button"
-            className={`group relative flex items-center rounded-[12px] px-4 py-2 text-[15px] font-semibold text-[#7F7F7F] transition-all duration-200 hover:bg-[#F4F6FA] hover:text-[#4078C1] ${
+            className={`group relative flex items-center rounded-[12px] px-4 py-2 text-[15px] font-semibold text-[#7F7F7F] transition-all duration-200 hover:bg-[#F4F6FA] hover:text-brand ${
               isCollapsed ? "justify-center gap-0 px-3" : "gap-4"
             }`}
           >
             <Bell
               size={20}
               strokeWidth={2}
-              className="text-[#575555] group-hover:text-[#4078C1]"
+              className="text-[#575555] group-hover:text-brand"
             />
             {!isCollapsed && <span>Мэдэгдэл</span>}
             {unreadCount > 0 && (

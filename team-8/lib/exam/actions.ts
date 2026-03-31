@@ -8,6 +8,7 @@ import { syncExamRecipients } from "@/lib/exam-recipients";
 import { getExamPublishGuardError } from "@/lib/exam-readiness";
 import { assignExamToGroupRecord } from "@/lib/exam-assignments";
 import { notifyStudentsOfNewExam } from "@/lib/notification/actions";
+import { prewarmExamCache } from "@/lib/student/actions";
 import { toUlaanbaatarIsoString } from "@/lib/utils/date";
 import {
   deriveStudentExamLifecycle,
@@ -195,7 +196,7 @@ export async function createExam(formData: FormData) {
   }
 
   revalidatePath("/educator");
-  redirect(`/educator/exams/${data.id}/questions`);
+  redirect(`/educator/question-bank/private?examId=${data.id}`);
 }
 
 async function legacyUpdateExam(examId: string, formData: FormData) {
@@ -713,6 +714,19 @@ export async function publishExam(examId: string) {
     return { error: "Шалгалтын snapshot үүсгэж чадсангүй" };
   }
 
+  // Redis prewarm: cache stampede-ээс сэргийлж exam payload-г урьдчилан cache-лэнэ.
+  // Publish зөвхөн cache амжилттай бэлтгэгдсэн үед үргэлжилнэ.
+  try {
+    await prewarmExamCache(examId, snapshot);
+  } catch (prewarmError) {
+    return {
+      error:
+        prewarmError instanceof Error
+          ? `Шалгалтын cache бэлтгэхэд алдаа гарлаа: ${prewarmError.message}`
+          : "Шалгалтын cache бэлтгэхэд алдаа гарлаа",
+    };
+  }
+
   const publishPayload = {
     is_published: true,
     published_snapshot: snapshot,
@@ -751,11 +765,22 @@ export async function publishExam(examId: string) {
 
   if (recipients && recipients.length > 0) {
     const studentIds = recipients.map((r) => r.student_id);
-    notifyStudentsOfNewExam(
-      examId,
-      snapshot.exam.title,
-      studentIds
-    ).catch(() => {});
+    try {
+      await notifyStudentsOfNewExam(
+        examId,
+        snapshot.exam.title,
+        studentIds,
+        {
+          startTime: snapshot.exam.start_time,
+          durationMinutes: snapshot.exam.duration_minutes,
+        }
+      );
+    } catch (notificationError) {
+      console.error(
+        `Failed to notify students after publishing exam ${examId}:`,
+        notificationError
+      );
+    }
   }
 
   revalidatePath("/educator");

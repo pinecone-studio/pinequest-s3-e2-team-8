@@ -108,6 +108,7 @@ export type QuestionBankVisibility =
 export interface Question {
   id: string;
   exam_id: string;
+  subject_id?: string | null;
   passage_id?: string | null;
   type: QuestionType;
   content: string;
@@ -118,6 +119,10 @@ export interface Question {
   points: number;
   order_index: number;
   explanation: string | null;
+  subtopic?: string | null;
+  source_question_bank_id?: string | null;
+  topic_label_source?: string | null;
+  topic_label_confidence?: number | null;
   ai_variant_enabled: boolean;
   created_at: string;
   question_passages?: QuestionPassage | null;
@@ -257,6 +262,110 @@ export interface Answer {
   ai_score: number | null;
   ai_feedback: string | null;
   ai_graded_at: string | null;
+}
+
+export interface StudentTopicMastery {
+  id: string;
+  student_id: string;
+  subject_id: string;
+  topic_key: string;
+  topic_label: string;
+  official_correct_points: number;
+  official_total_points: number;
+  practice_correct_points: number;
+  practice_total_points: number;
+  official_question_count: number;
+  practice_question_count: number;
+  mastery_score: number;
+  updated_at: string;
+}
+
+export interface StudentLearningSubjectSummary {
+  subject_id: string;
+  subject_name: string;
+  mastery_score: number;
+  official_question_count: number;
+  practice_question_count: number;
+  weak_topic_count: number;
+  needs_topic_backfill: boolean;
+}
+
+export interface StudentLearningTopicSummary {
+  subject_id: string;
+  subject_name: string;
+  topic_key: string;
+  topic_label: string;
+  mastery_score: number;
+  official_question_count: number;
+  practice_question_count: number;
+  official_percentage: number | null;
+  practice_percentage: number | null;
+}
+
+export interface StudentSubjectStudyPlan {
+  student_id: string;
+  subject_id: string;
+  mastery_updated_at: string;
+  generated_at: string;
+  summary: string;
+  priorities: string[];
+  steps: string[];
+  next_practice_focus: string[];
+}
+
+export interface StudentPracticeExam {
+  id: string;
+  student_id: string;
+  subject_id: string;
+  title: string;
+  description: string | null;
+  selected_topics: Array<{ topic_key: string; topic_label: string }>;
+  question_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StudentPracticeQuestion {
+  id: string;
+  practice_exam_id: string;
+  subject_id: string;
+  source_type: "bank" | "ai";
+  source_question_bank_id: string | null;
+  topic_key: string;
+  subtopic: string | null;
+  type: QuestionType;
+  content: string;
+  content_html: string | null;
+  image_url: string | null;
+  options: string[] | null;
+  correct_answer: string | null;
+  points: number;
+  order_index: number;
+  explanation: string | null;
+}
+
+export interface StudentPracticeAttempt {
+  id: string;
+  practice_exam_id: string;
+  student_id: string;
+  status: "in_progress" | "graded";
+  started_at: string;
+  submitted_at: string | null;
+  total_score: number | null;
+  max_score: number | null;
+  attempt_number: number;
+}
+
+export interface StudentPracticeAnswer {
+  id: string;
+  practice_attempt_id: string;
+  practice_question_id: string;
+  student_id: string;
+  answer: string | null;
+  is_correct: boolean | null;
+  score: number | null;
+  feedback: string | null;
+  submitted_at: string;
 }
 
 export interface ExamSchedule {
