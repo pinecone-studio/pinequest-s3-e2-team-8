@@ -4,17 +4,17 @@ import { createClient } from "@/lib/supabase/server";
 import { getTeacherSubjects } from "@/lib/subject/actions";
 import { isAdminUser } from "@/lib/teacher/permissions";
 import type { Subject } from "@/types";
-import QuestionBankBrowser from "./_features/QuestionBankBrowser";
+import QuestionBankBrowser from "../_features/QuestionBankBrowser";
 
-interface QuestionBankPageProps {
+interface PrivateQuestionBankPageProps {
   searchParams: Promise<{
     examId?: string;
   }>;
 }
 
-export default async function QuestionBankPage({
+export default async function PrivateQuestionBankPage({
   searchParams,
-}: QuestionBankPageProps) {
+}: PrivateQuestionBankPageProps) {
   const { examId } = await searchParams;
   const [{ certifiedQuestions, privateQuestions, sampleExams }, subjects, targetExam] =
     await Promise.all([
@@ -74,7 +74,11 @@ export default async function QuestionBankPage({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold tracking-tight">Асуултын сан</h2>
+        <h2 className="text-2xl font-bold tracking-tight">Хувийн сан</h2>
+        <p className="text-sm text-muted-foreground">
+          Таны шалгалтын материал (зураг, текст) — энд хадгалж, &quot;Засах&quot;-аар
+          бүрэн асуулт болгож, дараа нь шалгалтад оруулна.
+        </p>
       </div>
 
       <QuestionBankBrowser
@@ -88,6 +92,7 @@ export default async function QuestionBankPage({
           !importUnavailableMessage ? targetExam?.subject_id ?? undefined : undefined
         }
         importUnavailableMessage={importUnavailableMessage}
+        defaultTab="private"
         viewerIsAdmin={viewerIsAdmin}
       />
     </div>

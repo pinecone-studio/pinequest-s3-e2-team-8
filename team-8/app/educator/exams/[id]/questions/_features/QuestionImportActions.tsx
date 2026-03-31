@@ -587,9 +587,15 @@ export default function QuestionImportActions({
               <DropdownMenuContent align="end" className="w-64">
                 <DropdownMenuLabel>Эх сурвалж сонгох</DropdownMenuLabel>
                 <DropdownMenuItem asChild>
+                  <Link href={`/educator/question-bank/private?examId=${examId}`}>
+                    <BookOpen className="h-4 w-4" />
+                    Хувийн сангаас авах
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
                   <Link href={`/educator/question-bank?examId=${examId}`}>
                     <BookOpen className="h-4 w-4" />
-                    Асуултын сан ашиглах
+                    Баталгаажсан сан, жишиг шалгалт
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
@@ -685,8 +691,8 @@ export default function QuestionImportActions({
 
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button asChild variant="outline" className="justify-between rounded-full px-5">
-              <Link href={`/educator/question-bank?examId=${examId}`}>
-                Асуултын сангаас авах
+              <Link href={`/educator/question-bank/private?examId=${examId}`}>
+                Хувийн сангаас авах
               </Link>
             </Button>
 

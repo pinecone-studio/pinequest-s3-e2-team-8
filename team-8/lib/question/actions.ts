@@ -1,6 +1,10 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import mammoth from "mammoth";
+import * as XLSX from "xlsx";
+import { extractQuestionTextFromImageBytes } from "@/lib/ai/extract-image-text";
 import { createClient } from "@/lib/supabase/server";
 import { isQuestionVariantSchemaMissing } from "@/lib/question-variants";
 import { getAllowedSubjectIds } from "@/lib/teacher/permissions";
@@ -124,6 +128,16 @@ function canManageQuestionBankItem(
   }
 
   return context.isAdmin || question.created_by === context.userId;
+}
+
+function canImportQuestionBankItemToExam(
+  question: QuestionBankRow,
+  context: QuestionBankAccessContext
+) {
+  if (question.visibility === "archived") {
+    return false;
+  }
+  return canViewQuestionBankItem(question, context);
 }
 
 function buildQuestionBankSummary(
@@ -856,54 +870,70 @@ export async function getQuestionBankCatalogData() {
   if (!user) {
     return {
       certifiedQuestions: [] as QuestionBank[],
+      privateQuestions: [] as QuestionBank[],
       sampleExams: [] as SampleExam[],
     };
   }
 
   const context = await getQuestionBankAccessContext(supabase, user.id);
+  const hasSubjectCatalogScope =
+    context.isAdmin || context.allowedSubjectIds.length > 0;
 
-  if (!context.isAdmin && context.allowedSubjectIds.length === 0) {
-    return {
-      certifiedQuestions: [] as QuestionBank[],
-      sampleExams: [] as SampleExam[],
-    };
-  }
+  const certifiedQuery =
+    !hasSubjectCatalogScope
+      ? Promise.resolve({ data: [] as Partial<QuestionBank>[] | null })
+      : context.isAdmin
+        ? supabase
+            .from("question_bank")
+            .select("*, subjects(name)")
+            .eq("visibility", "admin_curated")
+            .order("updated_at", { ascending: false })
+        : supabase
+            .from("question_bank")
+            .select("*, subjects(name)")
+            .eq("visibility", "admin_curated")
+            .in("subject_id", context.allowedSubjectIds)
+            .order("updated_at", { ascending: false });
 
-  const certifiedQuery = context.isAdmin
+  const sampleExamQuery =
+    !hasSubjectCatalogScope
+      ? Promise.resolve({ data: null, error: null })
+      : context.isAdmin
+        ? supabase
+            .from("sample_exams")
+            .select(
+              "*, subjects(name), sample_exam_items(id, sample_exam_id, question_bank_id, order_index, created_at, question_bank:question_bank_id(*, subjects(name)))"
+            )
+            .order("updated_at", { ascending: false })
+        : supabase
+            .from("sample_exams")
+            .select(
+              "*, subjects(name), sample_exam_items(id, sample_exam_id, question_bank_id, order_index, created_at, question_bank:question_bank_id(*, subjects(name)))"
+            )
+            .in("subject_id", context.allowedSubjectIds)
+            .order("updated_at", { ascending: false });
+
+  const privateQuery = context.isAdmin
     ? supabase
         .from("question_bank")
         .select("*, subjects(name)")
-        .eq("visibility", "admin_curated")
+        .eq("visibility", "private")
         .order("updated_at", { ascending: false })
     : supabase
         .from("question_bank")
         .select("*, subjects(name)")
-        .eq("visibility", "admin_curated")
-        .in("subject_id", context.allowedSubjectIds)
+        .eq("visibility", "private")
+        .eq("created_by", user.id)
         .order("updated_at", { ascending: false });
 
-  const sampleExamQuery = context.isAdmin
-    ? supabase
-        .from("sample_exams")
-        .select(
-          "*, subjects(name), sample_exam_items(id, sample_exam_id, question_bank_id, order_index, created_at, question_bank:question_bank_id(*, subjects(name)))"
-        )
-        .order("updated_at", { ascending: false })
-    : supabase
-        .from("sample_exams")
-        .select(
-          "*, subjects(name), sample_exam_items(id, sample_exam_id, question_bank_id, order_index, created_at, question_bank:question_bank_id(*, subjects(name)))"
-        )
-        .in("subject_id", context.allowedSubjectIds)
-        .order("updated_at", { ascending: false });
-
-  const [{ data: certifiedRows }, sampleExamResult] = await Promise.all([
-    certifiedQuery,
-    sampleExamQuery,
-  ]);
+  const [{ data: certifiedRows }, sampleExamResult, { data: privateRows }] =
+    await Promise.all([certifiedQuery, sampleExamQuery, privateQuery]);
 
   return {
     certifiedQuestions: (certifiedRows as Partial<QuestionBank>[]).map(
+      normalizeQuestionBankRecord
+    ),
+    privateQuestions: (privateRows as Partial<QuestionBank>[]).map(
       normalizeQuestionBankRecord
     ),
     sampleExams:
@@ -1031,15 +1061,8 @@ export async function importQuestionsFromBank(
   }
 
   for (const bankQuestion of orderedQuestions) {
-    if (!canViewQuestionBankItem(bankQuestion, context)) {
+    if (!canImportQuestionBankItemToExam(bankQuestion, context)) {
       return { error: "Зарим сонгосон асуултыг оруулах эрх байхгүй байна." };
-    }
-
-    if (bankQuestion.visibility !== "admin_curated") {
-      return {
-        error:
-          "Зөвхөн баталгаажсан сангийн асуултуудыг шалгалт руу оруулж болно.",
-      };
     }
 
     if (
@@ -1092,6 +1115,7 @@ export async function importQuestionsFromBank(
 
   revalidatePath(`/educator/exams/${examId}/questions`);
   revalidatePath("/educator/question-bank");
+  revalidatePath("/educator/question-bank/private");
 
   if (usageError) {
     return {
@@ -1137,11 +1161,8 @@ export async function importQuestionFromBank(
     return { error: QUESTION_BANK_GOVERNANCE_ERROR };
   }
   if (!bankQuestion) return { error: "Асуултын сангийн бичлэг олдсонгүй" };
-  if (!canViewQuestionBankItem(bankQuestion, context)) {
+  if (!canImportQuestionBankItemToExam(bankQuestion, context)) {
     return { error: "Энэ асуултыг импортлох эрх байхгүй байна" };
-  }
-  if (bankQuestion.visibility !== "admin_curated") {
-    return { error: "Зөвхөн баталгаажсан сангийн асуултыг оруулах боломжтой" };
   }
   if (
     exam.subject_id &&
@@ -1189,6 +1210,7 @@ export async function importQuestionFromBank(
 
   revalidatePath(`/educator/exams/${examId}/questions`);
   revalidatePath("/educator/question-bank");
+  revalidatePath("/educator/question-bank/private");
   if (usageError) {
     return {
       success: true,
@@ -1433,6 +1455,7 @@ export async function updateQuestionBankItem(
   if (error) return { error: error.message };
 
   revalidatePath("/educator/question-bank");
+  revalidatePath("/educator/question-bank/private");
   return { success: true };
 }
 
@@ -1466,7 +1489,238 @@ export async function deleteQuestionBankItem(bankQuestionId: string) {
   if (error) return { error: error.message };
 
   revalidatePath("/educator/question-bank");
+  revalidatePath("/educator/question-bank/private");
   return { success: true };
+}
+
+const PRIVATE_BANK_IMAGE_MIME = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+] as const;
+
+export async function createPrivateBankEntryFromImage(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const subjectId = String(formData.get("subject_id") ?? "").trim();
+  const subtopic = String(formData.get("subtopic") ?? "").trim() || null;
+  const gradeRaw = String(formData.get("grade_level") ?? "").trim();
+  const gradeLevelParsed = parseInt(gradeRaw, 10);
+  const grade_level =
+    gradeRaw && !Number.isNaN(gradeLevelParsed)
+      ? Math.min(12, Math.max(1, gradeLevelParsed))
+      : null;
+  const useAi =
+    formData.get("use_ai") === "on" || formData.get("use_ai") === "true";
+
+  const file = formData.get("image");
+  if (!file || typeof file !== "object" || !("arrayBuffer" in file)) {
+    return { error: "Зургийн файл сонгоно уу." };
+  }
+  const uploaded = file as File;
+  const mime = uploaded.type || "image/jpeg";
+  if (!PRIVATE_BANK_IMAGE_MIME.includes(mime as (typeof PRIVATE_BANK_IMAGE_MIME)[number])) {
+    return { error: "Зөвхөн JPG, PNG, WEBP, GIF зураг дэмжинэ." };
+  }
+  if (uploaded.size > 5 * 1024 * 1024) {
+    return { error: "Зураг 5MB-аас бага байх ёстой." };
+  }
+
+  const context = await getQuestionBankAccessContext(supabase, user.id);
+  if (!context.isAdmin) {
+    if (!subjectId) {
+      return { error: "Хичээл сонгоно уу." };
+    }
+    if (!context.allowedSubjectSet.has(subjectId)) {
+      return { error: "Энэ хичээлд материал нэмэх эрх байхгүй байна." };
+    }
+  }
+
+  const buffer = Buffer.from(await uploaded.arrayBuffer());
+  const ext =
+    mime === "image/png"
+      ? "png"
+      : mime === "image/webp"
+        ? "webp"
+        : mime === "image/gif"
+          ? "gif"
+          : "jpg";
+  const path = `${user.id}/${randomUUID()}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from("question-media")
+    .upload(path, buffer, { contentType: mime, upsert: false });
+
+  if (uploadError) {
+    return {
+      error: `Зураг хадгалахад алдаа: ${uploadError.message}. Storage bucket «question-media» идэвхтэй эсэхийг (migration 029) шалгана уу.`,
+    };
+  }
+
+  const { data: pub } = supabase.storage.from("question-media").getPublicUrl(path);
+  const imageUrl = pub.publicUrl;
+
+  let content = "";
+  if (useAi) {
+    const extracted = await extractQuestionTextFromImageBytes(
+      new Uint8Array(buffer),
+      mime
+    );
+    if (extracted) {
+      content = extracted;
+    }
+  }
+  if (!content.trim()) {
+    content =
+      "Энэ материал голлон зураг дээр байрлана. Дээрх «Засах» товчоор асуултын төрөл, текст, сонголт, зөв хариултаа бүрэн тохируулна уу.";
+  }
+
+  const { error: insertError } = await supabase.from("question_bank").insert({
+    subject_id: subjectId || null,
+    created_by: user.id,
+    visibility: "private",
+    type: "essay",
+    content,
+    content_html: null,
+    image_url: imageUrl,
+    options: null,
+    correct_answer: null,
+    points: 1,
+    difficulty: "medium",
+    difficulty_level: 2,
+    tags: [],
+    subtopic,
+    grade_level,
+    explanation: null,
+  });
+
+  if (insertError) return { error: insertError.message };
+
+  revalidatePath("/educator/question-bank");
+  revalidatePath("/educator/question-bank/private");
+  return { success: true };
+}
+
+export async function createPrivateBankEntryFromText(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const subjectId = String(formData.get("subject_id") ?? "").trim();
+  const subtopic = String(formData.get("subtopic") ?? "").trim() || null;
+  const gradeRaw = String(formData.get("grade_level") ?? "").trim();
+  const gradeLevelParsed = parseInt(gradeRaw, 10);
+  const grade_level =
+    gradeRaw && !Number.isNaN(gradeLevelParsed)
+      ? Math.min(12, Math.max(1, gradeLevelParsed))
+      : null;
+
+  const content = String(formData.get("content") ?? "").trim();
+  if (!content) {
+    return { error: "Шалгалтын материалын текстээ бичнэ үү." };
+  }
+  const content_html = String(formData.get("content_html") ?? "").trim() || null;
+
+  const context = await getQuestionBankAccessContext(supabase, user.id);
+  if (!context.isAdmin) {
+    if (!subjectId) {
+      return { error: "Хичээл сонгоно уу." };
+    }
+    if (!context.allowedSubjectSet.has(subjectId)) {
+      return { error: "Энэ хичээлд материал нэмэх эрх байхгүй байна." };
+    }
+  }
+
+  const { error: insertError } = await supabase.from("question_bank").insert({
+    subject_id: subjectId || null,
+    created_by: user.id,
+    visibility: "private",
+    type: "essay",
+    content,
+    content_html,
+    image_url: null,
+    options: null,
+    correct_answer: null,
+    points: 1,
+    difficulty: "medium",
+    difficulty_level: 2,
+    tags: [],
+    subtopic,
+    grade_level,
+    explanation: null,
+  });
+
+  if (insertError) return { error: insertError.message };
+
+  revalidatePath("/educator/question-bank");
+  revalidatePath("/educator/question-bank/private");
+  return { success: true };
+}
+
+const PRIVATE_BANK_FILE_EXT = new Set(["txt", "csv", "docx", "xlsx", "xls"]);
+
+export async function extractPrivateBankTextFromFile(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const file = formData.get("file");
+  if (!file || typeof file !== "object" || !("arrayBuffer" in file)) {
+    return { error: "Файл сонгоно уу." };
+  }
+  const uploaded = file as File;
+  const fileName = uploaded.name || "material";
+  const ext = (fileName.includes(".") ? fileName.split(".").pop() : "")?.toLowerCase() ?? "";
+  if (!PRIVATE_BANK_FILE_EXT.has(ext)) {
+    return {
+      error: "Зөвхөн .txt, .csv, .docx, .xlsx, .xls файл дэмжинэ.",
+    };
+  }
+  if (uploaded.size > 10 * 1024 * 1024) {
+    return { error: "Файл 10MB-аас бага байх ёстой." };
+  }
+
+  try {
+    const buffer = Buffer.from(await uploaded.arrayBuffer());
+    let text = "";
+
+    if (ext === "docx") {
+      const { value } = await mammoth.extractRawText({ buffer });
+      text = value;
+    } else if (ext === "txt" || ext === "csv") {
+      text = buffer.toString("utf-8");
+    } else {
+      const workbook = XLSX.read(buffer, { type: "buffer" });
+      const firstSheet = workbook.SheetNames[0];
+      if (!firstSheet) {
+        return { error: "Excel файлд хуудас олдсонгүй." };
+      }
+      const sheet = workbook.Sheets[firstSheet];
+      text = XLSX.utils.sheet_to_csv(sheet, { FS: "\t", blankrows: false });
+    }
+
+    const normalized = text.replace(/\r\n/g, "\n").trim();
+    if (!normalized) {
+      return { error: "Файлаас текст олдсонгүй." };
+    }
+    return { success: true as const, text: normalized };
+  } catch (error) {
+    return {
+      error:
+        error instanceof Error
+          ? error.message
+          : "Файлыг уншихад алдаа гарлаа.",
+    };
+  }
 }
 
 export async function bulkUpdateQuestionBankItems(
@@ -1570,6 +1824,7 @@ export async function bulkUpdateQuestionBankItems(
   if (error) return { error: error.message };
 
   revalidatePath("/educator/question-bank");
+  revalidatePath("/educator/question-bank/private");
   return { success: true, updatedCount: manageableRows.length };
 }
 
