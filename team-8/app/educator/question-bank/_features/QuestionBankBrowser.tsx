@@ -15,6 +15,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import EditQuestionBankDialog from "./EditQuestionBankDialog";
+import PrivateBankAddMaterial from "./PrivateBankAddMaterial";
 
 const typeLabels: Record<string, string> = {
   multiple_choice: "Сонголттой",
@@ -30,17 +32,20 @@ const difficultyLabels: Record<number, string> = {
   3: "Хүнд",
 };
 
+type TabKey = "sample" | "bank" | "private";
+
 interface QuestionBankBrowserProps {
   certifiedQuestions: QuestionBank[];
+  privateQuestions: QuestionBank[];
   sampleExams: SampleExam[];
   subjects: Subject[];
   examId?: string;
   examTitle?: string;
   targetExamSubjectId?: string;
   importUnavailableMessage?: string | null;
+  defaultTab?: TabKey;
+  viewerIsAdmin?: boolean;
 }
-
-type TabKey = "sample" | "bank";
 type MessageTone = "neutral" | "success" | "error" | "warning";
 
 function uniqueValues(values: Array<string | null | undefined>) {
@@ -51,16 +56,19 @@ function uniqueValues(values: Array<string | null | undefined>) {
 
 export default function QuestionBankBrowser({
   certifiedQuestions,
+  privateQuestions,
   sampleExams,
   subjects,
   examId,
   examTitle,
   targetExamSubjectId,
   importUnavailableMessage,
+  defaultTab = "sample",
+  viewerIsAdmin = false,
 }: QuestionBankBrowserProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [tab, setTab] = useState<TabKey>("sample");
+  const [tab, setTab] = useState<TabKey>(defaultTab);
   const [query, setQuery] = useState("");
   const [subjectFilter, setSubjectFilter] = useState("all");
   const [gradeFilter, setGradeFilter] = useState("all");
@@ -79,6 +87,11 @@ export default function QuestionBankBrowser({
 
   const normalizedQuery = query.trim().toLowerCase();
 
+  function changeTab(next: TabKey) {
+    setSelectedQuestionIds([]);
+    setTab(next);
+  }
+
   const subjectOptions = useMemo(
     () =>
       Array.from(
@@ -93,20 +106,22 @@ export default function QuestionBankBrowser({
         new Set(
           [
             ...certifiedQuestions.map((question) => question.grade_level),
+            ...privateQuestions.map((question) => question.grade_level),
             ...sampleExams.map((sampleExam) => sampleExam.grade_level),
           ].filter((grade): grade is number => Boolean(grade))
         )
       ).sort((left, right) => left - right),
-    [certifiedQuestions, sampleExams]
+    [certifiedQuestions, privateQuestions, sampleExams]
   );
 
   const subtopicOptions = useMemo(
     () =>
       uniqueValues([
         ...certifiedQuestions.map((question) => question.subtopic),
+        ...privateQuestions.map((question) => question.subtopic),
         ...sampleExams.map((sampleExam) => sampleExam.subtopic),
       ]),
-    [certifiedQuestions, sampleExams]
+    [certifiedQuestions, privateQuestions, sampleExams]
   );
 
   const filteredSampleExams = useMemo(() => {
@@ -186,10 +201,57 @@ export default function QuestionBankBrowser({
     typeFilter,
   ]);
 
-  const selectableQuestionIds = useMemo(() => {
-    if (!examId) return [];
+  const filteredPrivateQuestions = useMemo(() => {
+    return privateQuestions.filter((question) => {
+      const tags = Array.isArray(question.tags) ? question.tags : [];
+      const matchesQuery =
+        normalizedQuery.length === 0 ||
+        question.content.toLowerCase().includes(normalizedQuery) ||
+        (question.explanation ?? "").toLowerCase().includes(normalizedQuery) ||
+        (question.subtopic ?? "").toLowerCase().includes(normalizedQuery) ||
+        (question.subjects?.name ?? "").toLowerCase().includes(normalizedQuery) ||
+        tags.some((tag) => tag.toLowerCase().includes(normalizedQuery));
 
-    return filteredCertifiedQuestions
+      const matchesSubject =
+        subjectFilter === "all" || question.subject_id === subjectFilter;
+      const matchesGrade =
+        gradeFilter === "all" || String(question.grade_level ?? "") === gradeFilter;
+      const matchesSubtopic =
+        subtopicFilter === "all" || question.subtopic === subtopicFilter;
+      const matchesDifficulty =
+        difficultyFilter === "all" ||
+        String(question.difficulty_level) === difficultyFilter;
+      const matchesType = typeFilter === "all" || question.type === typeFilter;
+
+      return (
+        matchesQuery &&
+        matchesSubject &&
+        matchesGrade &&
+        matchesSubtopic &&
+        matchesDifficulty &&
+        matchesType
+      );
+    });
+  }, [
+    privateQuestions,
+    difficultyFilter,
+    gradeFilter,
+    normalizedQuery,
+    subjectFilter,
+    subtopicFilter,
+    typeFilter,
+  ]);
+
+  const activeFilteredBankQuestions = useMemo(() => {
+    if (tab === "bank") return filteredCertifiedQuestions;
+    if (tab === "private") return filteredPrivateQuestions;
+    return [];
+  }, [tab, filteredCertifiedQuestions, filteredPrivateQuestions]);
+
+  const selectableQuestionIds = useMemo(() => {
+    if (!examId || (tab !== "bank" && tab !== "private")) return [];
+
+    return activeFilteredBankQuestions
       .filter(
         (question) =>
           !(
@@ -199,7 +261,7 @@ export default function QuestionBankBrowser({
           )
       )
       .map((question) => question.id);
-  }, [examId, filteredCertifiedQuestions, targetExamSubjectId]);
+  }, [activeFilteredBankQuestions, examId, tab, targetExamSubjectId]);
 
   function setStatusMessage(tone: MessageTone, nextMessage: string | null) {
     setMessageTone(tone);
@@ -309,21 +371,40 @@ export default function QuestionBankBrowser({
         </Card>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant={tab === "sample" ? "default" : "outline"}
-          onClick={() => setTab("sample")}
+      <div className="flex min-w-0 w-full flex-nowrap items-center gap-3">
+        <div
+          className="flex min-h-10 min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          role="tablist"
+          aria-label="Асуултын сангийн орон"
         >
-          Жишиг шалгалт
-        </Button>
-        <Button
-          type="button"
-          variant={tab === "bank" ? "default" : "outline"}
-          onClick={() => setTab("bank")}
-        >
-          Баталгаажсан сан
-        </Button>
+          <Button
+            type="button"
+            variant={tab === "sample" ? "default" : "outline"}
+            className="shrink-0"
+            onClick={() => changeTab("sample")}
+          >
+            Жишиг шалгалт
+          </Button>
+          <Button
+            type="button"
+            variant={tab === "bank" ? "default" : "outline"}
+            className="shrink-0"
+            onClick={() => changeTab("bank")}
+          >
+            Баталгаажсан сан
+          </Button>
+          <Button
+            type="button"
+            variant={tab === "private" ? "default" : "outline"}
+            className="shrink-0"
+            onClick={() => changeTab("private")}
+          >
+            Хувийн сан
+          </Button>
+        </div>
+        {tab === "private" ? (
+          <PrivateBankAddMaterial subjects={subjects} viewerIsAdmin={viewerIsAdmin} />
+        ) : null}
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
@@ -387,7 +468,7 @@ export default function QuestionBankBrowser({
           <option value="3">3 · Хүнд</option>
         </select>
 
-        {tab === "bank" ? (
+        {tab === "bank" || tab === "private" ? (
           <select
             value={typeFilter}
             onChange={(event) => setTypeFilter(event.target.value)}
@@ -527,9 +608,11 @@ export default function QuestionBankBrowser({
             })}
           </div>
         )
-      ) : filteredCertifiedQuestions.length === 0 ? (
+      ) : activeFilteredBankQuestions.length === 0 ? (
         <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
-          Баталгаажсан бодлого олдсонгүй.
+          {tab === "private"
+            ? "Хувийн бодлого олдсонгүй."
+            : "Баталгаажсан бодлого олдсонгүй."}
         </div>
       ) : (
         <div className="space-y-3">
@@ -576,7 +659,7 @@ export default function QuestionBankBrowser({
             </Card>
           ) : null}
 
-          {filteredCertifiedQuestions.map((question) => {
+          {activeFilteredBankQuestions.map((question) => {
             const hasSubjectMismatch = Boolean(
               targetExamSubjectId &&
                 question.subject_id &&
@@ -606,34 +689,48 @@ export default function QuestionBankBrowser({
                       <Badge variant="outline">{question.points} оноо</Badge>
                     </div>
 
-                    {examId ? (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={selectedQuestionIds.includes(question.id)}
-                            onChange={() => toggleQuestionSelection(question.id)}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {tab === "private" ? (
+                        <EditQuestionBankDialog
+                          question={question}
+                          subjects={subjects}
+                          canAdminCurate={viewerIsAdmin}
+                          trigger={
+                            <Button type="button" variant="secondary" size="sm">
+                              Засах
+                            </Button>
+                          }
+                        />
+                      ) : null}
+                      {examId ? (
+                        <>
+                          <label className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={selectedQuestionIds.includes(question.id)}
+                              onChange={() => toggleQuestionSelection(question.id)}
+                              disabled={isPending || hasSubjectMismatch}
+                              className="h-4 w-4"
+                            />
+                            Сонгох
+                          </label>
+                          <Button
+                            type="button"
+                            onClick={() => handleImportQuestion(question.id)}
                             disabled={isPending || hasSubjectMismatch}
-                            className="h-4 w-4"
-                          />
-                          Сонгох
-                        </label>
-                        <Button
-                          type="button"
-                          onClick={() => handleImportQuestion(question.id)}
-                          disabled={isPending || hasSubjectMismatch}
-                          variant={hasSubjectMismatch ? "outline" : "default"}
-                        >
-                          {lastImportedQuestionId === question.id
-                            ? "Оруулсан"
-                            : hasSubjectMismatch
-                              ? "Хичээл таарахгүй"
-                              : isPending
-                                ? "Оруулж байна..."
-                                : "Шалгалтад нэмэх"}
-                        </Button>
-                      </div>
-                    ) : null}
+                            variant={hasSubjectMismatch ? "outline" : "default"}
+                          >
+                            {lastImportedQuestionId === question.id
+                              ? "Оруулсан"
+                              : hasSubjectMismatch
+                                ? "Хичээл таарахгүй"
+                                : isPending
+                                  ? "Оруулж байна..."
+                                  : "Шалгалтад нэмэх"}
+                          </Button>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
 
                   <MathContent

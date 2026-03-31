@@ -358,6 +358,42 @@ export default function AddQuestionForm({ examId, passages }: Props) {
   }
 
   const activeTargetValue = getActiveTargetValue().trim();
+  const activeFormulaPreview = activeTargetValue ? (
+    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-zinc-950">Харагдах байдал</p>
+          <p className="text-xs text-zinc-500">
+            Томьёо талбарт LaTeX кодоор хадгалагдаж, доорх шиг render хийгдэнэ.
+          </p>
+        </div>
+        <p className="text-xs text-zinc-500">{activeFormulaTarget.label}</p>
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
+            Code
+          </p>
+          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-sm text-zinc-900">
+            {activeTargetValue}
+          </pre>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
+            Preview
+          </p>
+          <div className="mt-2 min-h-16">
+            <MathContent
+              text={activeTargetValue}
+              className="prose prose-sm max-w-none text-zinc-900"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div className="rounded-[28px] border border-zinc-200 bg-white p-6 shadow-[0_12px_40px_-18px_rgba(15,23,42,0.16)] md:p-8">
@@ -566,24 +602,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
                 description="Асуулт, хариулт эсвэл холбох мөр дээр дарж байгаад томьёогоо шууд оруулна."
               />
 
-              {activeTargetValue ? (
-                <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-zinc-950">
-                      Идэвхтэй талбарын preview
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      {activeFormulaTarget.label}
-                    </p>
-                  </div>
-                  <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">
-                    <MathContent
-                      text={activeTargetValue}
-                      className="prose prose-sm max-w-none text-zinc-900"
-                    />
-                  </div>
-                </div>
-              ) : null}
+              {activeFormulaPreview}
             </div>
           </div>
         ) : null}
@@ -618,24 +637,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
                 description="Асуулт, хариулт эсвэл холбох мөр дээр дарж байгаад томьёогоо шууд оруулна."
               />
 
-              {activeTargetValue ? (
-                <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-zinc-950">
-                      Идэвхтэй талбарын preview
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      {activeFormulaTarget.label}
-                    </p>
-                  </div>
-                  <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">
-                    <MathContent
-                      text={activeTargetValue}
-                      className="prose prose-sm max-w-none text-zinc-900"
-                    />
-                  </div>
-                </div>
-              ) : null}
+              {activeFormulaPreview}
             </div>
           ) : null}
         </div>

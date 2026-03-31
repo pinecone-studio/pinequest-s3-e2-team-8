@@ -11,7 +11,7 @@ import {
   FileSpreadsheet,
   HomeIcon,
   LogOut,
-  LucideIcon,
+  type LucideIcon,
   Users,
 } from "lucide-react";
 import Logo from "@/app/_icons/Logo";
@@ -24,7 +24,7 @@ interface NavItem {
   icon: LucideIcon;
 }
 
-const ALL_NAV_ITEMS: NavItem[] = [
+const allNavItems: NavItem[] = [
   { href: "/educator", label: "Нүүр хуудас", icon: HomeIcon },
   {
     href: "/educator/question-bank",
@@ -72,7 +72,7 @@ export default function Sidebar() {
           </div>
 
           <nav className="flex flex-col gap-1.5">
-            {ALL_NAV_ITEMS.map((item) => {
+            {allNavItems.map((item) => {
               const Icon = item.icon;
               const isActive =
                 pathname === item.href ||
