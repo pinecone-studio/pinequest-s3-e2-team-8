@@ -1,260 +1,265 @@
 import Link from "next/link";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { getStudentStats } from "@/lib/dashboard/actions";
-import { formatDateTimeUB } from "@/lib/utils/date";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import DashboardImage from "../_icons/DashboardImage";
+import { formatTimeUB, ULAANBAATAR_TIME_ZONE } from "@/lib/utils/date";
+
+type UpcomingExam = {
+  id: string;
+  title: string;
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  session_status: string | null;
+  lifecycle_status: string;
+  lifecycle_label: string;
+};
+
+function formatExamTimeLabel(
+  startTime: string,
+  durationMinutes: number,
+): string {
+  const now = new Date();
+
+  const toUBDate = (d: Date) =>
+    new Date(d.toLocaleString("en-US", { timeZone: ULAANBAATAR_TIME_ZONE }));
+
+  const nowUB = toUBDate(now);
+  const startUB = toUBDate(new Date(startTime));
+
+  const nowMidnight = new Date(nowUB);
+  nowMidnight.setHours(0, 0, 0, 0);
+  const startMidnight = new Date(startUB);
+  startMidnight.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.round(
+    (startMidnight.getTime() - nowMidnight.getTime()) / (1000 * 60 * 60 * 24),
+  );
+
+  const timeStr = formatTimeUB(startTime);
+
+  let dayLabel: string;
+  if (diffDays <= 0) {
+    dayLabel = `Өнөөдөр ${timeStr}`;
+  } else if (diffDays === 1) {
+    dayLabel = `Маргааш ${timeStr}`;
+  } else {
+    dayLabel = `${diffDays} өдрийн дараа`;
+  }
+
+  return `${dayLabel} • ${durationMinutes} минут`;
+}
+
+const CARD_PALETTES = [
+  "bg-blue-100",
+  "bg-violet-100",
+  "bg-emerald-100",
+  "bg-orange-100",
+  "bg-pink-100",
+  "bg-teal-100",
+  "bg-yellow-100",
+  "bg-indigo-100",
+];
+
+const AVATAR_COLORS = [
+  "bg-blue-400",
+  "bg-violet-400",
+  "bg-emerald-400",
+  "bg-orange-400",
+  "bg-pink-400",
+];
+
+function ExamCard({
+  exam,
+  paletteIndex,
+  isActive,
+}: {
+  exam: UpcomingExam;
+  paletteIndex: number;
+  isActive: boolean;
+}) {
+  const bgColor = CARD_PALETTES[paletteIndex % CARD_PALETTES.length];
+  const timeLabel = formatExamTimeLabel(exam.start_time, exam.duration_minutes);
+
+  return (
+    <article
+      className={`relative h-[226px] w-full max-w-[340px] overflow-hidden rounded-[13px] ${bgColor} shadow-[0_2px_6px_rgba(0,0,0,0.25)]`}
+    >
+      <div
+        className="absolute left-0 top-[68px] h-[158px] w-full bg-white shadow-[0_4px_10px_rgba(0,0,0,0.10)]"
+        style={{
+          clipPath:
+            "polygon(0 0, 78% 0, 84% 22px, 100% 22px, 100% 100%, 0 100%)",
+          borderTopLeftRadius: "13px",
+          borderBottomLeftRadius: "13px",
+          borderBottomRightRadius: "13px",
+        }}
+      />
+
+      <svg
+        className="pointer-events-none absolute left-0 top-[68px]"
+        width="340"
+        height="158"
+        viewBox="0 0 340 158"
+        fill="none"
+      >
+        <path
+          d="M13 0H265.2L285.6 22H327C334.18 22 340 27.82 340 35V145C340 152.18 334.18 158 327 158H13C5.82 158 0 152.18 0 145V13C0 5.82 5.82 0 13 0Z"
+          fill="none"
+          stroke="rgba(0,0,0,0.20)"
+          strokeWidth="1"
+        />
+      </svg>
+
+      <div className="absolute left-5 top-[85px] flex h-[128px] w-[300px] flex-col items-start gap-[14px]">
+        <div className="flex w-full flex-col items-start gap-3">
+          <div className="flex w-full flex-col items-start gap-[10px]">
+            <div className="h-[45px] w-full">
+              <h4 className="line-clamp-1 text-[20px] leading-[120%] font-normal text-black">
+                {exam.title}
+              </h4>
+              <p className="line-clamp-1 text-base leading-[120%] font-normal text-black/80">
+                {exam.lifecycle_label}
+              </p>
+            </div>
+
+            <div className="flex h-[17px] w-full items-center gap-2 text-sm leading-[120%] font-normal text-black/70">
+              <span className="shrink-0">{timeLabel.split(" • ")[0]}</span>
+              <span className="h-1 w-1 rounded-full bg-black/70" />
+              <span className="shrink-0">{exam.duration_minutes} минут</span>
+            </div>
+          </div>
+
+          <div className="w-full border-t border-black/30" />
+        </div>
+
+        <div className="flex h-8 w-full items-center justify-between">
+          <div className="relative h-7 w-[63px]">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className={`absolute top-0 flex h-7 w-7 items-center justify-center rounded-full border-[1.5px] border-white text-[10px] font-bold text-white ${
+                  AVATAR_COLORS[(paletteIndex + i) % AVATAR_COLORS.length]
+                }`}
+                style={{ left: `${i === 0 ? 0 : i === 1 ? 18 : 35}px` }}
+              >
+                {["А", "Б", "В"][i]}
+              </div>
+            ))}
+          </div>
+
+          {isActive ? (
+            <Link href={`/student/exams/${exam.id}`}>
+              <Button
+                size="sm"
+                className="h-8 rounded-[10px] bg-[#6BBF7A] px-4 text-sm leading-[120%] font-normal text-white hover:bg-[#63b873]"
+              >
+                Шалгалт өгөх
+              </Button>
+            </Link>
+          ) : (
+            <Button
+              size="sm"
+              className="h-8 cursor-default rounded-[10px] bg-[#E05252] px-4 text-sm leading-[120%] font-normal text-white hover:bg-[#E05252]"
+              tabIndex={-1}
+            >
+              Идэвхгүй
+            </Button>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
 
 export default async function StudentDashboard() {
   const stats = await getStudentStats();
 
+  const activeExams = stats.upcomingExams.filter(
+    (exam) =>
+      exam.lifecycle_status === "available" ||
+      exam.lifecycle_status === "retake_available" ||
+      exam.lifecycle_status === "in_progress",
+  );
+
+  const scheduledExams = stats.upcomingExams.filter(
+    (exam) =>
+      exam.lifecycle_status === "scheduled" ||
+      exam.lifecycle_status === "retake_scheduled",
+  );
+
   return (
-    <div className="relative space-y-6">
-      {/* 1. The Background Card */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#ffffff] via-[#ffeac0] to-[#ffd474] px-8 py-6">
-        <div className="relative z-0 max-w-2xl space-y-2">
+    <div className="space-y-[35px]">
+      {/* Hero Banner */}
+      <div className="relative overflow-hidden rounded-3xl bg-linear-to-r from-white via-[#ffeac0] to-[#ffd474] px-8 py-8 min-h-37">
+        <div className="relative z-10 max-w-lg space-y-2">
           <h2 className="text-2xl font-bold tracking-tight md:text-3xl">
-            Сурагчын самбар
+            Сурагчийн самбар
           </h2>
           <p className="text-sm text-muted-foreground md:text-base">
-            Шалгалт, дүнгийн мэдээллээ нэг доороос хянаарай.
+            Шалгалт, дүнгийн мэдээллээ нэг дороос хянаарай.
           </p>
+        </div>
+        <div className="pointer-events-none absolute bottom-0 right-0 h-full w-auto hidden md:block">
+          <DashboardImage />
         </div>
       </div>
 
-      {/* 2. The Image Layer - Moved OUTSIDE the overflow-hidden div */}
-      <div className="pointer-events-none absolute -bottom-0 right-0 z-[60] hidden h-full w-auto scale-105 origin-bottom-right md:block">
-        <DashboardImage />
-      </div>
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Хянах самбар</h2>
-        <p className="text-muted-foreground">
-          Таны шалгалтууд болон үр дүнгийн хураангуй
-        </p>
-      </div>
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Идэвхтэй шалгалт</CardDescription>
-            <CardTitle className="text-3xl">{stats.activeExams}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">Одоо өгөх боломжтой</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Өгсөн шалгалт</CardDescription>
-            <CardTitle className="text-3xl">{stats.completedExams}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">Нийт</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Дундаж оноо</CardDescription>
-            <CardTitle className="text-3xl">
-              {stats.avgScore !== null ? `${stats.avgScore}%` : "—"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">Бүх шалгалтаар</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="rounded-2xl">
-        <CardHeader className="flex flex-row items-start justify-between gap-4">
-          <div>
-            <CardTitle className="text-lg">Learning Summary</CardTitle>
-            <CardDescription>
-              Сайжруулах шаардлагатай хичээл, сэдвүүдийн товч тойм
-            </CardDescription>
+      {/* Active Exams Section */}
+      <section className="space-y-8">
+        <div className="flex items-center gap-[26px]">
+          <h3 className="text-[20px] leading-[120%] font-medium text-black">
+            Идэвхтэй шалгалтууд
+          </h3>
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-[30px] bg-black/10 text-base leading-[120%] font-normal text-black">
+            {activeExams.length}
+          </span>
+        </div>
+        {activeExams.length === 0 ? (
+          <p className="text-muted-foreground text-sm py-2">
+            Одоогоор идэвхтэй шалгалт байхгүй байна.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 justify-items-start gap-x-[34px] gap-y-6 lg:grid-cols-2">
+            {activeExams.map((exam, index) => (
+              <ExamCard
+                key={exam.id}
+                exam={exam}
+                paletteIndex={index}
+                isActive={true}
+              />
+            ))}
           </div>
-          <Link href="/student/learning">
-            <Button variant="outline" size="sm">
-              Learning Hub
-            </Button>
-          </Link>
-        </CardHeader>
-        <CardContent>
-          {stats.learningSummary.weakSubjects.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Одоогоор mastery profile үүсгэх data хангалтгүй байна.
-            </p>
-          ) : (
-            <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="space-y-3">
-                <p className="text-sm font-medium text-foreground">Сайжруулах хичээлүүд</p>
-                {stats.learningSummary.weakSubjects.map((subject) => (
-                  <div
-                    key={subject.subject_id}
-                    className="rounded-xl border p-4"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold">{subject.subject_name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {subject.weak_topic_count > 0
-                            ? `${subject.weak_topic_count} weak topic`
-                            : "Topic breakdown pending"}
-                        </p>
-                      </div>
-                      <Badge variant={subject.mastery_score < 60 ? "secondary" : "outline"}>
-                        {Math.round(subject.mastery_score)}%
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
+        )}
+      </section>
 
-              <div className="space-y-3">
-                <p className="text-sm font-medium text-foreground">Хамгийн сул сэдвүүд</p>
-                {stats.learningSummary.weakTopics.length === 0 ? (
-                  <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                    Topic-level data хараахан бүрэн бэлэн болоогүй байна.
-                  </div>
-                ) : (
-                  stats.learningSummary.weakTopics.map((topic) => (
-                    <div
-                      key={`${topic.subject_id}:${topic.topic_key}`}
-                      className="rounded-xl border p-4"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold">{topic.topic_label}</p>
-                          <p className="text-xs text-muted-foreground">{topic.subject_name}</p>
-                        </div>
-                        <Badge variant={topic.mastery_score < 60 ? "secondary" : "outline"}>
-                          {Math.round(topic.mastery_score)}%
-                        </Badge>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-4">
-            <div>
-              <CardTitle className="text-lg">Дараагийн шалгалтууд</CardTitle>
-              <CardDescription>
-                Эхлэх цаг болон үргэлжлэх хугацааг шалгана уу
-              </CardDescription>
-            </div>
-            <Link href="/student/schedule">
-              <Button variant="outline" size="sm">
-                Хуваарь харах
-              </Button>
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {stats.upcomingExams.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Одоогоор товлогдсон шалгалт алга.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {stats.upcomingExams.map((exam) => (
-                  <div
-                    key={exam.id}
-                    className="flex items-start justify-between gap-4 rounded-lg border p-3"
-                  >
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium">{exam.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatDateTimeUB(exam.start_time)}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      <Badge variant="outline">
-                        {exam.duration_minutes} мин
-                      </Badge>
-                      <Badge
-                        variant={
-                          exam.lifecycle_status === "available" ||
-                          exam.lifecycle_status === "retake_available" ||
-                          exam.lifecycle_status === "in_progress"
-                            ? "secondary"
-                            : "outline"
-                        }
-                      >
-                        {exam.lifecycle_label}
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-4">
-            <div>
-              <CardTitle className="text-lg">Сүүлд шинэчлэгдсэн дүн</CardTitle>
-              <CardDescription>Саяхан өгсөн шалгалтуудын төлөв</CardDescription>
-            </div>
-            <Link href="/student/results">
-              <Button variant="outline" size="sm">
-                Үр дүн харах
-              </Button>
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {stats.recentResults.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Дүн гарсан шалгалт одоогоор алга.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {stats.recentResults.map((result) => (
-                  <div
-                    key={`${result.id}-${result.submitted_at ?? "pending"}`}
-                    className="flex items-start justify-between gap-4 rounded-lg border p-3"
-                  >
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium">{result.exam_title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {result.submitted_at
-                          ? formatDateTimeUB(result.submitted_at)
-                          : "Хугацаа тодорхойгүй"}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      {result.percentage !== null && (
-                        <Badge variant="outline">{result.percentage}%</Badge>
-                      )}
-                      <Badge
-                        variant={
-                          result.status === "graded" ? "secondary" : "outline"
-                        }
-                      >
-                        {result.status === "graded"
-                          ? "Дүн баталгаажсан"
-                          : "Шалгагдаж байна"}
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      {/* Upcoming Exams Section */}
+      <section className="space-y-8">
+        <div className="flex items-center gap-[26px]">
+          <h3 className="text-[20px] leading-[120%] font-medium text-black">
+            Удахгүй болох шалгалтууд
+          </h3>
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-[30px] bg-black/10 text-base leading-[120%] font-normal text-black">
+            {scheduledExams.length}
+          </span>
+        </div>
+        {scheduledExams.length === 0 ? (
+          <p className="text-muted-foreground text-sm py-2">
+            Удахгүй болох шалгалт байхгүй байна.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 justify-items-start gap-x-[34px] gap-y-[22px] md:grid-cols-2 xl:grid-cols-3">
+            {scheduledExams.map((exam, index) => (
+              <ExamCard
+                key={exam.id}
+                exam={exam}
+                paletteIndex={index + 3}
+                isActive={false}
+              />
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

@@ -154,6 +154,49 @@ function isQuestionAnswered(question: QuestionItem, answer: string | undefined) 
   return normalizeDraftAnswer(question.type, answer ?? "") !== null;
 }
 
+function DividerLine() {
+  return <div className="h-[52px] w-px bg-black/20" />;
+}
+
+function AlarmIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-6 w-6 text-[#7F32F5]"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="13" r="7" />
+      <path d="M12 10v3.5l2.5 1.5" />
+      <path d="M5 4 3 6" />
+      <path d="m19 4 2 2" />
+    </svg>
+  );
+}
+
+function ArrowIcon({ direction }: { direction: "left" | "right" }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-[18px] w-[26px] text-[#6B6B6B]"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {direction === "left" ? (
+        <path d="m15 18-6-6 6-6" />
+      ) : (
+        <path d="m9 18 6-6-6-6" />
+      )}
+    </svg>
+  );
+}
+
 export default function ExamTaker({
   exam,
   questions,
@@ -496,17 +539,20 @@ export default function ExamTaker({
     []
   );
 
-  // Хугацааг формат хийх
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  };
-
   const answeredCount = displayQuestions.filter((question) =>
     isQuestionAnswered(question, answers[question.id])
   ).length;
   const isTimeWarning = timeLeft < 300; // 5 минутаас бага
+  const completionPercent = Math.round(
+    (answeredCount / Math.max(displayQuestions.length, 1)) * 100
+  );
+  const minutesLeft = Math.floor(timeLeft / 60);
+  const secondsLeft = timeLeft % 60;
+  const currentQuestionOptions = getDisplayOptions(
+    currentQuestion.options ?? [],
+    Boolean(exam.shuffle_options),
+    `${sessionId}:${currentQuestion.id}`
+  );
 
   if (REQUIRE_SEB && !sebDetected) {
     return (
@@ -551,7 +597,7 @@ export default function ExamTaker({
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="min-h-screen bg-[rgba(250,250,250,0.98)]">
       {/* Submit confirmation dialog */}
       {showSubmitConfirm && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
@@ -591,294 +637,254 @@ export default function ExamTaker({
         </div>
       )}
 
-      {/* Header: Timer + Progress */}
-      <div className="sticky top-0 z-50 border-b bg-background/95 px-3 py-2 backdrop-blur">
+      <div className="mx-auto flex w-full max-w-[1090px] flex-col items-center gap-[30px] px-4 py-8 lg:py-10">
         {gazeWarningCount > 0 && (
-          <div className="border-b border-red-200 bg-red-50 px-3 py-1.5 text-center text-sm font-medium text-red-700">
+          <div className="w-full rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-center text-sm font-medium text-red-700">
             {gazeWarningCount < 3
               ? `Анхааруулга ${gazeWarningCount}/3: Та камерын өмнө шулуун харна уу. ${3 - gazeWarningCount} анхааруулга үлдсэн.`
               : "Анхааруулга 3/3: Шалгалт дуусгагдаж байна..."}
           </div>
         )}
-        <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <h1 className="line-clamp-1 text-base font-semibold sm:text-lg">
-              {exam.title as string}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {answeredCount}/{displayQuestions.length} хариулсан
-            </p>
-          </div>
-          <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
-            {cameraStatus === "denied" && (
-              <Badge variant="destructive">Камер хаалттай</Badge>
-            )}
-            {gazeWarningCount > 0 && (
-              <Badge variant="destructive">
-                Анхааруулга {gazeWarningCount}/3
-              </Badge>
-            )}
-            {tabSwitchCount > 0 && (
-              <Badge variant="destructive">
-                Tab {tabSwitchCount}/5
-              </Badge>
-            )}
-            <div
-              className={`rounded-lg px-3 py-2 font-mono text-lg font-bold sm:text-xl ${
-                isTimeWarning
-                  ? "animate-pulse bg-red-100 text-red-700"
-                  : "bg-muted"
-              }`}
-            >
-              {formatTime(timeLeft)}
-            </div>
-            <Button
-              onClick={() => setShowSubmitConfirm(true)}
-              loading={isSubmitting}
-              loadingText="Илгээж байна..."
-              variant="destructive"
-              className="shrink-0"
-            >
-              Дуусгах
-            </Button>
-          </div>
-        </div>
-      </div>
 
-      <div className="mx-auto flex w-full max-w-4xl flex-1 gap-4 p-3 sm:p-4">
-        {/* Question Navigator (sidebar) */}
-        <div className="hidden w-48 shrink-0 md:block">
-          <div className="sticky top-20 space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">
-              Асуултууд
-            </p>
-            <div className="grid grid-cols-5 gap-1.5">
-              {displayQuestions.map((q, i) => {
-                const qId = q.id as string;
-                const isAnswered = isQuestionAnswered(q, answers[qId]);
-                const isCurrent = i === currentIndex;
-                return (
-                  <button
-                    key={qId}
-                    onClick={() => setCurrentIndex(i)}
-                    className={`flex h-8 w-8 items-center justify-center rounded text-sm font-medium transition-colors ${
-                      isCurrent
-                        ? "bg-primary text-primary-foreground"
-                        : isAnswered
-                          ? "bg-green-100 text-green-800"
-                          : "bg-muted hover:bg-muted/80"
-                    }`}
-                  >
-                    {i + 1}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* Question Content */}
-        <div className="flex-1">
-          <Card className="rounded-2xl">
-            <CardHeader className="pb-4">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">
-                  Асуулт {currentIndex + 1}/{displayQuestions.length}
-                </CardTitle>
-                <Badge variant="outline">
-                  {currentQuestion.points} оноо
-                </Badge>
+        <div className="flex w-full flex-col gap-8">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-center">
+              <div className="min-w-[260px]">
+                <h1 className="text-[20px] font-medium leading-[120%] text-black">
+                  {exam.title as string}
+                </h1>
+                <p className="mt-1 text-base font-normal leading-[120%] text-[#6B6B6B]">
+                  {(exam.description as string | null) || "Шалгалтын асуултуудыг анхааралтай бөглөнө үү."}
+                </p>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              {currentPassage && (
-                <div className="space-y-3 rounded-xl border border-dashed bg-muted/30 p-3">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary">Нийтлэг өгөгдөл</Badge>
-                    {currentPassage.title && (
-                      <span className="font-medium">{currentPassage.title}</span>
+
+              <div className="hidden lg:block">
+                <DividerLine />
+              </div>
+
+              <div className="flex min-w-0 flex-1 flex-col gap-[6px] lg:max-w-[491px]">
+                <p className="text-base font-medium leading-[120%] text-black">
+                  {completionPercent}%
+                </p>
+                <div className="h-2 w-full rounded-[64px] bg-[#E0E0E0]">
+                  <div
+                    className="h-2 rounded-[64px] bg-[#C59CFC]"
+                    style={{ width: `${completionPercent}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-[18px] self-start lg:self-auto">
+              <div className="hidden lg:block">
+                <DividerLine />
+              </div>
+
+              <div className="flex items-center gap-[18px]">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#EEE1FE]">
+                  <AlarmIcon />
+                </div>
+                <div className="flex flex-col items-start">
+                  <div className="flex items-center gap-2 text-[#7F7F7F]">
+                    <span className={`text-[20px] leading-[120%] ${isTimeWarning ? "text-red-600" : ""}`}>
+                      {minutesLeft.toString().padStart(2, "0")}
+                    </span>
+                    <span className="text-sm">мин</span>
+                    <span className={`text-[20px] leading-[120%] ${isTimeWarning ? "text-red-600" : ""}`}>
+                      {secondsLeft.toString().padStart(2, "0")}
+                    </span>
+                    <span className="text-sm">сек</span>
+                  </div>
+                  <p className="text-[13px] leading-[120%] text-[#7F7F7F]">
+                    үлдсэн байна
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {cameraStatus === "denied" && <Badge variant="destructive">Камер хаалттай</Badge>}
+            {gazeWarningCount > 0 && <Badge variant="destructive">Анхааруулга {gazeWarningCount}/3</Badge>}
+            {tabSwitchCount > 0 && <Badge variant="destructive">Tab {tabSwitchCount}/5</Badge>}
+          </div>
+
+          <div className="w-full rounded-2xl bg-white px-0 py-6 shadow-[0_12px_40px_rgba(15,23,42,0.04)]">
+            <div className="mx-auto flex w-full max-w-[992px] flex-col gap-[42px]">
+              <div className="flex flex-col gap-[42px]">
+                <div className="px-4 sm:px-0">
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <h2 className="text-[20px] font-medium leading-[120%] text-[#7F7F7F]">
+                        Асуулт {currentIndex + 1}
+                      </h2>
+                      <div className="flex h-10 items-center justify-center rounded-[26px] bg-[#E5E5E5] px-5 text-[15px] leading-[120%] text-black">
+                        {currentQuestion.points} оноо
+                      </div>
+                    </div>
+
+                    {currentPassage && (
+                      <div className="rounded-2xl bg-[#FAFAFA] p-4">
+                        <div className="mb-2 text-sm font-medium text-[#7F32F5]">
+                          {currentPassage.title || "Нэмэлт өгөгдөл"}
+                        </div>
+                        <MathContent
+                          html={currentPassage.content_html}
+                          text={currentPassage.content}
+                          className="prose prose-sm max-w-none text-foreground"
+                        />
+                      </div>
+                    )}
+
+                    <MathContent
+                      html={currentQuestion.content_html}
+                      text={currentQuestion.content}
+                      className="prose prose-base max-w-none text-[20px] leading-[120%] text-black"
+                    />
+
+                    {currentQuestion.image_url && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={currentQuestion.image_url}
+                        alt="Асуултын зураг"
+                        className="max-h-64 rounded-xl"
+                      />
                     )}
                   </div>
-                  <MathContent
-                    html={currentPassage.content_html}
-                    text={currentPassage.content}
-                    className="prose prose-sm max-w-none text-foreground"
+                </div>
+
+                <div className="w-full border-t border-black/20" />
+              </div>
+
+              <div className="flex flex-col gap-[26px] px-4 sm:px-0">
+                {currentQuestion.type === "multiple_choice" && (
+                  <div className="flex flex-col gap-[26px]">
+                    {currentQuestionOptions.map((option, i) => {
+                      const optionValue = String(option);
+                      const isSelected = answers[currentQuestion.id] === optionValue;
+
+                      return (
+                        <button
+                          key={i}
+                          onClick={() =>
+                            handleAnswer(
+                              currentQuestion.id,
+                              optionValue,
+                              currentQuestion.type
+                            )
+                          }
+                          className={`relative flex h-[60px] w-full items-center justify-between px-[34px] text-left transition-all ${
+                            isSelected
+                              ? "border-l-4 border-l-[#C59CFC] bg-white shadow-[0_4px_12px_rgba(197,156,252,0.2)]"
+                              : "bg-white"
+                          }`}
+                        >
+                          <MathContent
+                            text={optionValue}
+                            className="prose prose-sm max-w-none text-base leading-[120%] text-black"
+                          />
+                          <span
+                            className={`h-5 w-5 rounded-full ${
+                              isSelected ? "bg-[#6BBF7A]" : "border border-[#949494]"
+                            }`}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {currentQuestion.type === "multiple_response" && (
+                  <div className="flex flex-col gap-[26px]">
+                    {currentQuestionOptions.map((option, i) => {
+                      const optionValue = String(option);
+                      const isSelected = currentMultipleAnswers.includes(optionValue);
+
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => {
+                            const nextAnswers = isSelected
+                              ? currentMultipleAnswers.filter((item) => item !== optionValue)
+                              : [...currentMultipleAnswers, optionValue];
+
+                            handleAnswer(
+                              currentQuestion.id,
+                              JSON.stringify(nextAnswers),
+                              currentQuestion.type
+                            );
+                          }}
+                          className={`relative flex h-[60px] w-full items-center justify-between px-[34px] text-left transition-all ${
+                            isSelected
+                              ? "border-l-4 border-l-[#C59CFC] bg-white shadow-[0_4px_12px_rgba(197,156,252,0.2)]"
+                              : "bg-white"
+                          }`}
+                        >
+                          <MathContent
+                            text={optionValue}
+                            className="prose prose-sm max-w-none text-base leading-[120%] text-black"
+                          />
+                          <span
+                            className={`flex h-5 w-5 items-center justify-center rounded-full text-[12px] ${
+                              isSelected
+                                ? "bg-[#6BBF7A] text-white"
+                                : "border border-[#949494]"
+                            }`}
+                          >
+                            {isSelected ? "✓" : ""}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {currentQuestion.type === "essay" && (
+                  <textarea
+                    className="min-h-[180px] w-full rounded-2xl border border-black/10 px-6 py-5 focus:outline-none focus:ring-2 focus:ring-[#C59CFC]"
+                    placeholder="Хариултаа бичнэ үү..."
+                    value={answers[currentQuestion.id] ?? ""}
+                    onChange={(e) =>
+                      handleAnswer(
+                        currentQuestion.id,
+                        e.target.value,
+                        currentQuestion.type
+                      )
+                    }
                   />
-                  {currentPassage.image_url && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={currentPassage.image_url}
-                      alt="Нийтлэг өгөгдлийн зураг"
-                      className="max-h-72 rounded-lg border"
-                    />
-                  )}
-                </div>
-              )}
+                )}
 
-              {/* Question text */}
-              <MathContent
-                html={currentQuestion.content_html}
-                text={currentQuestion.content}
-                className="prose prose-sm max-w-none text-foreground"
-              />
+                {currentQuestion.type === "fill_blank" && (
+                  <input
+                    type="text"
+                    className="h-14 w-full rounded-2xl border border-black/10 px-6 focus:outline-none focus:ring-2 focus:ring-[#C59CFC]"
+                    placeholder="Хариултаа бичнэ үү..."
+                    value={answers[currentQuestion.id] ?? ""}
+                    onChange={(e) =>
+                      handleAnswer(
+                        currentQuestion.id,
+                        e.target.value,
+                        currentQuestion.type
+                      )
+                    }
+                  />
+                )}
 
-              {/* Image */}
-              {currentQuestion.image_url && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={currentQuestion.image_url}
-                  alt="Асуултын зураг"
-                  className="max-h-64 rounded-lg"
-                />
-              )}
-
-              {/* Answer options */}
-              {currentQuestion.type === "multiple_choice" && (
-                <div className="space-y-2">
-                  {getDisplayOptions(
-                    currentQuestion.options ?? [],
-                    Boolean(exam.shuffle_options),
-                    `${sessionId}:${currentQuestion.id}`
-                  ).map((option, i) => {
-                    const optionValue =
-                      typeof option === "string" ? option : String(option);
-                    const isSelected =
-                      answers[currentQuestion.id] === optionValue;
-                    return (
-                      <button
-                        key={i}
-                        onClick={() =>
-                          handleAnswer(
-                            currentQuestion.id,
-                            optionValue,
-                            currentQuestion.type
-                          )
-                        }
-                        className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
-                          isSelected
-                            ? "border-primary bg-primary/5"
-                            : "hover:bg-muted/50"
-                        }`}
-                      >
-                        <span
-                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-sm ${
-                            isSelected
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : ""
-                          }`}
-                        >
-                          {String.fromCharCode(65 + i)}
-                        </span>
-                        <MathContent
-                          text={optionValue}
-                          className="prose prose-sm max-w-none text-foreground"
-                        />
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {currentQuestion.type === "multiple_response" && (
-                <div className="space-y-2">
-                  {getDisplayOptions(
-                    currentQuestion.options ?? [],
-                    Boolean(exam.shuffle_options),
-                    `${sessionId}:${currentQuestion.id}`
-                  ).map((option, i) => {
-                    const optionValue = String(option);
-                    const isSelected = currentMultipleAnswers.includes(optionValue);
-
-                    return (
-                      <button
-                        key={i}
-                        onClick={() => {
-                          const nextAnswers = isSelected
-                            ? currentMultipleAnswers.filter(
-                                (item) => item !== optionValue
-                              )
-                            : [...currentMultipleAnswers, optionValue];
-
-                          handleAnswer(
-                            currentQuestion.id,
-                            JSON.stringify(nextAnswers),
-                            currentQuestion.type
-                          );
-                        }}
-                        className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
-                          isSelected
-                            ? "border-primary bg-primary/5"
-                            : "hover:bg-muted/50"
-                        }`}
-                      >
-                        <span
-                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded border text-sm ${
-                            isSelected
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : ""
-                          }`}
-                        >
-                          {isSelected ? "✓" : ""}
-                        </span>
-                        <MathContent
-                          text={optionValue}
-                          className="prose prose-sm max-w-none text-foreground"
-                        />
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Essay answer */}
-              {currentQuestion.type === "essay" && (
-                <textarea
-                  className="min-h-[140px] w-full rounded-lg border p-3 focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="Хариултаа бичнэ үү..."
-                  value={answers[currentQuestion.id] ?? ""}
-                  onChange={(e) =>
-                    handleAnswer(
-                      currentQuestion.id,
-                      e.target.value,
-                      currentQuestion.type
-                    )
-                  }
-                />
-              )}
-
-              {/* Fill blank */}
-              {currentQuestion.type === "fill_blank" && (
-                <input
-                  type="text"
-                  className="w-full rounded-lg border p-3 focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="Хариултаа бичнэ үү..."
-                  value={answers[currentQuestion.id] ?? ""}
-                  onChange={(e) =>
-                    handleAnswer(
-                      currentQuestion.id,
-                      e.target.value,
-                      currentQuestion.type
-                    )
-                  }
-                />
-              )}
-
-              {currentQuestion.type === "matching" && (
-                <div className="space-y-3">
-                  {currentMatchingPrompts.map((leftPrompt, index) => {
-                    return (
+                {currentQuestion.type === "matching" && (
+                  <div className="space-y-3">
+                    {currentMatchingPrompts.map((leftPrompt, index) => (
                       <div
                         key={`${leftPrompt}-${index}`}
-                        className="grid gap-3 rounded-lg border p-4 md:grid-cols-2"
+                        className="grid gap-3 rounded-2xl border border-black/10 p-4 md:grid-cols-2"
                       >
-                        <div className="rounded-lg bg-muted/40 px-3 py-2 font-medium">
+                        <div className="rounded-xl bg-[#FAFAFA] px-4 py-3 font-medium">
                           <MathContent
                             text={leftPrompt}
                             className="prose prose-sm max-w-none text-foreground"
                           />
                         </div>
                         <select
-                          className="rounded-lg border bg-background px-3 py-2"
+                          className="rounded-xl border border-black/10 bg-white px-4 py-3"
                           value={currentMatchingAnswer[leftPrompt] ?? ""}
                           onChange={(event) => {
                             const nextAnswer = {
@@ -901,36 +907,52 @@ export default function ExamTaker({
                           ))}
                         </select>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Navigation */}
-              <div className="flex gap-2 border-t pt-4">
-                <Button
-                  variant="outline"
-                  onClick={() => setCurrentIndex((p) => Math.max(0, p - 1))}
-                  disabled={currentIndex === 0}
-                  className="flex-1"
-                >
-                  Өмнөх
-                </Button>
-                {currentIndex < displayQuestions.length - 1 && (
-                  <Button
-                    onClick={() =>
-                      setCurrentIndex((p) =>
-                        Math.min(displayQuestions.length - 1, p + 1)
-                      )
-                    }
-                    className="flex-1"
-                  >
-                    Дараах
-                  </Button>
+                    ))}
+                  </div>
                 )}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
+
+          {currentIndex < displayQuestions.length - 1 ? (
+            <div className="flex items-center justify-center gap-6">
+              <Button
+                variant="ghost"
+                onClick={() => setCurrentIndex((p) => Math.max(0, p - 1))}
+                disabled={currentIndex === 0}
+                className="h-10 rounded-full bg-[#E5E5E5] px-0 text-[20px] leading-[120%] text-[#6B6B6B] hover:bg-[#dbdbdb] disabled:opacity-60"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#D1D1D1]">
+                  <ArrowIcon direction="left" />
+                </span>
+                <span className="px-4">Өмнөх</span>
+              </Button>
+
+              <Button
+                variant="ghost"
+                onClick={() =>
+                  setCurrentIndex((p) =>
+                    Math.min(displayQuestions.length - 1, p + 1)
+                  )
+                }
+                className="h-10 rounded-full bg-[#E5E5E5] px-0 text-[20px] leading-[120%] text-[#6B6B6B] hover:bg-[#dbdbdb]"
+              >
+                <span className="px-4">Дараах</span>
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#D1D1D1]">
+                  <ArrowIcon direction="right" />
+                </span>
+              </Button>
+            </div>
+          ) : (
+            <Button
+              onClick={() => setShowSubmitConfirm(true)}
+              loading={isSubmitting}
+              loadingText="Илгээж байна..."
+              className="h-11 w-full rounded-full bg-[#7F32F5] text-[20px] font-normal leading-[120%] text-white hover:bg-[#712adf]"
+            >
+              Дуусгах
+            </Button>
+          )}
         </div>
       </div>
 
