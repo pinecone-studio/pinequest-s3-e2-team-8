@@ -68,6 +68,13 @@ export default async function EditExamPage({ params, searchParams }: Props) {
         initialMaxAttempts={exam.max_attempts ?? 1}
         initialShuffleQuestions={exam.shuffle_questions}
         initialShuffleOptions={exam.shuffle_options}
+        initialProctoringMode={exam.proctoring_mode}
+        initialDevicePolicy={exam.device_policy}
+        initialRequireFullscreen={exam.require_fullscreen}
+        initialRequireCamera={exam.require_camera}
+        initialIdentityVerification={exam.identity_verification}
+        initialEvidenceMode={exam.evidence_mode}
+        initialPostExamSimilarityEnabled={exam.post_exam_similarity_enabled}
         initialError={pageError ?? null}
       />
     </div>

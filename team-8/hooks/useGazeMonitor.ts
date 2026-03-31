@@ -37,7 +37,7 @@ const MAX_WARNINGS = 3;
 // Types
 // ---------------------------------------------------------------------------
 // Internal classification for each detection frame.
-type FrameState = "center" | "left" | "right" | "face_missing";
+type FrameState = "center" | "left" | "right" | "face_missing" | "multi_face";
 
 export interface UseGazeMonitorOptions {
   sessionId: string;
@@ -47,6 +47,11 @@ export interface UseGazeMonitorOptions {
   onWarning: (totalWarnings: number) => void;
   /** Called exactly once when total warnings reach MAX_WARNINGS. */
   onMaxWarnings: () => void;
+  /** Called on every processed frame with the dominant face direction. */
+  onStateChange?: (
+    state: "center" | "left" | "right" | "missing" | "multi_face",
+    faceCount: number
+  ) => void;
 }
 
 export function useGazeMonitor({
@@ -55,6 +60,7 @@ export function useGazeMonitor({
   enabled,
   onWarning,
   onMaxWarnings,
+  onStateChange,
 }: UseGazeMonitorOptions) {
   // ---------------------------------------------------------------------------
   // Pending-state tracker — all mutable, never causes re-renders.
@@ -80,8 +86,10 @@ export function useGazeMonitor({
   // Stable callback refs so the rAF loop never closes over stale values.
   const onWarningRef = useRef(onWarning);
   const onMaxWarningsRef = useRef(onMaxWarnings);
+  const onStateChangeRef = useRef(onStateChange);
   useEffect(() => { onWarningRef.current = onWarning; }, [onWarning]);
   useEffect(() => { onMaxWarningsRef.current = onMaxWarnings; }, [onMaxWarnings]);
+  useEffect(() => { onStateChangeRef.current = onStateChange; }, [onStateChange]);
 
   // ---------------------------------------------------------------------------
   // Core: called once per throttled frame with the classified state.
@@ -142,7 +150,9 @@ export function useGazeMonitor({
           ? "look_left"
           : state === "right"
             ? "look_right"
-            : "face_missing";
+            : state === "multi_face"
+              ? "multi_face"
+              : "face_missing";
 
       void logProctorEvent(sessionId, eventType, { warning_count: total });
 
@@ -185,7 +195,7 @@ export function useGazeMonitor({
           delegate: "GPU",
         },
         runningMode: "VIDEO",
-        numFaces: 1,
+        numFaces: 2,
         outputFaceBlendshapes: false,
         outputFacialTransformationMatrixes: false,
       });
@@ -217,7 +227,14 @@ export function useGazeMonitor({
           const results = faceLandmarker.detectForVideo(video, now);
 
           if (!results.faceLandmarks || results.faceLandmarks.length === 0) {
+            onStateChangeRef.current?.("missing", 0);
             handleFrameState("face_missing");
+            return;
+          }
+
+          if (results.faceLandmarks.length > 1) {
+            onStateChangeRef.current?.("multi_face", results.faceLandmarks.length);
+            handleFrameState("multi_face");
             return;
           }
 
@@ -227,12 +244,14 @@ export function useGazeMonitor({
           const rightEye = landmarks[362];
 
           if (!nose || !leftEye || !rightEye) {
+            onStateChangeRef.current?.("center", 1);
             handleFrameState("center");
             return;
           }
 
           const faceWidth = Math.abs(rightEye.x - leftEye.x);
           if (faceWidth < 0.01) {
+            onStateChangeRef.current?.("center", 1);
             handleFrameState("center");
             return;
           }
@@ -244,6 +263,7 @@ export function useGazeMonitor({
           if (noseOffset < GAZE_LEFT_THRESHOLD) state = "left";
           else if (noseOffset > GAZE_RIGHT_THRESHOLD) state = "right";
 
+          onStateChangeRef.current?.(state, 1);
           handleFrameState(state);
         } catch {
           // Any runtime error (invalid video element, MediaPipe internal error,

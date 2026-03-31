@@ -1,4 +1,11 @@
 export type UserRole = "student" | "teacher" | "admin";
+export type ProctoringMode = "off" | "standard" | "strict";
+export type EvidenceMode = "metadata_only" | "metadata_snapshots";
+export type DevicePolicy = "any" | "mobile_preferred" | "desktop_only";
+export type StudentDeviceType = "desktop" | "mobile";
+export type ProctorDisplayMode = "browser" | "standalone" | "fullscreen" | "unknown";
+export type ProctorRiskLevel = "low" | "medium" | "high" | "critical";
+export type ProctorFlagStatus = "clear" | "flagged" | "reviewed" | "escalated";
 
 export interface Profile {
   id: string;
@@ -45,6 +52,13 @@ export interface Exam {
   shuffle_questions: boolean;
   shuffle_options: boolean;
   passing_score: number | null;
+  proctoring_mode: ProctoringMode;
+  device_policy: DevicePolicy;
+  require_fullscreen: boolean;
+  require_camera: boolean;
+  identity_verification: boolean;
+  evidence_mode: EvidenceMode;
+  post_exam_similarity_enabled: boolean;
   created_at: string;
   updated_at: string;
   published_at?: string | null;
@@ -83,6 +97,13 @@ export interface PublishedExamSnapshot {
     shuffle_questions: boolean;
     shuffle_options: boolean;
     passing_score: number | null;
+    proctoring_mode: ProctoringMode;
+    device_policy: DevicePolicy;
+    require_fullscreen: boolean;
+    require_camera: boolean;
+    identity_verification: boolean;
+    evidence_mode: EvidenceMode;
+    post_exam_similarity_enabled: boolean;
     published_at: string;
   };
   questions: Question[];
@@ -245,6 +266,20 @@ export interface ExamSession {
   total_score: number | null;
   max_score: number | null;
   attempt_number: number;
+  risk_score: number;
+  risk_level: ProctorRiskLevel;
+  flag_status: ProctorFlagStatus;
+  flag_summary: string | null;
+  identity_verified_at: string | null;
+  last_heartbeat_at: string | null;
+  challenge_count: number;
+  last_snapshot_at: string | null;
+  review_note: string | null;
+  device_type: StudentDeviceType;
+  display_mode: ProctorDisplayMode;
+  platform: string | null;
+  spot_check_count: number;
+  last_spot_check_at: string | null;
 }
 
 export interface Answer {
@@ -262,6 +297,9 @@ export interface Answer {
   ai_score: number | null;
   ai_feedback: string | null;
   ai_graded_at: string | null;
+  first_answered_at: string | null;
+  last_changed_at: string | null;
+  change_count: number;
 }
 
 export interface StudentTopicMastery {

@@ -5,11 +5,20 @@ import { format } from "date-fns";
 import { mn } from "date-fns/locale";
 import {
   CalendarDays,
+  Camera,
   ChevronDown,
   Clock3,
+  Monitor,
   RefreshCw,
+  ShieldCheck,
+  Smartphone,
   Trophy,
 } from "lucide-react";
+import type {
+  DevicePolicy,
+  EvidenceMode,
+  ProctoringMode,
+} from "@/lib/proctoring";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
@@ -36,6 +45,13 @@ type ExamSettingsSectionProps = {
   initialMaxAttempts?: number | null;
   initialShuffleQuestions?: boolean;
   initialShuffleOptions?: boolean;
+  initialProctoringMode?: ProctoringMode | null;
+  initialRequireFullscreen?: boolean;
+  initialRequireCamera?: boolean;
+  initialIdentityVerification?: boolean;
+  initialEvidenceMode?: EvidenceMode | null;
+  initialPostExamSimilarityEnabled?: boolean;
+  initialDevicePolicy?: DevicePolicy | null;
 };
 
 type ExamScheduleFieldsProps = ExamScheduleSectionProps &
@@ -460,8 +476,40 @@ export function ExamScheduleSection({
 }
 
 export function ExamSettingsSection(props: ExamSettingsSectionProps) {
-  const { initialPassingScore, initialMaxAttempts } = props;
+  const {
+    initialPassingScore,
+    initialMaxAttempts,
+    initialProctoringMode,
+    initialRequireFullscreen,
+    initialRequireCamera,
+    initialIdentityVerification,
+    initialEvidenceMode,
+    initialPostExamSimilarityEnabled,
+    initialDevicePolicy,
+  } = props;
   const [attempts, setAttempts] = useState(String(initialMaxAttempts ?? 1));
+  const [proctoringMode, setProctoringMode] = useState<ProctoringMode>(
+    initialProctoringMode ?? "off"
+  );
+  const [requireFullscreen, setRequireFullscreen] = useState(
+    initialRequireFullscreen ?? false
+  );
+  const [requireCamera, setRequireCamera] = useState(
+    initialRequireCamera ?? false
+  );
+  const [identityVerification, setIdentityVerification] = useState(
+    initialIdentityVerification ?? false
+  );
+  const [evidenceMode, setEvidenceMode] = useState<EvidenceMode>(
+    initialEvidenceMode ?? "metadata_only"
+  );
+  const [postExamSimilarityEnabled, setPostExamSimilarityEnabled] = useState(
+    initialPostExamSimilarityEnabled ?? false
+  );
+  const [devicePolicy, setDevicePolicy] = useState<DevicePolicy>(
+    initialDevicePolicy ?? "any"
+  );
+  const isProctored = proctoringMode !== "off";
 
   return (
     <div className="rounded-[28px] border border-zinc-100 bg-white p-6 shadow-[0_12px_40px_-18px_rgba(15,23,42,0.16)] md:p-8">
@@ -511,6 +559,183 @@ export function ExamSettingsSection(props: ExamSettingsSectionProps) {
             <input type="hidden" name="max_attempts" value={attempts} />
           </div>
         </SettingsRow>
+
+        <SettingsRow
+          icon={ShieldCheck}
+          title="Integrity profile"
+          description="Шалгалтын anti-cheat түвшин"
+        >
+          <div className="relative">
+            <select
+              name="proctoring_mode"
+              value={proctoringMode}
+              onChange={(event) => {
+                const nextMode = event.target.value as ProctoringMode;
+                setProctoringMode(nextMode);
+                if (nextMode === "off") {
+                  setDevicePolicy("any");
+                  setRequireFullscreen(false);
+                  setRequireCamera(false);
+                  setIdentityVerification(false);
+                  setEvidenceMode("metadata_only");
+                  setPostExamSimilarityEnabled(false);
+                } else if (nextMode === "strict") {
+                  setDevicePolicy("desktop_only");
+                  setRequireFullscreen(true);
+                  setRequireCamera(true);
+                } else {
+                  setDevicePolicy((prev) =>
+                    prev === "desktop_only" ? "mobile_preferred" : prev
+                  );
+                  setRequireCamera((prev) => prev || false);
+                }
+              }}
+              className="h-11 min-w-40 appearance-none rounded-[20px] border border-zinc-200 bg-white px-4 pr-10 text-sm text-zinc-950 outline-none focus:border-zinc-300"
+            >
+              <option value="off">Off</option>
+              <option value="standard">Standard</option>
+              <option value="strict">Strict</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-400" />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          icon={Smartphone}
+          title="Student device policy"
+          description="Standard mode дээр mobile-centered эсвэл desktop-only горим сонгоно"
+        >
+          <div className="relative">
+            <select
+              name="device_policy"
+              value={
+                proctoringMode === "strict"
+                  ? "desktop_only"
+                  : proctoringMode === "off"
+                    ? "any"
+                    : devicePolicy
+              }
+              disabled={!isProctored || proctoringMode === "strict"}
+              onChange={(event) =>
+                setDevicePolicy(event.target.value as DevicePolicy)
+              }
+              className="h-11 min-w-52 appearance-none rounded-[20px] border border-zinc-200 bg-white px-4 pr-10 text-sm text-zinc-950 outline-none focus:border-zinc-300 disabled:bg-zinc-100"
+            >
+              <option value="any">Any device</option>
+              <option value="mobile_preferred">Mobile preferred</option>
+              <option value="desktop_only">Desktop only</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-400" />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          icon={Monitor}
+          title="Fullscreen шаардах"
+          description="Proctored exam дээр fullscreen-ээс гарахыг flag хийнэ"
+        >
+          <label className="flex items-center gap-2 text-sm text-zinc-700">
+            <input
+              type="checkbox"
+              name="require_fullscreen"
+              checked={requireFullscreen}
+              disabled={!isProctored}
+              onChange={(event) => setRequireFullscreen(event.target.checked)}
+              className="h-4 w-4 rounded border-zinc-300"
+            />
+            Идэвхтэй
+          </label>
+        </SettingsRow>
+
+        <SettingsRow
+          icon={Camera}
+          title="Камер шаардлага"
+          description="Camera/presence monitoring ашиглах эсэх"
+        >
+          <label className="flex items-center gap-2 text-sm text-zinc-700">
+            <input
+              type="checkbox"
+              name="require_camera"
+              checked={requireCamera}
+              disabled={!isProctored}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setRequireCamera(checked);
+                if (!checked) {
+                  setIdentityVerification(false);
+                }
+              }}
+              className="h-4 w-4 rounded border-zinc-300"
+            />
+            Идэвхтэй
+          </label>
+        </SettingsRow>
+
+        <SettingsRow
+          icon={ShieldCheck}
+          title="Identity verification"
+          description="Эхлэх үед enrollment selfie-тай тааруулах"
+        >
+          <label className="flex items-center gap-2 text-sm text-zinc-700">
+            <input
+              type="checkbox"
+              name="identity_verification"
+              checked={identityVerification}
+              disabled={!isProctored || !requireCamera}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setIdentityVerification(checked);
+                if (checked) {
+                  setRequireCamera(true);
+                }
+              }}
+              className="h-4 w-4 rounded border-zinc-300"
+            />
+            Эхлэхэд шалгах
+          </label>
+        </SettingsRow>
+
+        <SettingsRow
+          icon={ShieldCheck}
+          title="Evidence policy"
+          description="Metadata-only эсвэл snapshot хадгалах"
+        >
+          <div className="relative">
+            <select
+              name="evidence_mode"
+              value={evidenceMode}
+              disabled={!isProctored}
+              onChange={(event) =>
+                setEvidenceMode(event.target.value as EvidenceMode)
+              }
+              className="h-11 min-w-44 appearance-none rounded-[20px] border border-zinc-200 bg-white px-4 pr-10 text-sm text-zinc-950 outline-none focus:border-zinc-300 disabled:bg-zinc-100"
+            >
+              <option value="metadata_only">Metadata only</option>
+              <option value="metadata_snapshots">Metadata + snapshots</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-400" />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          icon={RefreshCw}
+          title="Post-exam similarity"
+          description="Objective/essay similarity-гаар copied pair илрүүлэх"
+        >
+          <label className="flex items-center gap-2 text-sm text-zinc-700">
+            <input
+              type="checkbox"
+              name="post_exam_similarity_enabled"
+              checked={postExamSimilarityEnabled}
+              disabled={!isProctored}
+              onChange={(event) =>
+                setPostExamSimilarityEnabled(event.target.checked)
+              }
+              className="h-4 w-4 rounded border-zinc-300"
+            />
+            Идэвхтэй
+          </label>
+        </SettingsRow>
       </div>
     </div>
   );
@@ -522,6 +747,13 @@ export default function ExamScheduleFields({
   initialDurationMinutes,
   initialPassingScore,
   initialMaxAttempts,
+  initialProctoringMode,
+  initialRequireFullscreen,
+  initialRequireCamera,
+  initialIdentityVerification,
+  initialEvidenceMode,
+  initialPostExamSimilarityEnabled,
+  initialDevicePolicy,
 }: ExamScheduleFieldsProps) {
   return (
     <div className="space-y-6">
@@ -533,6 +765,13 @@ export default function ExamScheduleFields({
       <ExamSettingsSection
         initialPassingScore={initialPassingScore}
         initialMaxAttempts={initialMaxAttempts}
+        initialProctoringMode={initialProctoringMode}
+        initialRequireFullscreen={initialRequireFullscreen}
+        initialRequireCamera={initialRequireCamera}
+        initialIdentityVerification={initialIdentityVerification}
+        initialEvidenceMode={initialEvidenceMode}
+        initialPostExamSimilarityEnabled={initialPostExamSimilarityEnabled}
+        initialDevicePolicy={initialDevicePolicy}
       />
     </div>
   );

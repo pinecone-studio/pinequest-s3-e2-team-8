@@ -262,7 +262,7 @@ export async function getSessionForGrading(sessionId: string) {
       .order("questions(order_index)", { ascending: true }),
     supabase
       .from("proctor_events")
-      .select("id, event_type, metadata, created_at")
+      .select("id, event_type, metadata, created_at, severity, snapshot_url, derived_risk_delta")
       .eq("session_id", sessionId)
       .order("created_at", { ascending: false }),
       getSessionQuestionVariantMap(supabase, sessionId),
