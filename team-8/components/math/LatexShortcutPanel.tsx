@@ -1,21 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { useState } from "react";
+import { ChevronLeft } from "lucide-react";
 import MathContent from "@/components/math/MathContent";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
-
-const CURSOR_MARKER = "__cursor__";
-const SELECTION_MARKER = "__selection__";
+import { cn } from "@/lib/utils";
 
 type FormulaItem = {
+  id: string;
   label: string;
-  preview: string;
-  snippet: string;
-  keywords: string[];
+  latex: string;
 };
 
 type FormulaGroup = {
@@ -29,42 +23,48 @@ const formulaGroups: FormulaGroup[] = [
   {
     id: "basic",
     label: "Суурь",
-    description: "Ерөнхий LaTeX хүрээ, зэрэг, индекс, тэнцэтгэлүүд.",
+    description: "Ерөнхий тэмдэглэгээ, зэрэг, индекс, бутархай.",
     items: [
-      { label: "Inline", preview: "$x^2$", snippet: `$${SELECTION_MARKER}${CURSOR_MARKER}$`, keywords: ["inline", "basic", "math"] },
-      { label: "Block", preview: "$$x^2$$", snippet: `$$${SELECTION_MARKER}${CURSOR_MARKER}$$`, keywords: ["block", "display", "math"] },
-      { label: "Зэрэг", preview: "x²", snippet: `$x^{${SELECTION_MARKER}${CURSOR_MARKER}}$`, keywords: ["power", "square", "superscript"] },
-      { label: "Индекс", preview: "aₙ", snippet: `$a_{${SELECTION_MARKER}${CURSOR_MARKER}}$`, keywords: ["subscript", "index"] },
-      { label: "Харьцуулалт", preview: "≤ ≥ ≠", snippet: `$\\le \\quad \\ge \\quad \\neq${CURSOR_MARKER}$`, keywords: ["less", "greater", "not equal"] },
-      { label: "Тэнцэтгэл", preview: "x = y", snippet: `$$${SELECTION_MARKER}${CURSOR_MARKER} = $$`, keywords: ["equation", "equal"] },
+      { id: "square", label: "Зэрэг", latex: "$x^2$" },
+      { id: "subscript", label: "Индекс", latex: "$a_n$" },
+      { id: "fraction", label: "Бутархай", latex: "$\\frac{a}{b}$" },
+      { id: "sqrt", label: "Язгуур", latex: "$\\sqrt{x}$" },
+      { id: "comparison", label: "Харьцуулалт", latex: "$x \\le y$" },
+      { id: "equation", label: "Тэнцэтгэл", latex: "$x = y$" },
     ],
   },
   {
     id: "algebra",
     label: "Алгебр",
-    description: "Бутархай, модуль, логарифм, язгуур, polynomial хэлбэрүүд.",
+    description: "Алгебрийн түгээмэл илэрхийлэл, логарифм, модуль.",
     items: [
-      { label: "Бутархай", preview: "a/b", snippet: `$$\\frac{${SELECTION_MARKER}${CURSOR_MARKER}}{ }$$`, keywords: ["fraction", "divide"] },
-      { label: "Жижиг бутархай", preview: "1/2", snippet: `$\\tfrac{${SELECTION_MARKER}${CURSOR_MARKER}}{ }$`, keywords: ["fraction", "inline"] },
-      { label: "Язгуур", preview: "√x", snippet: `$$\\sqrt{${SELECTION_MARKER}${CURSOR_MARKER}}$$`, keywords: ["root", "sqrt"] },
-      { label: "n-р язгуур", preview: "ⁿ√x", snippet: `$$\\sqrt[n]{${SELECTION_MARKER}${CURSOR_MARKER}}$$`, keywords: ["root", "nth root"] },
-      { label: "Модуль", preview: "|x|", snippet: `$\\left|${SELECTION_MARKER}${CURSOR_MARKER}\\right|$`, keywords: ["absolute", "modulus"] },
-      { label: "Логарифм", preview: "logₐ b", snippet: `$\\log_{a}{${SELECTION_MARKER}${CURSOR_MARKER}}$`, keywords: ["logarithm", "algebra"] },
-      { label: "Экспонент", preview: "eˣ", snippet: `$e^{${SELECTION_MARKER}${CURSOR_MARKER}}$`, keywords: ["exponential", "power"] },
-      { label: "Квадрат гурвалсан", preview: "ax²+bx+c", snippet: `$$ax^2 + bx + c${CURSOR_MARKER}$$`, keywords: ["quadratic", "polynomial"] },
+      { id: "quadratic", label: "Квадрат", latex: "$ax^2 + bx + c = 0$" },
+      { id: "factor", label: "Үржигдэхүүн", latex: "$(x+a)(x+b)$" },
+      { id: "log", label: "Логарифм", latex: "$\\log_a b$" },
+      { id: "abs", label: "Модуль", latex: "$\\left|x\\right|$" },
+      { id: "exp", label: "Экспонент", latex: "$e^x$" },
+      {
+        id: "system",
+        label: "Систем",
+        latex: "$$\\begin{cases} x + y = 5 \\\\ x - y = 1 \\end{cases}$$",
+      },
     ],
   },
   {
-    id: "trig",
-    label: "Триг",
-    description: "Тригонометрийн функц, өнцөг, identity.",
+    id: "trigonometry",
+    label: "Тригонометр",
+    description: "Тригонометрийн функц, өнцөг, үндсэн тэнцэтгэлүүд.",
     items: [
-      { label: "sin/cos/tan", preview: "sin x", snippet: `$\\sin(${SELECTION_MARKER}${CURSOR_MARKER})$`, keywords: ["sin", "cos", "tan", "trig"] },
-      { label: "Identity", preview: "sin²x + cos²x = 1", snippet: `$$\\sin^2 x + \\cos^2 x = 1${CURSOR_MARKER}$$`, keywords: ["identity", "trigonometry"] },
-      { label: "Өнцөг", preview: "∠ABC", snippet: `$\\angle ABC${CURSOR_MARKER}$`, keywords: ["angle", "geometry", "trig"] },
-      { label: "Градус", preview: "30°", snippet: `$30^\\circ${CURSOR_MARKER}$`, keywords: ["degree", "angle"] },
-      { label: "Радиан", preview: "π/2", snippet: `$\\frac{\\pi}{2${CURSOR_MARKER}}$`, keywords: ["radian", "pi"] },
-      { label: "Арк функц", preview: "arcsin x", snippet: `$\\arcsin(${SELECTION_MARKER}${CURSOR_MARKER})$`, keywords: ["inverse trig", "arcsin"] },
+      { id: "sin", label: "Sin", latex: "$\\sin x$" },
+      { id: "cos", label: "Cos", latex: "$\\cos x$" },
+      { id: "tan", label: "Tan", latex: "$\\tan x$" },
+      {
+        id: "identity",
+        label: "Identity",
+        latex: "$\\sin^2 x + \\cos^2 x = 1$",
+      },
+      { id: "angle", label: "Өнцөг", latex: "$\\angle ABC$" },
+      { id: "degree", label: "Градус", latex: "$45^\\circ$" },
     ],
   },
   {
@@ -72,12 +72,12 @@ const formulaGroups: FormulaGroup[] = [
     label: "Геометр",
     description: "Дүрс, параллель, перпендикуляр, талбай, эзлэхүүн.",
     items: [
-      { label: "Параллель", preview: "AB ∥ CD", snippet: `$AB \\parallel CD${CURSOR_MARKER}$`, keywords: ["parallel", "geometry"] },
-      { label: "Перпендикуляр", preview: "AB ⟂ CD", snippet: `$AB \\perp CD${CURSOR_MARKER}$`, keywords: ["perpendicular", "geometry"] },
-      { label: "Гурвалжин", preview: "△ABC", snippet: `$\\triangle ABC${CURSOR_MARKER}$`, keywords: ["triangle", "geometry"] },
-      { label: "Тойргийн талбай", preview: "πr²", snippet: `$S = \\pi r^2${CURSOR_MARKER}$`, keywords: ["circle", "area"] },
-      { label: "Пифагор", preview: "a²+b²=c²", snippet: `$$a^2 + b^2 = c^2${CURSOR_MARKER}$$`, keywords: ["pythagorean", "geometry"] },
-      { label: "Эзлэхүүн", preview: "V = lwh", snippet: `$V = lwh${CURSOR_MARKER}$`, keywords: ["volume", "geometry"] },
+      { id: "triangle", label: "Гурвалжин", latex: "$\\triangle ABC$" },
+      { id: "parallel", label: "Параллель", latex: "$AB \\parallel CD$" },
+      { id: "perpendicular", label: "Перпендикуляр", latex: "$AB \\perp CD$" },
+      { id: "circle-area", label: "Тойргийн талбай", latex: "$S = \\pi r^2$" },
+      { id: "pythagorean", label: "Пифагор", latex: "$a^2 + b^2 = c^2$" },
+      { id: "volume", label: "Эзлэхүүн", latex: "$V = lwh$" },
     ],
   },
   {
@@ -85,65 +85,50 @@ const formulaGroups: FormulaGroup[] = [
     label: "Калькулус",
     description: "Хязгаар, уламжлал, интеграл, нийлбэр, үржвэр.",
     items: [
-      { label: "Хязгаар", preview: "lim", snippet: `$$\\lim_{x \\to ${CURSOR_MARKER}}$$`, keywords: ["limit", "calculus"] },
-      { label: "Уламжлал", preview: "f'(x)", snippet: `$$f'(${SELECTION_MARKER}${CURSOR_MARKER})$$`, keywords: ["derivative", "prime"] },
-      { label: "d/dx", preview: "d/dx", snippet: `$$\\frac{d}{dx}${SELECTION_MARKER}${CURSOR_MARKER}$$`, keywords: ["derivative", "operator"] },
-      { label: "Интеграл", preview: "∫f(x)dx", snippet: `$$\\int ${SELECTION_MARKER}${CURSOR_MARKER}\\,dx$$`, keywords: ["integral", "calculus"] },
-      { label: "Хос интеграл", preview: "∬", snippet: `$$\\iint ${SELECTION_MARKER}${CURSOR_MARKER}\\,dA$$`, keywords: ["double integral"] },
-      { label: "Нийлбэр", preview: "Σ", snippet: `$$\\sum_{i=1}^{n}${SELECTION_MARKER}${CURSOR_MARKER}$$`, keywords: ["sum", "sigma"] },
-      { label: "Үржвэр", preview: "Π", snippet: `$$\\prod_{i=1}^{n}${SELECTION_MARKER}${CURSOR_MARKER}$$`, keywords: ["product", "pi"] },
+      { id: "limit", label: "Хязгаар", latex: "$\\lim_{x \\to 0} f(x)$" },
+      { id: "derivative", label: "Уламжлал", latex: "$f'(x)$" },
+      { id: "ddx", label: "d/dx", latex: "$\\frac{d}{dx}f(x)$" },
+      { id: "integral", label: "Интеграл", latex: "$\\int_a^b f(x)\\,dx$" },
+      { id: "sum", label: "Нийлбэр", latex: "$\\sum_{i=1}^{n} x_i$" },
+      { id: "product", label: "Үржвэр", latex: "$\\prod_{i=1}^{n} x_i$" },
     ],
   },
   {
     id: "matrix",
     label: "Матриц",
-    description: "Матриц, вектор, determinant, тэгшитгэлийн систем.",
+    description: "Матриц, вектор, детерминант зэрэг шугаман алгебрийн томьёо.",
     items: [
-      { label: "2x2 матриц", preview: "[a b; c d]", snippet: `$$\\begin{pmatrix} a & b \\\\ c & d${CURSOR_MARKER} \\end{pmatrix}$$`, keywords: ["matrix", "2x2"] },
-      { label: "Детерминант", preview: "|A|", snippet: `$$\\begin{vmatrix} a & b \\\\ c & d${CURSOR_MARKER} \\end{vmatrix}$$`, keywords: ["determinant"] },
-      { label: "Вектор", preview: "→v", snippet: `$\\vec{${SELECTION_MARKER}${CURSOR_MARKER}}$`, keywords: ["vector"] },
-      { label: "Column vector", preview: "[x;y;z]", snippet: `$$\\begin{pmatrix} x \\\\ y \\\\ z${CURSOR_MARKER} \\end{pmatrix}$$`, keywords: ["column vector"] },
-      { label: "Тэгшитгэлийн систем", preview: "{x+y=1}", snippet: `$$\\begin{cases} x + y = 1 \\\\ x - y = 3${CURSOR_MARKER} \\end{cases}$$`, keywords: ["system", "equations"] },
+      {
+        id: "matrix-2x2",
+        label: "2x2 матриц",
+        latex: "$$\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}$$",
+      },
+      {
+        id: "determinant",
+        label: "Детерминант",
+        latex: "$$\\begin{vmatrix} a & b \\\\ c & d \\end{vmatrix}$$",
+      },
+      { id: "vector", label: "Вектор", latex: "$\\vec{v}$" },
+      {
+        id: "column-vector",
+        label: "Баганан вектор",
+        latex: "$$\\begin{pmatrix} x \\\\ y \\\\ z \\end{pmatrix}$$",
+      },
+      { id: "inverse", label: "Урвуу матриц", latex: "$A^{-1}$" },
+      { id: "transpose", label: "Транспоуз", latex: "$A^T$" },
     ],
   },
   {
-    id: "sets",
+    id: "probability",
     label: "Магадлал",
     description: "Олонлог, магадлал, статистикийн үндсэн тэмдэглэгээ.",
     items: [
-      { label: "Олонлог", preview: "{a,b,c}", snippet: `$\\{${SELECTION_MARKER}${CURSOR_MARKER}\\}$`, keywords: ["set"] },
-      { label: "Нийлбэр олонлог", preview: "A ∪ B", snippet: `$A \\cup B${CURSOR_MARKER}$`, keywords: ["union", "set"] },
-      { label: "Огтлолцол", preview: "A ∩ B", snippet: `$A \\cap B${CURSOR_MARKER}$`, keywords: ["intersection", "set"] },
-      { label: "Хамаарах", preview: "x ∈ A", snippet: `$x \\in A${CURSOR_MARKER}$`, keywords: ["belongs", "element"] },
-      { label: "Магадлал", preview: "P(A)", snippet: `$P(${SELECTION_MARKER}${CURSOR_MARKER})$`, keywords: ["probability"] },
-      { label: "Дундаж", preview: "x̄", snippet: `$\\bar{x}${CURSOR_MARKER}$`, keywords: ["mean", "statistics"] },
-      { label: "Хазайлт", preview: "σ", snippet: `$\\sigma${CURSOR_MARKER}$`, keywords: ["sigma", "standard deviation"] },
-    ],
-  },
-  {
-    id: "chemistry",
-    label: "Хими",
-    description: "Молекул, ион, урвал, тэнцвэр, тунадас.",
-    items: [
-      { label: "Молекул", preview: "H₂O", snippet: `$$\\ce{H2O${CURSOR_MARKER}}$$`, keywords: ["molecule", "chemistry"] },
-      { label: "Урвал", preview: "2H₂ + O₂ → 2H₂O", snippet: `$$\\ce{2H2 + O2 -> 2H2O${CURSOR_MARKER}}$$`, keywords: ["reaction", "chemistry"] },
-      { label: "Ион", preview: "Na⁺", snippet: `$$\\ce{Na+${CURSOR_MARKER}}$$`, keywords: ["ion", "chemistry"] },
-      { label: "Тэнцвэр", preview: "⇌", snippet: `$$\\ce{CO2 + H2O <=> H2CO3${CURSOR_MARKER}}$$`, keywords: ["equilibrium", "chemistry"] },
-      { label: "Тунадас", preview: "↓", snippet: `$$\\ce{Ag+ + Cl- -> AgCl v${CURSOR_MARKER}}$$`, keywords: ["precipitate", "chemistry"] },
-      { label: "Концентрац", preview: "[H⁺]", snippet: `$[H^+]${CURSOR_MARKER}$`, keywords: ["concentration", "chemistry"] },
-    ],
-  },
-  {
-    id: "physics",
-    label: "Физик",
-    description: "Хурд, хүч, ажил, цахилгаан, долгион.",
-    items: [
-      { label: "Хурд", preview: "v = s/t", snippet: `$$v = \\frac{s}{t${CURSOR_MARKER}}$$`, keywords: ["speed", "velocity"] },
-      { label: "Хүч", preview: "F = ma", snippet: `$$F = ma${CURSOR_MARKER}$$`, keywords: ["force", "physics"] },
-      { label: "Ажил", preview: "A = Fs", snippet: `$$A = Fs\\cos\\theta${CURSOR_MARKER}$$`, keywords: ["work", "physics"] },
-      { label: "Омын хууль", preview: "U = IR", snippet: `$$U = IR${CURSOR_MARKER}$$`, keywords: ["ohm", "electric"] },
-      { label: "Долгион", preview: "λ = v/f", snippet: `$$\\lambda = \\frac{v}{f${CURSOR_MARKER}}$$`, keywords: ["wave", "lambda"] },
-      { label: "Өөрчлөлт", preview: "Δt", snippet: `$\\Delta t${CURSOR_MARKER}$`, keywords: ["delta", "change"] },
+      { id: "set", label: "Олонлог", latex: "$A = \\{1,2,3\\}$" },
+      { id: "union", label: "Нийлбэр олонлог", latex: "$A \\cup B$" },
+      { id: "intersection", label: "Огтлолцол", latex: "$A \\cap B$" },
+      { id: "belongs", label: "Хамаарах", latex: "$x \\in A$" },
+      { id: "probability", label: "Магадлал", latex: "$P(A)$" },
+      { id: "mean", label: "Дундаж", latex: "$\\bar{x}$" },
     ],
   },
 ];
@@ -153,16 +138,8 @@ interface LatexShortcutPanelProps {
   targetLabel?: string;
   title?: string;
   description?: string;
+  minimal?: boolean;
 }
-
-const quickSymbols = [
-  { label: "x²", snippet: "$x^2$" },
-  { label: "√x", snippet: "$\\sqrt{x}$" },
-  { label: "π", snippet: "$\\pi$" },
-  { label: "≤", snippet: "$\\le$" },
-  { label: "∑", snippet: "$\\sum_{i=1}^{n} x_i$" },
-  { label: "∫", snippet: "$\\int_a^b f(x)\\,dx$" },
-];
 
 function setNativeFieldValue(
   field: HTMLTextAreaElement | HTMLInputElement,
@@ -181,48 +158,20 @@ function setNativeFieldValue(
   field.value = nextValue;
 }
 
-function buildPreviewFormula(snippet: string) {
-  return snippet
-    .replaceAll(SELECTION_MARKER, "x")
-    .replaceAll(CURSOR_MARKER, "")
-    .replace(/\{\s*\}/g, "{y}")
-    .replace(/\\to\s*}/g, "\\to 0}")
-    .replace(/=\s*(\$\$|\$|\\\]|\\\))/g, "= y$1");
-}
-
 export default function LatexShortcutPanel({
   targetId,
-  targetLabel = "Асуултын талбар",
+  targetLabel = "Асуулт",
   title = "Томьёоны хэрэгсэл",
-  description = "Томьёогоо хайж олоод, caret байгаа талбартаа шууд оруулна.",
+  description = "Сэдвээ сонгоод, тухайн бүлгийн томьёоноос шууд оруулна.",
+  minimal = false,
 }: LatexShortcutPanelProps) {
-  const [query, setQuery] = useState("");
-  const [activeTab, setActiveTab] = useState(formulaGroups[0]?.id ?? "basic");
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [insertError, setInsertError] = useState<string | null>(null);
 
-  const filteredGroups = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return formulaGroups;
+  const activeGroup =
+    formulaGroups.find((group) => group.id === activeGroupId) ?? null;
 
-    return formulaGroups
-      .map((group) => ({
-        ...group,
-        items: group.items.filter((item) =>
-          [item.label, item.preview, ...item.keywords]
-            .join(" ")
-            .toLowerCase()
-            .includes(normalizedQuery)
-        ),
-      }))
-      .filter((group) => group.items.length > 0);
-  }, [query]);
-  const resolvedActiveTab =
-    filteredGroups.find((group) => group.id === activeTab)?.id ??
-    filteredGroups[0]?.id ??
-    formulaGroups[0]?.id ??
-    "basic";
-
-  function insertSnippet(snippet: string) {
+  function insertFormula(latex: string) {
     const field = document.getElementById(targetId) as
       | HTMLTextAreaElement
       | HTMLInputElement
@@ -230,145 +179,117 @@ export default function LatexShortcutPanel({
 
     if (!field) {
       setInsertError(
-        "Талбар олдсонгүй. Эхлээд асуулт эсвэл хариултын талбар дээр дарж байгаад томьёогоо сонгоно уу."
+        "Талбар олдсонгүй. Эхлээд асуулт эсвэл хариултын талбар дээр дарна уу."
       );
       return;
     }
 
     const start = field.selectionStart ?? field.value.length;
     const end = field.selectionEnd ?? field.value.length;
-    const selectedText = field.value.slice(start, end);
-    const replacementText = selectedText || "x";
-
-    const preparedSnippet = snippet.replaceAll(SELECTION_MARKER, replacementText);
-    const cursorIndex = preparedSnippet.indexOf(CURSOR_MARKER);
-    const cleanSnippet = preparedSnippet.replace(CURSOR_MARKER, "");
-
-    const nextValue =
-      field.value.slice(0, start) + cleanSnippet + field.value.slice(end);
+    const nextValue = field.value.slice(0, start) + latex + field.value.slice(end);
 
     setNativeFieldValue(field, nextValue);
     field.focus();
 
-    const caret =
-      start + (cursorIndex >= 0 ? cursorIndex : cleanSnippet.length);
+    const caret = start + latex.length;
     field.setSelectionRange?.(caret, caret);
     field.dispatchEvent(new Event("input", { bubbles: true }));
     setInsertError(null);
   }
 
   return (
-    <div className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
-      <div className="space-y-1">
-        <p className="text-sm font-semibold">{title}</p>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          {description}
-        </p>
-      </div>
+    <div
+      className={cn(
+        "space-y-4 rounded-[24px] border border-zinc-200 bg-white p-4",
+        minimal ? "" : "shadow-sm"
+      )}
+    >
+      {!minimal ? (
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-zinc-950">{title}</p>
+            <p className="text-sm text-zinc-500">{description}</p>
+          </div>
+          <p className="text-xs text-zinc-500">Оруулах талбар: {targetLabel}</p>
+        </div>
+      ) : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/10 px-3 py-2">
-        <div className="space-y-0.5">
-          <p className="text-xs text-muted-foreground">Одоогоор оруулах талбар</p>
-          <p className="text-sm font-medium">{targetLabel}</p>
-        </div>
-        <div className="relative w-full max-w-xs">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Томьёо хайх"
-            className="pl-9"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2 rounded-lg border bg-muted/5 p-3">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs font-medium text-muted-foreground">
-            Хурдан оруулах тэмдэг, томьёонууд
-          </p>
-          <Badge variant="outline" className="text-[11px]">
-            1. Талбар дээр дар 2. Томьёо сонго
-          </Badge>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {quickSymbols.map((item) => (
-            <Button
-              key={item.label}
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-full px-3 text-xs"
-              onClick={() => insertSnippet(item.snippet)}
-            >
-              {item.label}
-            </Button>
-          ))}
-        </div>
-      </div>
-
-      {insertError && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+      {insertError ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           {insertError}
         </div>
-      )}
+      ) : null}
 
-      {filteredGroups.length > 0 ? (
-        <Tabs value={resolvedActiveTab} onValueChange={setActiveTab} className="gap-3">
-          <TabsList variant="line" className="h-auto flex-wrap justify-start p-0">
-            {filteredGroups.map((group) => (
-              <TabsTrigger
-                key={group.id}
-                value={group.id}
-                className="rounded-full border border-border bg-background px-3 py-1.5 text-xs"
+      {activeGroup ? (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-9 rounded-full px-3 text-sm text-zinc-600 hover:text-zinc-950"
+              onClick={() => setActiveGroupId(null)}
+            >
+              <ChevronLeft className="mr-1 h-4 w-4" />
+              Бүлгүүд
+            </Button>
+            {!minimal ? (
+              <p className="text-xs text-zinc-500">{targetLabel}</p>
+            ) : null}
+          </div>
+
+          <div className="space-y-1">
+            <p className="text-base font-semibold text-zinc-950">
+              {activeGroup.label}
+            </p>
+            <p className="text-sm text-zinc-500">{activeGroup.description}</p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {activeGroup.items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className="rounded-[20px] border border-zinc-200 bg-zinc-50 px-4 py-4 text-left transition-colors hover:border-zinc-300 hover:bg-zinc-100"
+                onClick={() => insertFormula(item.latex)}
               >
-                {group.label}
-              </TabsTrigger>
+                <div className="flex min-h-20 items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-3">
+                  <MathContent
+                    text={item.latex}
+                    className="prose prose-sm max-w-none text-zinc-950"
+                  />
+                </div>
+                <p className="mt-3 text-sm font-medium text-zinc-900">
+                  {item.label}
+                </p>
+              </button>
             ))}
-          </TabsList>
-
-          {filteredGroups.map((group) => (
-            <TabsContent key={group.id} value={group.id} className="space-y-3">
-              <p className="text-xs text-muted-foreground">{group.description}</p>
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-                {group.items.map((item) => (
-                  <Button
-                    key={`${group.id}-${item.label}`}
-                    type="button"
-                    variant="outline"
-                    className="h-auto items-start justify-start rounded-xl px-3 py-3 text-left"
-                    onClick={() => insertSnippet(item.snippet)}
-                  >
-                    <div className="w-full space-y-2">
-                      <div className="text-xs font-medium text-muted-foreground">
-                        {item.label}
-                      </div>
-                      <div className="min-h-14 rounded-lg border bg-muted/30 px-3 py-2">
-                        <MathContent
-                          text={buildPreviewFormula(item.snippet)}
-                          className="prose prose-sm max-w-none text-foreground"
-                        />
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {item.preview}
-                      </div>
-                    </div>
-                  </Button>
-                ))}
-              </div>
-            </TabsContent>
-          ))}
-        </Tabs>
+          </div>
+        </div>
       ) : (
-        <div className="rounded-lg border border-dashed bg-muted/10 px-4 py-5 text-sm text-muted-foreground">
-          Хайлтад тохирох томьёо олдсонгүй.
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {formulaGroups.map((group) => (
+            <button
+              key={group.id}
+              type="button"
+              className="rounded-[20px] border border-zinc-200 bg-zinc-50 px-4 py-4 text-left transition-colors hover:border-zinc-300 hover:bg-zinc-100"
+              onClick={() => setActiveGroupId(group.id)}
+            >
+              <div className="space-y-2">
+                <p className="text-base font-semibold text-zinc-950">
+                  {group.label}
+                </p>
+                <p className="text-sm leading-6 text-zinc-500">
+                  {group.description}
+                </p>
+              </div>
+              <p className="mt-4 text-xs font-medium uppercase tracking-[0.16em] text-zinc-400">
+                {group.items.length} томьёо
+              </p>
+            </button>
+          ))}
         </div>
       )}
-
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        Товчлуур дарахад сонгосон талбарт формул орно. Текст сонгосон байвал
-        зарим snippet дотор автоматаар шингээнэ.
-      </p>
     </div>
   );
 }

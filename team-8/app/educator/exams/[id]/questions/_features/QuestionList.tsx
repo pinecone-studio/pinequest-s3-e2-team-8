@@ -25,33 +25,6 @@ interface Props {
   isLocked?: boolean;
 }
 
-function formatCorrectAnswer(question: Question) {
-  if (!question.correct_answer) return null;
-
-  if (question.type === "multiple_response") {
-    try {
-      const answers = JSON.parse(question.correct_answer) as string[];
-      return answers.join(", ");
-    } catch {
-      return question.correct_answer;
-    }
-  }
-
-  if (question.type === "matching") {
-    try {
-      const pairs = JSON.parse(question.correct_answer) as Array<{
-        left: string;
-        right: string;
-      }>;
-      return `${pairs.length} холбоос`;
-    } catch {
-      return "Холбох хариулт";
-    }
-  }
-
-  return question.correct_answer;
-}
-
 export default function QuestionList({
   questions,
   examId,
@@ -89,8 +62,6 @@ export default function QuestionList({
         if (passage?.id) {
           renderedPassages.add(passage.id);
         }
-
-        const formattedCorrectAnswer = formatCorrectAnswer(q);
 
         return (
           <Fragment key={q.id}>
@@ -145,15 +116,6 @@ export default function QuestionList({
                         AI хувилбар
                       </Badge>
                     ) : null}
-                    {formattedCorrectAnswer && (
-                      <Badge
-                        variant="secondary"
-                        className="max-w-full truncate text-xs"
-                        title={formattedCorrectAnswer}
-                      >
-                        ✓ {formattedCorrectAnswer}
-                      </Badge>
-                    )}
                   </div>
                 </div>
                 {!isLocked && (

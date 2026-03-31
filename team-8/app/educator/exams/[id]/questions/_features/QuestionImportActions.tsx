@@ -666,18 +666,11 @@ export default function QuestionImportActions({
           </div>
         </div>
 
-        {aiVariantEnabled || formulaToolOpen ? (
+        {aiVariantEnabled ? (
           <div className="flex flex-wrap gap-2">
-            {aiVariantEnabled ? (
-              <Badge variant="outline" className="border-amber-300 text-amber-700">
-                AI ашиглах идэвхтэй
-              </Badge>
-            ) : null}
-            {formulaToolOpen ? (
-              <Badge variant="outline" className="border-zinc-300 text-zinc-700">
-                Томьёоны хэрэгсэл нээлттэй
-              </Badge>
-            ) : null}
+            <Badge variant="outline" className="border-amber-300 text-amber-700">
+              AI ашиглах идэвхтэй
+            </Badge>
           </div>
         ) : null}
 

@@ -493,8 +493,7 @@ export default function EditQuestionDialog({
             <LatexShortcutPanel
               targetId={activeFormulaTarget.id}
               targetLabel={activeFormulaTarget.label}
-              title="Томьёоны самбар"
-              description="Талбар дээр дараад томьёогоо оруулна."
+              minimal
             />
           )}
 
