@@ -8,17 +8,33 @@ import { Badge } from "@/components/ui/badge";
 import MathContent from "@/components/math/MathContent";
 import {
   logProctorEvent,
+  recordExamHeartbeat,
   saveAnswersBatch,
   submitExam,
+  getIdentityEnrollment,
 } from "@/lib/student/actions";
+import {
+  captureVideoSnapshot,
+  computeBrightnessScore,
+  computeVideoFingerprint,
+  getDisplayMode,
+  getHashDistance,
+  getOrientationMode,
+} from "@/lib/proctoring-client";
+import {
+  deriveRiskLevel,
+  getProctorEventPolicy,
+  isMobileCompatibleProctoredExam,
+  shouldAutoFlag,
+  shouldTriggerChallenge,
+  type AnswerChangeAnalytics,
+  type ProctorDisplayMode,
+  type ProctorEventType,
+  type StudentDeviceType,
+} from "@/lib/proctoring";
 import { useCameraMonitor } from "@/hooks/useCameraMonitor";
 import { useGazeMonitor } from "@/hooks/useGazeMonitor";
 
-// ---------------------------------------------------------------------------
-// SEB (Safe Exam Browser) detection
-// ---------------------------------------------------------------------------
-// Set to true when you want to enforce SEB for all exams.
-// In Phase 2, replace this with a per-exam flag from the exams table.
 const REQUIRE_SEB = false;
 
 function isSEBBrowser(): boolean {
@@ -52,7 +68,23 @@ interface ExamTakerProps {
   questions: QuestionItem[];
   sessionId: string;
   savedAnswers: Record<string, string>;
+  initialAnswerAnalytics: Record<string, AnswerChangeAnalytics>;
   initialTimeLeftSeconds: number;
+  runtimeReadiness: ExamRuntimeReadiness | null;
+}
+
+interface ExamRuntimeReadiness {
+  isDesktop: boolean;
+  deviceType: StudentDeviceType;
+  displayMode: ProctorDisplayMode;
+  orientation: "portrait" | "landscape";
+  isStandalonePwa: boolean;
+  platform: string;
+  fullscreenReady: boolean;
+  cameraReady: boolean;
+  identityVerified: boolean;
+  brightnessScore: number | null;
+  identityHash: string | null;
 }
 
 function getShuffleWeight(seed: string, questionId: string) {
@@ -70,24 +102,26 @@ function getShuffleWeight(seed: string, questionId: string) {
 function getDisplayQuestions(
   questions: QuestionItem[],
   shouldShuffle: boolean,
-  seed: string,
+  seed: string
 ) {
   if (!shouldShuffle) return questions;
 
   return [...questions].sort(
-    (a, b) => getShuffleWeight(seed, a.id) - getShuffleWeight(seed, b.id),
+    (a, b) =>
+      getShuffleWeight(seed, a.id) - getShuffleWeight(seed, b.id)
   );
 }
 
 function getDisplayOptions(
   options: string[],
   shouldShuffle: boolean,
-  seed: string,
+  seed: string
 ) {
   if (!shouldShuffle) return options;
 
   return [...options].sort(
-    (a, b) => getShuffleWeight(seed, a) - getShuffleWeight(seed, b),
+    (a, b) =>
+      getShuffleWeight(seed, a) - getShuffleWeight(seed, b)
   );
 }
 
@@ -96,7 +130,9 @@ function parseStoredArray(value: string | undefined) {
 
   try {
     const parsed = JSON.parse(value) as string[];
-    return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
+    return Array.isArray(parsed)
+      ? parsed.map((item) => String(item))
+      : [];
   } catch {
     return [];
   }
@@ -109,7 +145,9 @@ function parseMatchingOptions(options: string[] | null | undefined) {
       if (!left || !right) return null;
       return { left, right };
     })
-    .filter((item): item is { left: string; right: string } => Boolean(item));
+    .filter(
+      (item): item is { left: string; right: string } => Boolean(item)
+    );
 }
 
 function normalizeDraftAnswer(questionType: string, answer: string) {
@@ -130,7 +168,7 @@ function normalizeDraftAnswer(questionType: string, answer: string) {
     try {
       const parsed = JSON.parse(answer) as Record<string, string>;
       const filteredEntries = Object.entries(parsed).filter(
-        ([, value]) => String(value ?? "").trim() !== "",
+        ([, value]) => String(value ?? "").trim() !== ""
       );
 
       return filteredEntries.length > 0
@@ -144,10 +182,7 @@ function normalizeDraftAnswer(questionType: string, answer: string) {
   return answer.trim() ? answer : null;
 }
 
-function isQuestionAnswered(
-  question: QuestionItem,
-  answer: string | undefined,
-) {
+function isQuestionAnswered(question: QuestionItem, answer: string | undefined) {
   return normalizeDraftAnswer(question.type, answer ?? "") !== null;
 }
 
@@ -156,12 +191,18 @@ export default function ExamTaker({
   questions,
   sessionId,
   savedAnswers,
+  initialAnswerAnalytics,
   initialTimeLeftSeconds,
+  runtimeReadiness,
 }: ExamTakerProps) {
   const router = useRouter();
   const draftStorageKey = `exam-session:${sessionId}:drafts`;
   const [displayQuestions] = useState(() =>
-    getDisplayQuestions(questions, true, sessionId),
+    getDisplayQuestions(
+      questions,
+      true,
+      sessionId
+    )
   );
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -180,27 +221,96 @@ export default function ExamTaker({
     }
   });
   const answersRef = useRef<Record<string, string>>(answers);
+  const answerAnalyticsRef = useRef<Record<string, AnswerChangeAnalytics>>(
+    initialAnswerAnalytics
+  );
   const [timeLeft, setTimeLeft] = useState(initialTimeLeftSeconds);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const lastCheckpointRef = useRef<Record<string, string>>(savedAnswers);
   const isCheckpointingRef = useRef(false);
+  const riskScoreRef = useRef(0);
   const currentQuestionRef = useRef<QuestionItem | null>(
-    displayQuestions[0] ?? null,
+    displayQuestions[0] ?? null
   );
   const currentIndexRef = useRef(0);
   const tabSwitchCountRef = useRef(0);
+  const lastOrientationLoggedRef = useRef<"portrait" | "landscape">(
+    runtimeReadiness?.orientation ?? "portrait"
+  );
   const isSubmittingRef = useRef(false);
+  const handleSubmitRef = useRef<() => void>(() => {});
   const proctorThrottleRef = useRef<Record<string, number>>({});
-
-  // SEB detection (evaluated once per render; navigator.userAgent never changes).
+  const [riskScore, setRiskScore] = useState(0);
+  const [challengeOpen, setChallengeOpen] = useState(false);
+  const [challengeAttempts, setChallengeAttempts] = useState(0);
+  const [challengeSecondsLeft, setChallengeSecondsLeft] = useState(30);
+  const [challengeDirection, setChallengeDirection] = useState<"left" | "right">(
+    "left"
+  );
+  const [challengeMessage, setChallengeMessage] = useState(
+    "Fullscreen руу буцаад, дараа нь толгойгоо шаардсан зүг рүү эргүүлнэ үү."
+  );
+  const [faceDirection, setFaceDirection] = useState<
+    "center" | "left" | "right" | "missing" | "multi_face"
+  >("center");
+  const [multiFaceCount, setMultiFaceCount] = useState(0);
+  const [fullscreenActive, setFullscreenActive] = useState(true);
+  const [questionSheetOpen, setQuestionSheetOpen] = useState(false);
+  const [spotCheckOpen, setSpotCheckOpen] = useState(false);
+  const [spotCheckSecondsLeft, setSpotCheckSecondsLeft] = useState(20);
+  const [spotCheckMessage, setSpotCheckMessage] = useState(
+    "Камераа нээгээд нүүрээ төвд барьж, богино spot-check хийнэ үү."
+  );
+  const [spotCheckBusy, setSpotCheckBusy] = useState(false);
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator === "undefined" ? true : navigator.onLine
+  );
+  const [orientation, setOrientation] = useState<"portrait" | "landscape">(
+    runtimeReadiness?.orientation ?? "portrait"
+  );
+  const [displayMode, setDisplayMode] = useState<ProctorDisplayMode>(
+    runtimeReadiness?.displayMode ?? "unknown"
+  );
+  const [identityReferenceHash, setIdentityReferenceHash] = useState<string | null>(null);
+  const deviceType: StudentDeviceType = runtimeReadiness?.deviceType ?? "desktop";
+  const platform = runtimeReadiness?.platform ?? "unknown";
+  const isStandalonePwa =
+    displayMode === "standalone" || displayMode === "fullscreen";
+  const isMobileSession = deviceType === "mobile";
+  const isStrictMode = String(exam.proctoring_mode ?? "off") === "strict";
+  const isMobileStandard = Boolean(
+    isMobileSession &&
+      isMobileCompatibleProctoredExam({
+        proctoring_mode:
+          (exam.proctoring_mode as "off" | "standard" | "strict" | undefined) ??
+          "off",
+        device_policy:
+          (exam.device_policy as "any" | "mobile_preferred" | "desktop_only" | undefined) ??
+          "any",
+      })
+  );
+  const requireCamera = Boolean(exam.require_camera);
+  const requireFullscreen = Boolean(exam.require_fullscreen);
+  const shouldEnforceFullscreen = requireFullscreen && !isMobileStandard;
+  const shouldUseSpotChecks = requireCamera && isMobileStandard;
+  const shouldRunContinuousCamera = requireCamera && (!isMobileStandard || spotCheckOpen);
+  const heartbeatIntervalMs =
+    exam.proctoring_mode === "strict"
+      ? 12000
+      : exam.proctoring_mode === "standard"
+        ? 20000
+        : null;
   const sebDetected = isSEBBrowser();
-  // Camera is only started when SEB is not required, or when SEB is detected.
+
   const { cameraStatus, videoRef } = useCameraMonitor({
     sessionId,
-    enabled: !REQUIRE_SEB || sebDetected,
+    enabled: shouldRunContinuousCamera && (!REQUIRE_SEB || sebDetected),
+    preferFrontCamera: true,
   });
+  const shouldPinCameraPreview =
+    cameraStatus === "granted" && (!isMobileStandard || spotCheckOpen);
 
   // Gaze warning count — only stored in state for badge display.
   // The ref inside useGazeMonitor is the authoritative counter.
@@ -209,37 +319,23 @@ export default function ExamTaker({
   useGazeMonitor({
     sessionId,
     videoRef,
-    enabled: cameraStatus === "granted",
+    enabled:
+      requireCamera &&
+      cameraStatus === "granted" &&
+      (!isMobileStandard || spotCheckOpen),
     onWarning: (total) => {
       setGazeWarningCount(total);
     },
     onMaxWarnings: () => {
-      void handleSubmit();
+      handleSubmitRef.current();
+    },
+    onStateChange: (state, faceCount) => {
+      setFaceDirection(state);
+      setMultiFaceCount(faceCount);
     },
   });
 
-  const currentQuestion = displayQuestions[currentIndex];
-  const currentPassage = currentQuestion.question_passages;
-  const currentMultipleAnswers = parseStoredArray(answers[currentQuestion.id]);
-  const currentMatchingPrompts =
-    currentQuestion.matching_prompts ??
-    parseMatchingOptions(currentQuestion.options).map((pair) => pair.left);
-  const currentMatchingChoices = getDisplayOptions(
-    currentQuestion.matching_choices ??
-      parseMatchingOptions(currentQuestion.options).map((pair) => pair.right),
-    Boolean(exam.shuffle_options),
-    `${sessionId}:${currentQuestion.id}:matching-right`,
-  );
-  const currentMatchingAnswer = (() => {
-    try {
-      return JSON.parse(answers[currentQuestion.id] ?? "{}") as Record<
-        string,
-        string
-      >;
-    } catch {
-      return {};
-    }
-  })();
+  const currentQuestion = displayQuestions[currentIndex] ?? null;
 
   useEffect(() => {
     currentQuestionRef.current = currentQuestion;
@@ -253,16 +349,126 @@ export default function ExamTaker({
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
 
+  useEffect(() => {
+    if (!Boolean(exam.identity_verification)) return;
+
+    void getIdentityEnrollment().then((enrollment) => {
+      setIdentityReferenceHash(enrollment?.referenceHash ?? null);
+    });
+  }, [exam.identity_verification]);
+
+  useEffect(() => {
+    const updateRuntimeView = () => {
+      setOrientation(getOrientationMode());
+      setDisplayMode(getDisplayMode());
+    };
+
+    updateRuntimeView();
+    window.addEventListener("orientationchange", updateRuntimeView);
+    window.addEventListener("resize", updateRuntimeView);
+    document.addEventListener("fullscreenchange", updateRuntimeView);
+    return () => {
+      window.removeEventListener("orientationchange", updateRuntimeView);
+      window.removeEventListener("resize", updateRuntimeView);
+      document.removeEventListener("fullscreenchange", updateRuntimeView);
+    };
+  }, []);
+
+  const captureSnapshot = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      return null;
+    }
+
+    try {
+      return captureVideoSnapshot(video);
+    } catch {
+      return null;
+    }
+  }, [videoRef]);
+
+  const queueSpotCheck = useCallback(
+    (reason: string, nextRiskScore = riskScoreRef.current) => {
+      if (!shouldUseSpotChecks || spotCheckOpen || isSubmittingRef.current) {
+        return;
+      }
+
+      setSpotCheckSecondsLeft(20);
+      setSpotCheckMessage(
+        reason === "scheduled"
+          ? "Тогтмол spot-check эхэллээ. Камераа нээгээд нүүрээ төвд барина уу."
+          : "Эрсдэл өссөн тул camera spot-check эхэллээ. Нүүрээ төвд бариад шалгана уу."
+      );
+      setSpotCheckOpen(true);
+      void logProctorEvent(sessionId, "spot_check_required", {
+        triggered_by: reason,
+        risk_score: nextRiskScore,
+        question_id: currentQuestionRef.current?.id ?? null,
+        question_number: currentIndexRef.current + 1,
+        device_type: deviceType,
+        display_mode: displayMode,
+        proctoring_mode: String(exam.proctoring_mode ?? "off"),
+        platform,
+        orientation,
+      });
+    },
+    [
+      deviceType,
+      displayMode,
+      exam.proctoring_mode,
+      orientation,
+      platform,
+      sessionId,
+      shouldUseSpotChecks,
+      spotCheckOpen,
+    ]
+  );
+
+  const maybeOpenChallenge = useCallback(
+    (nextRiskScore: number, triggeringEvent: ProctorEventType) => {
+      if (isSubmittingRef.current) {
+        return;
+      }
+
+      if (shouldUseSpotChecks) {
+        if (shouldTriggerChallenge(nextRiskScore)) {
+          queueSpotCheck(`risk:${triggeringEvent}`, nextRiskScore);
+        }
+        return;
+      }
+
+      if (challengeOpen) {
+        return;
+      }
+
+      if (shouldTriggerChallenge(nextRiskScore)) {
+        const nextDirection = Math.random() > 0.5 ? "left" : "right";
+        setChallengeDirection(nextDirection);
+        setChallengeSecondsLeft(30);
+        setChallengeOpen(true);
+        setChallengeMessage(
+          `Анхааруулга: integrity check идэвхжлээ. Fullscreen рүү буцаад толгойгоо ${nextDirection === "left" ? "зүүн" : "баруун"} тийш эргүүлнэ үү.`
+        );
+        void logProctorEvent(sessionId, "challenge_required", {
+          triggered_by: triggeringEvent,
+          risk_score: nextRiskScore,
+          question_id: currentQuestionRef.current?.id ?? null,
+          question_number: currentIndexRef.current + 1,
+        });
+      }
+
+      if (shouldAutoFlag(nextRiskScore) && isStrictMode) {
+        handleSubmitRef.current();
+      }
+    },
+    [challengeOpen, isStrictMode, queueSpotCheck, sessionId, shouldUseSpotChecks]
+  );
+
   const emitProctorEvent = useCallback(
     (
-      eventType:
-        | "tab_hidden"
-        | "window_blur"
-        | "copy_attempt"
-        | "paste_attempt"
-        | "context_menu",
+      eventType: ProctorEventType,
       metadata: Record<string, string | number | boolean | null> = {},
-      throttleMs = 0,
+      throttleMs = 0
     ) => {
       if (isSubmittingRef.current) return;
 
@@ -272,30 +478,146 @@ export default function ExamTaker({
 
       proctorThrottleRef.current[eventType] = now;
 
+      const eventPolicy = getProctorEventPolicy(eventType, {
+        deviceType,
+        displayMode,
+        proctoringMode:
+          (exam.proctoring_mode as "off" | "standard" | "strict" | undefined) ??
+          "off",
+      });
+      const nextRiskScore = riskScoreRef.current + eventPolicy.riskDelta;
+      riskScoreRef.current = nextRiskScore;
+      setRiskScore(nextRiskScore);
+      const nextRiskLevel = deriveRiskLevel(nextRiskScore);
+      const shouldAttachSnapshot =
+        (eventPolicy.severity === "high" || eventPolicy.severity === "critical") &&
+        String(exam.evidence_mode ?? "metadata_only") === "metadata_snapshots";
+      const snapshot = shouldAttachSnapshot ? captureSnapshot() : null;
+
       void logProctorEvent(sessionId, eventType, {
         question_id: currentQuestionRef.current?.id ?? null,
         question_number: currentIndexRef.current + 1,
+        risk_score: nextRiskScore,
+        risk_level: nextRiskLevel,
+        derived_risk_delta: eventPolicy.riskDelta,
+        snapshot_url: snapshot,
+        device_type: deviceType,
+        display_mode: displayMode,
+        proctoring_mode: String(exam.proctoring_mode ?? "off"),
+        platform,
+        orientation,
         ...metadata,
       });
+
+      if (
+        eventType !== "spot_check_required" &&
+        eventType !== "spot_check_passed" &&
+        eventType !== "spot_check_failed"
+      ) {
+        maybeOpenChallenge(nextRiskScore, eventType);
+      }
     },
-    [sessionId],
+    [
+      captureSnapshot,
+      deviceType,
+      displayMode,
+      exam.evidence_mode,
+      exam.proctoring_mode,
+      maybeOpenChallenge,
+      orientation,
+      platform,
+      sessionId,
+    ]
   );
+
+  const runSpotCheck = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video || cameraStatus !== "granted") {
+      setSpotCheckOpen(false);
+      emitProctorEvent("spot_check_failed", { reason: "camera_unavailable" });
+      return;
+    }
+
+    setSpotCheckBusy(true);
+    try {
+      const brightnessScore = computeBrightnessScore(video);
+      const liveHash = computeVideoFingerprint(video);
+      const identityDistance =
+        Boolean(exam.identity_verification) && identityReferenceHash
+          ? getHashDistance(identityReferenceHash, liveHash)
+          : null;
+      const identityOk =
+        !Boolean(exam.identity_verification) ||
+        (identityDistance !== null && Number.isFinite(identityDistance) && identityDistance <= 56);
+      const faceOk = faceDirection !== "missing" && faceDirection !== "multi_face";
+      const brightnessOk = brightnessScore >= 28;
+
+      if (identityOk && faceOk && brightnessOk) {
+        setSpotCheckOpen(false);
+        emitProctorEvent("spot_check_passed", {
+          brightness_score: brightnessScore,
+          identity_distance: identityDistance,
+          face_state: faceDirection,
+        });
+        return;
+      }
+
+      setSpotCheckOpen(false);
+      emitProctorEvent(
+        identityOk ? "spot_check_failed" : "identity_failed",
+        {
+          brightness_score: brightnessScore,
+          identity_distance: identityDistance,
+          face_state: faceDirection,
+          multi_face_count: multiFaceCount,
+          reason: !brightnessOk
+            ? "low_light"
+            : !faceOk
+              ? "face_not_ready"
+              : "identity_mismatch",
+        }
+      );
+    } catch {
+      setSpotCheckOpen(false);
+      emitProctorEvent("spot_check_failed", { reason: "runtime_error" });
+    } finally {
+      setSpotCheckBusy(false);
+    }
+  }, [
+    cameraStatus,
+    emitProctorEvent,
+    exam.identity_verification,
+    faceDirection,
+    identityReferenceHash,
+    multiFaceCount,
+    videoRef,
+  ]);
 
   const checkpointDirtyAnswers = useCallback(async () => {
     if (isCheckpointingRef.current || isSubmittingRef.current) return;
 
     const currentAnswers = answersRef.current;
     const lastCheckpoint = lastCheckpointRef.current;
+    const currentAnalytics = answerAnalyticsRef.current;
 
     const dirty: Record<string, string> = {};
+    const dirtyAnalytics: Record<string, AnswerChangeAnalytics> = {};
     for (const [qId, answer] of Object.entries(currentAnswers)) {
       if (lastCheckpoint[qId] !== answer) {
         dirty[qId] = answer;
+        dirtyAnalytics[qId] = currentAnalytics[qId] ?? {
+          firstAnsweredAt: null,
+          lastChangedAt: null,
+          changeCount: 0,
+        };
       }
     }
     for (const qId of Object.keys(lastCheckpoint)) {
       if (!(qId in currentAnswers)) {
         dirty[qId] = "";
+        if (currentAnalytics[qId]) {
+          dirtyAnalytics[qId] = currentAnalytics[qId];
+        }
       }
     }
 
@@ -303,7 +625,7 @@ export default function ExamTaker({
 
     isCheckpointingRef.current = true;
     try {
-      const result = await saveAnswersBatch(sessionId, dirty);
+      const result = await saveAnswersBatch(sessionId, dirty, dirtyAnalytics);
       // Алдаа буцаасан бол lastCheckpoint шинэчлэхгүй — дараагийн checkpoint дахин оролдоно
       if (!result || "error" in result) return;
       lastCheckpointRef.current = { ...currentAnswers };
@@ -326,7 +648,11 @@ export default function ExamTaker({
     setIsSubmitting(true);
 
     await flushPendingAnswers();
-    const result = await submitExam(sessionId, { ...answersRef.current });
+    const result = await submitExam(
+      sessionId,
+      { ...answersRef.current },
+      { ...answerAnalyticsRef.current }
+    );
     if ("success" in result && result.success) {
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(draftStorageKey);
@@ -337,11 +663,26 @@ export default function ExamTaker({
       setIsSubmitting(false);
       alert(("error" in result && result.error) || "Алдаа гарлаа");
     }
-  }, [draftStorageKey, exam.id, flushPendingAnswers, router, sessionId]);
+  }, [
+    draftStorageKey,
+    exam.id,
+    flushPendingAnswers,
+    router,
+    sessionId,
+  ]);
+
+  useEffect(() => {
+    handleSubmitRef.current = () => {
+      void handleSubmit();
+    };
+  }, [handleSubmit]);
 
   // Timer
   useEffect(() => {
     const timer = setInterval(() => {
+      if (challengeOpen) {
+        return;
+      }
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
@@ -352,7 +693,7 @@ export default function ExamTaker({
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [handleSubmit]);
+  }, [challengeOpen, handleSubmit]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -363,9 +704,9 @@ export default function ExamTaker({
   useEffect(() => {
     const interval = setInterval(() => {
       void checkpointDirtyAnswers();
-    }, 5000);
+    }, isMobileSession ? 3000 : 5000);
     return () => clearInterval(interval);
-  }, [checkpointDirtyAnswers]);
+  }, [checkpointDirtyAnswers, isMobileSession]);
 
   // Checkpoint on question navigation
   useEffect(() => {
@@ -374,8 +715,18 @@ export default function ExamTaker({
 
   // Checkpoint on page hide / beforeunload
   useEffect(() => {
-    const handlePageHide = () => {
+    const handlePageHide = (event?: Event) => {
       void checkpointDirtyAnswers();
+      emitProctorEvent(
+        "page_frozen",
+        {
+          persisted:
+            event && "persisted" in event
+              ? Boolean((event as PageTransitionEvent).persisted)
+              : false,
+        },
+        2000
+      );
     };
     window.addEventListener("pagehide", handlePageHide);
     window.addEventListener("beforeunload", handlePageHide);
@@ -383,9 +734,9 @@ export default function ExamTaker({
       window.removeEventListener("pagehide", handlePageHide);
       window.removeEventListener("beforeunload", handlePageHide);
     };
-  }, [checkpointDirtyAnswers]);
+  }, [checkpointDirtyAnswers, emitProctorEvent]);
 
-  // Proctoring: Tab switch detection
+  // Proctoring: visibility / focus / fullscreen / device change
   useEffect(() => {
     const handleVisibility = () => {
       if (document.hidden) {
@@ -394,44 +745,148 @@ export default function ExamTaker({
         setTabSwitchCount(newCount);
 
         emitProctorEvent(
-          "tab_hidden",
+          isMobileSession ? "app_hidden" : "tab_hidden",
           {
             tab_switch_count: newCount,
             visibility_state: document.visibilityState,
           },
-          500,
+          500
         );
+        void checkpointDirtyAnswers();
 
-        if (newCount >= 10) {
-          void handleSubmit();
-        } else if (newCount >= 5) {
+        if (!isMobileSession && newCount >= 5) {
           alert(
-            `Анхааруулга: Та ${newCount} удаа цонхноос гарлаа. 10 удаа давбал шалгалт автоматаар дуусна!`,
+            `Анхааруулга: Та ${newCount} удаа цонхноос гарлаа. Integrity challenge идэвхжиж болно.`
           );
         }
       }
     };
 
     const handleWindowBlur = () => {
-      if (document.hidden) return;
+      if (document.hidden || isMobileSession) return;
 
       emitProctorEvent(
         "window_blur",
         {
           tab_switch_count: tabSwitchCountRef.current,
         },
-        2000,
+        2000
+      );
+    };
+
+    const handleFullscreenChange = () => {
+      setFullscreenActive(Boolean(document.fullscreenElement));
+      setDisplayMode(getDisplayMode());
+      if (shouldEnforceFullscreen && !document.fullscreenElement) {
+        emitProctorEvent(
+          "fullscreen_exit",
+          {
+            tab_switch_count: tabSwitchCountRef.current,
+          },
+          1000
+        );
+      }
+    };
+
+    const handleDeviceChange = () => {
+      if (!requireCamera) return;
+      emitProctorEvent(
+        "camera_disconnected",
+        {
+          reason: "device_change",
+        },
+        2000
       );
     };
 
     document.addEventListener("visibilitychange", handleVisibility);
     window.addEventListener("blur", handleWindowBlur);
+    setFullscreenActive(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    navigator.mediaDevices?.addEventListener?.("devicechange", handleDeviceChange);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("blur", handleWindowBlur);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      navigator.mediaDevices?.removeEventListener?.("devicechange", handleDeviceChange);
     };
-  }, [emitProctorEvent, handleSubmit]);
+  }, [
+    checkpointDirtyAnswers,
+    emitProctorEvent,
+    isMobileSession,
+    requireCamera,
+    shouldEnforceFullscreen,
+  ]);
+
+  useEffect(() => {
+    let offlineStartedAt = 0;
+
+    const handleOffline = () => {
+      offlineStartedAt = Date.now();
+      setIsOnline(false);
+      emitProctorEvent("offline_started", { reason: "navigator_offline" }, 2000);
+    };
+
+    const handleOnline = () => {
+      setIsOnline(true);
+      emitProctorEvent(
+        "offline_restored",
+        {
+          downtime_seconds:
+            offlineStartedAt > 0 ? Math.round((Date.now() - offlineStartedAt) / 1000) : 0,
+        },
+        2000
+      );
+      void checkpointDirtyAnswers();
+    };
+
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
+    return () => {
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [checkpointDirtyAnswers, emitProctorEvent]);
+
+  useEffect(() => {
+    if (!isMobileSession) return;
+
+    const handleOrientationChange = () => {
+      const nextOrientation = getOrientationMode();
+      if (lastOrientationLoggedRef.current !== nextOrientation) {
+        lastOrientationLoggedRef.current = nextOrientation;
+        setOrientation(nextOrientation);
+        emitProctorEvent("orientation_changed", { orientation: nextOrientation }, 2000);
+      }
+    };
+
+    window.addEventListener("orientationchange", handleOrientationChange);
+    window.addEventListener("resize", handleOrientationChange);
+    return () => {
+      window.removeEventListener("orientationchange", handleOrientationChange);
+      window.removeEventListener("resize", handleOrientationChange);
+    };
+  }, [emitProctorEvent, isMobileSession]);
+
+  useEffect(() => {
+    if (!shouldUseSpotChecks) return;
+
+    let timeoutId: number | undefined;
+    const scheduleNext = () => {
+      timeoutId = window.setTimeout(() => {
+        if (!document.hidden && !spotCheckOpen && !isSubmittingRef.current) {
+          queueSpotCheck("scheduled");
+        }
+        scheduleNext();
+      }, 90000 + Math.floor(Math.random() * 60000));
+    };
+
+    scheduleNext();
+    return () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+    };
+  }, [queueSpotCheck, shouldUseSpotChecks, spotCheckOpen]);
 
   useEffect(() => {
     const handleCopy = (event: ClipboardEvent) => {
@@ -466,21 +921,135 @@ export default function ExamTaker({
     };
   }, [emitProctorEvent]);
 
+  useEffect(() => {
+    if (!requireCamera) return;
+
+    const video = videoRef.current;
+    const stream = video?.srcObject;
+    if (!(stream instanceof MediaStream)) return;
+
+    const tracks = stream.getVideoTracks();
+    if (tracks.length === 0) return;
+
+    const handleTrackEnded = () => {
+      emitProctorEvent("camera_disconnected", { reason: "track_ended" }, 1000);
+    };
+
+    for (const track of tracks) {
+      track.addEventListener("ended", handleTrackEnded);
+    }
+
+    return () => {
+      for (const track of tracks) {
+        track.removeEventListener("ended", handleTrackEnded);
+      }
+    };
+  }, [emitProctorEvent, requireCamera, videoRef, cameraStatus]);
+
+  useEffect(() => {
+    if (!heartbeatIntervalMs) return;
+
+    const interval = window.setInterval(() => {
+      void recordExamHeartbeat(sessionId).then((result) => {
+        if (result && "error" in result) {
+          emitProctorEvent("heartbeat_lost", { reason: result.error ?? "heartbeat_failed" }, 5000);
+        }
+      });
+    }, heartbeatIntervalMs);
+
+    return () => window.clearInterval(interval);
+  }, [emitProctorEvent, heartbeatIntervalMs, sessionId]);
+
+  useEffect(() => {
+    if (!challengeOpen) return;
+
+    const timer = window.setInterval(() => {
+      setChallengeSecondsLeft((prev) => {
+        if (prev <= 1) {
+          window.clearInterval(timer);
+          setChallengeAttempts((current) => current + 1);
+          setChallengeOpen(false);
+          emitProctorEvent("challenge_failed", {
+            reason: "timeout",
+            risk_score: riskScoreRef.current,
+          });
+          if (challengeAttempts + 1 >= 2) {
+            handleSubmitRef.current();
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [challengeAttempts, challengeOpen, emitProctorEvent]);
+
+  useEffect(() => {
+    if (!spotCheckOpen) return;
+
+    const timer = window.setInterval(() => {
+      setSpotCheckSecondsLeft((prev) => {
+        if (prev <= 1) {
+          window.clearInterval(timer);
+          setSpotCheckOpen(false);
+          emitProctorEvent("spot_check_failed", { reason: "timeout" });
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [emitProctorEvent, spotCheckOpen]);
+
+  useEffect(() => {
+    if (!challengeOpen) return;
+
+    if (
+      document.fullscreenElement &&
+      ((challengeDirection === "left" && faceDirection === "left") ||
+        (challengeDirection === "right" && faceDirection === "right"))
+    ) {
+      setChallengeOpen(false);
+      setChallengeMessage("Challenge амжилттай.");
+      emitProctorEvent("challenge_passed", {
+        challenge_direction: challengeDirection,
+        risk_score: riskScoreRef.current,
+      });
+    }
+  }, [challengeDirection, challengeOpen, emitProctorEvent, faceDirection]);
+
   // Хариулт хадгалах (localStorage-д шууд, Redis-д batch checkpoint-ээр)
   const handleAnswer = useCallback(
     (questionId: string, answer: string, questionType: string) => {
       const normalizedAnswer = normalizeDraftAnswer(questionType, answer);
       const nextAnswers = { ...answersRef.current };
+      const nowIso = new Date().toISOString();
+      const previous = answerAnalyticsRef.current[questionId] ?? {
+        firstAnsweredAt: null,
+        lastChangedAt: null,
+        changeCount: 0,
+      };
       if (normalizedAnswer === null) {
         delete nextAnswers[questionId];
       } else {
         nextAnswers[questionId] = normalizedAnswer;
       }
 
+      answerAnalyticsRef.current = {
+        ...answerAnalyticsRef.current,
+        [questionId]: {
+          firstAnsweredAt: previous.firstAnsweredAt ?? nowIso,
+          lastChangedAt: nowIso,
+          changeCount: previous.changeCount + 1,
+        },
+      };
+
       answersRef.current = nextAnswers;
       setAnswers(nextAnswers);
     },
-    [],
+    []
   );
 
   // Хугацааг формат хийх
@@ -491,9 +1060,13 @@ export default function ExamTaker({
   };
 
   const answeredCount = displayQuestions.filter((question) =>
-    isQuestionAnswered(question, answers[question.id]),
+    isQuestionAnswered(question, answers[question.id])
   ).length;
   const isTimeWarning = timeLeft < 300; // 5 минутаас бага
+  const progressPercent =
+    displayQuestions.length > 0
+      ? Math.round(((currentIndex + 1) / displayQuestions.length) * 100)
+      : 0;
 
   if (REQUIRE_SEB && !sebDetected) {
     return (
@@ -504,8 +1077,8 @@ export default function ExamTaker({
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Энэ шалгалтыг зөвхөн Safe Exam Browser (SEB) ашиглан нээх
-              боломжтой. Та SEB татаж аваад дахин нээнэ үү.
+              Энэ шалгалтыг зөвхөн Safe Exam Browser ашиглан нээх боломжтой.
+              SEB-ээ нээгээд дахин оролдоно уу.
             </p>
             <p className="text-xs text-muted-foreground">safeexambrowser.org</p>
           </CardContent>
@@ -523,14 +1096,10 @@ export default function ExamTaker({
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Энэ шалгалтын асуултын багц бүрэн бэлдээгүй байна. Багшдаа
-              мэдэгдээд дараа дахин оролдоно уу.
+              Энэ шалгалтын асуултын багц бүрэн бэлдээгүй байна. Багшдаа мэдэгдээд
+              дараа дахин оролдоно уу.
             </p>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => router.push("/student/exams")}
-            >
+            <Button variant="outline" className="w-full" onClick={() => router.push("/student/exams")}>
               Шалгалтын жагсаалт руу буцах
             </Button>
           </CardContent>
@@ -539,21 +1108,40 @@ export default function ExamTaker({
     );
   }
 
+  const currentPassage = currentQuestion.question_passages;
+  const currentMultipleAnswers = parseStoredArray(answers[currentQuestion.id]);
+  const currentMatchingPrompts =
+    currentQuestion.matching_prompts ??
+    parseMatchingOptions(currentQuestion.options).map((pair) => pair.left);
+  const currentMatchingChoices = getDisplayOptions(
+    currentQuestion.matching_choices ??
+      parseMatchingOptions(currentQuestion.options).map((pair) => pair.right),
+    Boolean(exam.shuffle_options),
+    `${sessionId}:${currentQuestion.id}:matching-right`
+  );
+  const currentMatchingAnswer = (() => {
+    try {
+      return JSON.parse(answers[currentQuestion.id] ?? "{}") as Record<
+        string,
+        string
+      >;
+    } catch {
+      return {};
+    }
+  })();
+
   return (
-    <div className="flex min-h-screen flex-col">
-      {/* Submit confirmation dialog */}
+    <div className="flex min-h-screen flex-col bg-background pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:pb-8">
       {showSubmitConfirm && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
-          <div className="mx-4 w-full max-w-md rounded-xl border bg-background p-6 shadow-xl">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md rounded-3xl border bg-background p-6 shadow-xl">
             <h3 className="text-lg font-semibold">Шалгалт дуусгах уу?</h3>
             <p className="mt-2 text-sm text-muted-foreground">
-              {answeredCount}/{displayQuestions.length} асуултад хариулсан
-              байна.
+              {answeredCount}/{displayQuestions.length} асуултад хариулсан байна.
               {answeredCount < displayQuestions.length && (
                 <span className="font-medium text-destructive">
                   {" "}
-                  {displayQuestions.length - answeredCount} асуулт хариулаагүй
-                  байна!
+                  {displayQuestions.length - answeredCount} асуулт хариулаагүй байна.
                 </span>
               )}
             </p>
@@ -583,51 +1171,218 @@ export default function ExamTaker({
         </div>
       )}
 
-      {/* Header: Timer + Progress */}
-      <div className="sticky top-0 z-50 border-b bg-background/95 px-3 py-2 backdrop-blur">
-        {gazeWarningCount > 0 && (
+      {challengeOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-lg rounded-3xl border bg-background p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold">Integrity Challenge</h3>
+            <p className="mt-2 text-sm text-muted-foreground">{challengeMessage}</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border p-3">
+                <p className="text-xs text-muted-foreground">Risk</p>
+                <p className="text-lg font-semibold">{deriveRiskLevel(riskScore)}</p>
+              </div>
+              <div className="rounded-xl border p-3">
+                <p className="text-xs text-muted-foreground">Seconds left</p>
+                <p className="text-lg font-semibold">{challengeSecondsLeft}s</p>
+              </div>
+              <div className="rounded-xl border p-3">
+                <p className="text-xs text-muted-foreground">Face state</p>
+                <p className="text-lg font-semibold">{faceDirection}</p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Fullscreen руу буцаж, камераа төвлөрүүлээд толгойгоо{" "}
+              {challengeDirection === "left" ? "зүүн" : "баруун"} тийш эргүүлнэ үү.
+              Амжилтгүй бол автоматаар flag хийгдэнэ.
+            </div>
+            <div className="mt-4 flex justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  void document.documentElement.requestFullscreen().catch(() => {});
+                }}
+              >
+                Fullscreen руу буцах
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {spotCheckOpen && (
+        <div className="fixed inset-0 z-[115] bg-black/65 px-4 py-6">
+          <div className="mx-auto mt-56 w-full max-w-md rounded-3xl border bg-background p-5 shadow-2xl">
+            <h3 className="text-lg font-semibold">Camera Spot-check</h3>
+            <p className="mt-2 text-sm text-muted-foreground">{spotCheckMessage}</p>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="rounded-xl border p-3">
+                <p className="text-xs text-muted-foreground">Хугацаа</p>
+                <p className="text-lg font-semibold">{spotCheckSecondsLeft}s</p>
+              </div>
+              <div className="rounded-xl border p-3">
+                <p className="text-xs text-muted-foreground">Face</p>
+                <p className="text-lg font-semibold">{faceDirection}</p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Нүүрээ төвд барьж, гэрлээ сайн тааруулаад шалгалтаа үргэлжлүүлэхийн өмнө баталгаажуулна уу.
+            </div>
+            <div className="mt-4 flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  setSpotCheckOpen(false);
+                  emitProctorEvent("spot_check_failed", { reason: "dismissed" });
+                }}
+              >
+                Болих
+              </Button>
+              <Button
+                type="button"
+                className="flex-1"
+                loading={spotCheckBusy}
+                loadingText="Шалгаж байна..."
+                onClick={() => void runSpotCheck()}
+              >
+                Spot-check хийх
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {questionSheetOpen && (
+        <div className="fixed inset-0 z-[95] bg-black/45 md:hidden">
+          <button
+            type="button"
+            className="absolute inset-0"
+            onClick={() => setQuestionSheetOpen(false)}
+            aria-label="Question list хаах"
+          />
+          <div className="absolute inset-x-0 bottom-0 rounded-t-[28px] border bg-background p-4 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold">Асуултын жагсаалт</p>
+                <p className="text-xs text-muted-foreground">
+                  {answeredCount}/{displayQuestions.length} хариулсан
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setQuestionSheetOpen(false)}
+              >
+                Хаах
+              </Button>
+            </div>
+            <div className="grid grid-cols-5 gap-2">
+              {displayQuestions.map((question, index) => {
+                const answered = isQuestionAnswered(question, answers[question.id]);
+                const active = index === currentIndex;
+                return (
+                  <button
+                    key={question.id}
+                    type="button"
+                    onClick={() => {
+                      setCurrentIndex(index);
+                      setQuestionSheetOpen(false);
+                    }}
+                    className={`flex h-12 items-center justify-center rounded-2xl text-sm font-semibold ${
+                      active
+                        ? "bg-primary text-primary-foreground"
+                        : answered
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-muted text-foreground"
+                    }`}
+                  >
+                    {index + 1}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur">
+        {!isOnline && (
+          <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm font-medium text-amber-800">
+            Сүлжээ тасарсан байна. Хариултыг утсан дээр хадгалж, холболт сэргээхийг хүлээж байна.
+          </div>
+        )}
+        {gazeWarningCount > 0 && !isMobileStandard && (
           <div className="border-b border-red-200 bg-red-50 px-3 py-1.5 text-center text-sm font-medium text-red-700">
             {gazeWarningCount < 3
               ? `Анхааруулга ${gazeWarningCount}/3: Та камерын өмнө шулуун харна уу. ${3 - gazeWarningCount} анхааруулга үлдсэн.`
               : "Анхааруулга 3/3: Шалгалт дуусгагдаж байна..."}
           </div>
         )}
-        <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <h1 className="line-clamp-1 text-base font-semibold sm:text-lg">
-              {exam.title as string}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {answeredCount}/{displayQuestions.length} хариулсан
-            </p>
-          </div>
-          <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
-            {cameraStatus === "denied" && (
-              <Badge variant="destructive">Камер хаалттай</Badge>
-            )}
-            {gazeWarningCount > 0 && (
-              <Badge variant="destructive">
-                Анхааруулга {gazeWarningCount}/3
-              </Badge>
-            )}
-            {tabSwitchCount > 0 && (
-              <Badge variant="destructive">Tab {tabSwitchCount}/5</Badge>
-            )}
+        <div className="mx-auto max-w-4xl space-y-3 px-3 py-3 sm:px-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="line-clamp-1 text-sm font-semibold sm:text-lg">
+                {exam.title as string}
+              </h1>
+              <p className="text-xs text-muted-foreground sm:text-sm">
+                Асуулт {currentIndex + 1}/{displayQuestions.length} · {answeredCount} хариулсан
+              </p>
+            </div>
             <div
-              className={`rounded-lg px-3 py-2 font-mono text-lg font-bold sm:text-xl ${
+              className={`shrink-0 rounded-2xl px-3 py-2 font-mono text-base font-bold sm:text-xl ${
                 isTimeWarning
                   ? "animate-pulse bg-red-100 text-red-700"
-                  : "bg-muted"
+                  : "bg-muted text-foreground"
               }`}
             >
               {formatTime(timeLeft)}
             </div>
+          </div>
+
+          <div className="h-2 rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-all"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {!isOnline && <Badge variant="destructive">Offline</Badge>}
+            {cameraStatus === "denied" && <Badge variant="destructive">Камер хаалттай</Badge>}
+            {shouldEnforceFullscreen && !fullscreenActive && (
+              <Badge variant="destructive">Fullscreen off</Badge>
+            )}
+            {tabSwitchCount > 0 && (
+              <Badge variant="destructive">
+                {isMobileSession ? "App" : "Tab"} {tabSwitchCount}
+              </Badge>
+            )}
+            {multiFaceCount > 1 && (
+              <Badge variant="destructive">Extra face x{multiFaceCount}</Badge>
+            )}
+            {isMobileSession && !isStandalonePwa && (
+              <Badge variant="outline">Browser mode</Badge>
+            )}
+            {isMobileSession && orientation === "landscape" && (
+              <Badge variant="outline">Landscape</Badge>
+            )}
+            <Badge variant={riskScore >= 40 ? "destructive" : "outline"}>
+              Risk {deriveRiskLevel(riskScore)}
+            </Badge>
+          </div>
+
+          <div className="hidden items-center justify-end gap-2 md:flex">
+            <Button type="button" variant="outline" onClick={() => setQuestionSheetOpen(true)}>
+              Асуултууд
+            </Button>
             <Button
               onClick={() => setShowSubmitConfirm(true)}
               loading={isSubmitting}
               loadingText="Илгээж байна..."
               variant="destructive"
-              className="shrink-0"
             >
               Дуусгах
             </Button>
@@ -635,58 +1390,62 @@ export default function ExamTaker({
         </div>
       </div>
 
-      <div className="mx-auto flex w-full max-w-4xl flex-1 gap-4 p-3 sm:p-4">
-        {/* Question Navigator (sidebar) */}
-        <div className="hidden w-48 shrink-0 md:block">
-          <div className="sticky top-20 space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">
-              Асуултууд
-            </p>
-            <div className="grid grid-cols-5 gap-1.5">
-              {displayQuestions.map((q, i) => {
-                const qId = q.id as string;
-                const isAnswered = isQuestionAnswered(q, answers[qId]);
-                const isCurrent = i === currentIndex;
-                return (
-                  <button
-                    key={qId}
-                    onClick={() => setCurrentIndex(i)}
-                    className={`flex h-8 w-8 items-center justify-center rounded text-sm font-medium transition-colors ${
-                      isCurrent
-                        ? "bg-primary text-primary-foreground"
-                        : isAnswered
-                          ? "bg-[#D4EDD9] text-green-800"
-                          : "bg-muted hover:bg-muted/80"
-                    }`}
-                  >
-                    {i + 1}
-                  </button>
-                );
-              })}
+      <div className="mx-auto flex w-full max-w-4xl flex-1 gap-4 px-3 py-4 sm:px-4">
+        <div className="hidden w-52 shrink-0 lg:block">
+          <div className="sticky top-28 space-y-3">
+            <div className="rounded-3xl border bg-card p-4 shadow-sm">
+              <p className="text-sm font-semibold">Асуултууд</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {answeredCount}/{displayQuestions.length} хариулсан
+              </p>
+              <div className="mt-4 grid grid-cols-5 gap-2">
+                {displayQuestions.map((question, index) => {
+                  const answered = isQuestionAnswered(question, answers[question.id]);
+                  const active = index === currentIndex;
+                  return (
+                    <button
+                      key={question.id}
+                      type="button"
+                      onClick={() => setCurrentIndex(index)}
+                      className={`flex h-10 items-center justify-center rounded-xl text-sm font-semibold ${
+                        active
+                          ? "bg-primary text-primary-foreground"
+                          : answered
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-muted text-foreground"
+                      }`}
+                    >
+                      {index + 1}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Question Content */}
-        <div className="flex-1">
-          <Card className="rounded-2xl">
+        <div className="min-w-0 flex-1">
+          <Card className="rounded-[28px] border shadow-sm">
             <CardHeader className="pb-4">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">
-                  Асуулт {currentIndex + 1}/{displayQuestions.length}
-                </CardTitle>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base sm:text-lg">
+                    Асуулт {currentIndex + 1}
+                  </CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Нэг удаад нэг асуулт дээр төвлөрч ажиллана уу.
+                  </p>
+                </div>
                 <Badge variant="outline">{currentQuestion.points} оноо</Badge>
               </div>
             </CardHeader>
-            <CardContent className="space-y-5">
+            <CardContent className="space-y-5 px-4 pb-6 sm:px-6">
               {currentPassage && (
-                <div className="space-y-3 rounded-xl border border-dashed bg-muted/30 p-3">
+                <div className="space-y-3 rounded-2xl border border-dashed bg-muted/30 p-4">
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary">Нийтлэг өгөгдөл</Badge>
                     {currentPassage.title && (
-                      <span className="font-medium">
-                        {currentPassage.title}
-                      </span>
+                      <span className="font-medium">{currentPassage.title}</span>
                     )}
                   </div>
                   <MathContent
@@ -699,65 +1458,62 @@ export default function ExamTaker({
                     <img
                       src={currentPassage.image_url}
                       alt="Нийтлэг өгөгдлийн зураг"
-                      className="max-h-72 rounded-lg border"
+                      className="max-h-72 rounded-2xl border"
                     />
                   )}
                 </div>
               )}
 
-              {/* Question text */}
               <MathContent
                 html={currentQuestion.content_html}
                 text={currentQuestion.content}
                 className="prose prose-sm max-w-none text-foreground"
               />
 
-              {/* Image */}
               {currentQuestion.image_url && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={currentQuestion.image_url}
                   alt="Асуултын зураг"
-                  className="max-h-64 rounded-lg"
+                  className="max-h-64 rounded-2xl"
                 />
               )}
 
-              {/* Answer options */}
               {currentQuestion.type === "multiple_choice" && (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {getDisplayOptions(
                     currentQuestion.options ?? [],
                     Boolean(exam.shuffle_options),
-                    `${sessionId}:${currentQuestion.id}`,
-                  ).map((option, i) => {
+                    `${sessionId}:${currentQuestion.id}`
+                  ).map((option, index) => {
                     const optionValue =
                       typeof option === "string" ? option : String(option);
-                    const isSelected =
-                      answers[currentQuestion.id] === optionValue;
+                    const isSelected = answers[currentQuestion.id] === optionValue;
                     return (
                       <button
-                        key={i}
+                        key={index}
+                        type="button"
                         onClick={() =>
                           handleAnswer(
                             currentQuestion.id,
                             optionValue,
-                            currentQuestion.type,
+                            currentQuestion.type
                           )
                         }
-                        className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
+                        className={`flex w-full items-start gap-3 rounded-2xl border px-4 py-4 text-left transition-colors ${
                           isSelected
                             ? "border-primary bg-primary/5"
-                            : "hover:bg-muted/50"
+                            : "bg-card hover:bg-muted/50"
                         }`}
                       >
                         <span
-                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-sm ${
+                          className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-sm font-semibold ${
                             isSelected
                               ? "border-primary bg-primary text-primary-foreground"
-                              : ""
+                              : "border-zinc-300 text-zinc-600"
                           }`}
                         >
-                          {String.fromCharCode(65 + i)}
+                          {String.fromCharCode(65 + index)}
                         </span>
                         <MathContent
                           text={optionValue}
@@ -770,43 +1526,39 @@ export default function ExamTaker({
               )}
 
               {currentQuestion.type === "multiple_response" && (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {getDisplayOptions(
                     currentQuestion.options ?? [],
                     Boolean(exam.shuffle_options),
-                    `${sessionId}:${currentQuestion.id}`,
-                  ).map((option, i) => {
+                    `${sessionId}:${currentQuestion.id}`
+                  ).map((option, index) => {
                     const optionValue = String(option);
-                    const isSelected =
-                      currentMultipleAnswers.includes(optionValue);
-
+                    const isSelected = currentMultipleAnswers.includes(optionValue);
                     return (
                       <button
-                        key={i}
+                        key={index}
+                        type="button"
                         onClick={() => {
                           const nextAnswers = isSelected
-                            ? currentMultipleAnswers.filter(
-                                (item) => item !== optionValue,
-                              )
+                            ? currentMultipleAnswers.filter((item) => item !== optionValue)
                             : [...currentMultipleAnswers, optionValue];
-
                           handleAnswer(
                             currentQuestion.id,
                             JSON.stringify(nextAnswers),
-                            currentQuestion.type,
+                            currentQuestion.type
                           );
                         }}
-                        className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
+                        className={`flex w-full items-start gap-3 rounded-2xl border px-4 py-4 text-left transition-colors ${
                           isSelected
                             ? "border-primary bg-primary/5"
-                            : "hover:bg-muted/50"
+                            : "bg-card hover:bg-muted/50"
                         }`}
                       >
                         <span
-                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded border text-sm ${
+                          className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border text-sm font-semibold ${
                             isSelected
                               ? "border-primary bg-primary text-primary-foreground"
-                              : ""
+                              : "border-zinc-300 text-zinc-500"
                           }`}
                         >
                           {isSelected ? "✓" : ""}
@@ -821,34 +1573,37 @@ export default function ExamTaker({
                 </div>
               )}
 
-              {/* Essay answer */}
               {currentQuestion.type === "essay" && (
                 <textarea
-                  className="min-h-[140px] w-full rounded-lg border p-3 focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="min-h-[180px] w-full resize-none rounded-2xl border px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-primary"
                   placeholder="Хариултаа бичнэ үү..."
                   value={answers[currentQuestion.id] ?? ""}
-                  onChange={(e) =>
+                  onChange={(event) =>
                     handleAnswer(
                       currentQuestion.id,
-                      e.target.value,
-                      currentQuestion.type,
+                      event.target.value,
+                      currentQuestion.type
                     )
                   }
+                  onInput={(event) => {
+                    const target = event.currentTarget;
+                    target.style.height = "0px";
+                    target.style.height = `${Math.max(target.scrollHeight, 180)}px`;
+                  }}
                 />
               )}
 
-              {/* Fill blank */}
               {currentQuestion.type === "fill_blank" && (
                 <input
                   type="text"
-                  className="w-full rounded-lg border p-3 focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="h-13 w-full rounded-2xl border px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-primary"
                   placeholder="Хариултаа бичнэ үү..."
                   value={answers[currentQuestion.id] ?? ""}
-                  onChange={(e) =>
+                  onChange={(event) =>
                     handleAnswer(
                       currentQuestion.id,
-                      e.target.value,
-                      currentQuestion.type,
+                      event.target.value,
+                      currentQuestion.type
                     )
                   }
                 />
@@ -856,70 +1611,83 @@ export default function ExamTaker({
 
               {currentQuestion.type === "matching" && (
                 <div className="space-y-3">
-                  {currentMatchingPrompts.map((leftPrompt, index) => {
-                    return (
-                      <div
-                        key={`${leftPrompt}-${index}`}
-                        className="grid gap-3 rounded-lg border p-4 md:grid-cols-2"
-                      >
-                        <div className="rounded-lg bg-muted/40 px-3 py-2 font-medium">
-                          <MathContent
-                            text={leftPrompt}
-                            className="prose prose-sm max-w-none text-foreground"
-                          />
-                        </div>
-                        <select
-                          className="rounded-lg border bg-background px-3 py-2"
-                          value={currentMatchingAnswer[leftPrompt] ?? ""}
-                          onChange={(event) => {
-                            const nextAnswer = {
-                              ...currentMatchingAnswer,
-                              [leftPrompt]: event.target.value,
-                            };
-
-                            handleAnswer(
-                              currentQuestion.id,
-                              JSON.stringify(nextAnswer),
-                              currentQuestion.type,
-                            );
-                          }}
-                        >
-                          <option value="">Сонгоно уу</option>
-                          {currentMatchingChoices.map((option) => (
-                            <option
-                              key={`${leftPrompt}-${option}`}
-                              value={option}
-                            >
-                              {option}
-                            </option>
-                          ))}
-                        </select>
+                  {currentMatchingPrompts.map((leftPrompt, index) => (
+                    <div
+                      key={`${leftPrompt}-${index}`}
+                      className="grid gap-3 rounded-2xl border p-4 md:grid-cols-2"
+                    >
+                      <div className="rounded-2xl bg-muted/40 px-3 py-3 font-medium">
+                        <MathContent
+                          text={leftPrompt}
+                          className="prose prose-sm max-w-none text-foreground"
+                        />
                       </div>
-                    );
-                  })}
+                      <select
+                        className="rounded-2xl border bg-background px-3 py-3"
+                        value={currentMatchingAnswer[leftPrompt] ?? ""}
+                        onChange={(event) => {
+                          const nextAnswer = {
+                            ...currentMatchingAnswer,
+                            [leftPrompt]: event.target.value,
+                          };
+
+                          handleAnswer(
+                            currentQuestion.id,
+                            JSON.stringify(nextAnswer),
+                            currentQuestion.type
+                          );
+                        }}
+                      >
+                        <option value="">Сонгоно уу</option>
+                        {currentMatchingChoices.map((option) => (
+                          <option key={`${leftPrompt}-${option}`} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
                 </div>
               )}
 
-              {/* Navigation */}
-              <div className="flex gap-2 border-t pt-4">
+              <div className="hidden gap-2 border-t pt-4 md:flex">
                 <Button
+                  type="button"
                   variant="outline"
-                  onClick={() => setCurrentIndex((p) => Math.max(0, p - 1))}
+                  onClick={() => setCurrentIndex((prev) => Math.max(0, prev - 1))}
                   disabled={currentIndex === 0}
                   className="flex-1"
                 >
                   Өмнөх
                 </Button>
-                {currentIndex < displayQuestions.length - 1 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setQuestionSheetOpen(true)}
+                  className="flex-1 lg:hidden"
+                >
+                  Асуултууд
+                </Button>
+                {currentIndex < displayQuestions.length - 1 ? (
                   <Button
+                    type="button"
                     onClick={() =>
-                      setCurrentIndex((p) =>
-                        Math.min(displayQuestions.length - 1, p + 1),
+                      setCurrentIndex((prev) =>
+                        Math.min(displayQuestions.length - 1, prev + 1)
                       )
                     }
                     className="flex-1"
                   >
                     Дараах
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() => setShowSubmitConfirm(true)}
+                    className="flex-1"
+                  >
+                    Дуусгах
                   </Button>
                 )}
               </div>
@@ -928,17 +1696,64 @@ export default function ExamTaker({
         </div>
       </div>
 
-      {/* Camera preview — always in DOM so videoRef is attached before stream resolves.
-          Hidden when camera is not yet granted. PiP-style fixed box bottom-right. */}
+      <div
+        className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 px-3 py-3 shadow-[0_-10px_30px_-20px_rgba(15,23,42,0.28)] backdrop-blur md:hidden"
+        style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}
+      >
+        <div className="mx-auto flex max-w-4xl items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setCurrentIndex((prev) => Math.max(0, prev - 1))}
+            disabled={currentIndex === 0}
+            className="flex-1"
+          >
+            Өмнөх
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setQuestionSheetOpen(true)}
+            className="flex-1"
+          >
+            Жагсаалт
+          </Button>
+          {currentIndex < displayQuestions.length - 1 ? (
+            <Button
+              type="button"
+              onClick={() =>
+                setCurrentIndex((prev) =>
+                  Math.min(displayQuestions.length - 1, prev + 1)
+                )
+              }
+              className="flex-1"
+            >
+              Дараах
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => setShowSubmitConfirm(true)}
+              className="flex-1"
+            >
+              Дуусгах
+            </Button>
+          )}
+        </div>
+      </div>
+
       <video
         ref={videoRef}
         autoPlay
         muted
         playsInline
-        className={`fixed top-16 right-4 z-50 h-28 w-36 rounded-xl border-2 bg-black object-cover shadow-lg transition-opacity ${
-          cameraStatus === "granted"
-            ? "opacity-100"
-            : "opacity-0 pointer-events-none"
+        className={`fixed z-[120] rounded-2xl border-2 bg-black object-cover shadow-lg transition-opacity ${
+          shouldPinCameraPreview ? "opacity-100" : "opacity-0 pointer-events-none"
+        } ${
+          isMobileStandard
+            ? "left-4 right-4 top-20 h-44 w-auto"
+            : "right-4 top-20 h-28 w-36"
         }`}
       />
     </div>

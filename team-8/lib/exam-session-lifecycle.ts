@@ -72,6 +72,7 @@ export function getSessionDeadlineMs(
 
   const startedAtMs = new Date(startedAt).getTime();
   const durationMs = Number(exam.duration_minutes ?? 0) * 60 * 1000;
+  const endTimeMs = new Date(exam.end_time).getTime();
 
   if (
     Number.isNaN(startedAtMs) ||
@@ -81,7 +82,12 @@ export function getSessionDeadlineMs(
     return null;
   }
 
-  return startedAtMs + durationMs;
+  const durationDeadlineMs = startedAtMs + durationMs;
+  if (Number.isNaN(endTimeMs)) {
+    return durationDeadlineMs;
+  }
+
+  return Math.min(durationDeadlineMs, endTimeMs);
 }
 
 export function deriveStudentExamLifecycle(
@@ -103,7 +109,10 @@ export function deriveStudentExamLifecycle(
   const isRetakeFlow = hasRetakeOverride || attemptsUsed > 0;
   const sessionDeadlineMs = getSessionDeadlineMs(
     input.latestSessionStartedAt,
-    input.exam
+    {
+      end_time: effectiveEndTime,
+      duration_minutes: input.exam.duration_minutes,
+    }
   );
   const isExpiredInProgress =
     status === "in_progress" &&

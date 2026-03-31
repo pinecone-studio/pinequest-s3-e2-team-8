@@ -26,7 +26,9 @@ export default async function TakeExamPage({
       questions={payload.questions}
       sessionId={payload.sessionId}
       savedAnswers={payload.savedAnswers}
+      answerAnalytics={payload.answerAnalytics}
       initialTimeLeftSeconds={payload.initialTimeLeftSeconds}
+      sessionAlreadyStarted={payload.sessionAlreadyStarted}
     />
   );
 }

@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -25,24 +26,31 @@ import {
   type RecipientAccessOverride,
 } from "@/lib/exam-session-lifecycle";
 import { notifyTeacherOfSubmission } from "@/lib/notification/actions";
+import { getExamManagementScope } from "@/lib/exam-scope";
 import {
   isFinalizedAttemptStatus,
   pickBestAttempt,
   pickLatestAttempt,
 } from "@/lib/exam-attempt-utils";
-import { recomputeStudentTopicMastery } from "@/lib/student-learning/actions";
+import { enqueueStudentTopicMasteryRefresh } from "@/lib/student-learning/actions";
 import { attachPassagesToQuestions } from "@/lib/question-passages";
+import {
+  DEFAULT_PROCTORING_SETTINGS,
+  deriveRiskLevel,
+  getEffectiveDevicePolicy,
+  getProctorEventPolicy,
+  type AnswerChangeAnalytics,
+  type DevicePolicy,
+  type EvidenceMode,
+  type ProctorDisplayMode,
+  type ProctorEventType,
+  type ProctorFlagStatus,
+  type ProctoringMode,
+  type StudentDeviceType,
+  shouldAutoFlag,
+  isStrictProctoredExam,
+} from "@/lib/proctoring";
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
-type ProctorEventType =
-  | "tab_hidden"
-  | "window_blur"
-  | "copy_attempt"
-  | "paste_attempt"
-  | "context_menu"
-  | "camera_denied"
-  | "look_left"
-  | "look_right"
-  | "face_missing";
 type ProctorEventMetadata = Record<
   string,
   string | number | boolean | null
@@ -61,6 +69,13 @@ const STUDENT_EXAM_SELECT = `
   shuffle_options,
   max_attempts,
   passing_score,
+  proctoring_mode,
+  device_policy,
+  require_fullscreen,
+  require_camera,
+  identity_verification,
+  evidence_mode,
+  post_exam_similarity_enabled,
   created_at
 `;
 
@@ -77,6 +92,13 @@ type StudentExamBase = {
   shuffle_options: boolean;
   max_attempts: number;
   passing_score: number | null;
+  proctoring_mode: ProctoringMode;
+  device_policy: DevicePolicy;
+  require_fullscreen: boolean;
+  require_camera: boolean;
+  identity_verification: boolean;
+  evidence_mode: EvidenceMode;
+  post_exam_similarity_enabled: boolean;
   created_at: string;
 };
 
@@ -128,9 +150,11 @@ type PrepareExamTakePayloadResult =
   | {
       exam: StudentAssignedExam & Record<string, unknown>;
       questions: StudentSafeQuestion[];
-      sessionId: string;
+      sessionId: string | null;
       savedAnswers: Record<string, string>;
-      initialTimeLeftSeconds: number;
+      answerAnalytics: Record<string, AnswerChangeAnalytics>;
+      initialTimeLeftSeconds: number | null;
+      sessionAlreadyStarted: boolean;
     };
 
 export type StudentAssignedExam = StudentExamBase & {
@@ -142,6 +166,20 @@ export type StudentAssignedExam = StudentExamBase & {
   status_note: string | null;
 };
 
+type StartExamReadinessPayload = {
+  isDesktop: boolean;
+  deviceType: StudentDeviceType;
+  displayMode: ProctorDisplayMode;
+  orientation: "portrait" | "landscape";
+  isStandalonePwa: boolean;
+  platform: string;
+  fullscreenReady: boolean;
+  cameraReady: boolean;
+  identityVerified: boolean;
+  brightnessScore: number | null;
+  identityHash: string | null;
+};
+
 function getQuestionCacheKey(examId: string) {
   return `exam:${examId}:questions`;
 }
@@ -151,12 +189,52 @@ function getRelationObject<T>(value: T | T[] | null | undefined) {
   return value ?? null;
 }
 
+function normalizeProctoringSettings(
+  exam: Partial<StudentExamBase> | Record<string, unknown> | null | undefined
+) {
+  return {
+    proctoring_mode:
+      (exam?.proctoring_mode as ProctoringMode | undefined) ??
+      DEFAULT_PROCTORING_SETTINGS.proctoring_mode,
+    device_policy:
+      (exam?.device_policy as DevicePolicy | undefined) ??
+      DEFAULT_PROCTORING_SETTINGS.device_policy,
+    require_fullscreen:
+      typeof exam?.require_fullscreen === "boolean"
+        ? exam.require_fullscreen
+        : DEFAULT_PROCTORING_SETTINGS.require_fullscreen,
+    require_camera:
+      typeof exam?.require_camera === "boolean"
+        ? exam.require_camera
+        : DEFAULT_PROCTORING_SETTINGS.require_camera,
+    identity_verification:
+      typeof exam?.identity_verification === "boolean"
+        ? exam.identity_verification
+        : DEFAULT_PROCTORING_SETTINGS.identity_verification,
+    evidence_mode:
+      (exam?.evidence_mode as EvidenceMode | undefined) ??
+      DEFAULT_PROCTORING_SETTINGS.evidence_mode,
+    post_exam_similarity_enabled:
+      typeof exam?.post_exam_similarity_enabled === "boolean"
+        ? exam.post_exam_similarity_enabled
+        : DEFAULT_PROCTORING_SETTINGS.post_exam_similarity_enabled,
+  };
+}
+
 function getSessionAnswersCacheKey(sessionId: string, userId: string) {
   return `session:${sessionId}:user:${userId}:answers`;
 }
 
+function getSessionAnswerMetaCacheKey(sessionId: string, userId: string) {
+  return `session:${sessionId}:user:${userId}:answer-meta`;
+}
+
 function getSessionMetaCacheKey(sessionId: string, userId: string) {
   return `session:${sessionId}:user:${userId}:meta`;
+}
+
+function getSessionHeartbeatCacheKey(sessionId: string) {
+  return `heartbeat:session:${sessionId}`;
 }
 
 function getStartSessionLockKey(examId: string, userId: string) {
@@ -244,22 +322,77 @@ async function cacheSessionMeta(sessionId: string, userId: string, status: strin
 async function replaceSessionDraftAnswers(
   sessionId: string,
   userId: string,
-  answers: Record<string, string>
+  answers: Record<string, string>,
+  answerAnalytics: Record<string, AnswerChangeAnalytics> = {}
 ) {
   const redisKey = getSessionAnswersCacheKey(sessionId, userId);
+  const analyticsKey = getSessionAnswerMetaCacheKey(sessionId, userId);
   const sanitizedEntries = Object.entries(answers).filter(
     ([questionId, answer]) =>
       questionId.trim() !== "" && String(answer ?? "").trim() !== ""
   );
+  const sanitizedAnalytics = Object.entries(answerAnalytics).filter(
+    ([questionId]) => questionId.trim() !== ""
+  );
 
   await redis.del(redisKey);
+  await redis.del(analyticsKey);
 
   if (sanitizedEntries.length === 0) {
-    return;
+    if (sanitizedAnalytics.length === 0) {
+      return;
+    }
+  } else {
+    await redis.hset(redisKey, Object.fromEntries(sanitizedEntries));
+    await redis.expire(redisKey, 7200);
   }
 
-  await redis.hset(redisKey, Object.fromEntries(sanitizedEntries));
-  await redis.expire(redisKey, 7200);
+  if (sanitizedAnalytics.length > 0) {
+    await redis.hset(
+      analyticsKey,
+      Object.fromEntries(
+        sanitizedAnalytics.map(([questionId, analytics]) => [
+          questionId,
+          JSON.stringify(analytics),
+        ])
+      )
+    );
+    await redis.expire(analyticsKey, 7200);
+  }
+}
+
+async function getSessionAnswerAnalyticsForUser(
+  sessionId: string,
+  userId: string
+) {
+  const analyticsKey = getSessionAnswerMetaCacheKey(sessionId, userId);
+  const redisMeta = await redis.hgetall(analyticsKey);
+  const analytics: Record<string, AnswerChangeAnalytics> = {};
+
+  for (const [questionId, rawValue] of Object.entries(redisMeta ?? {})) {
+    try {
+      const parsed = JSON.parse(String(rawValue)) as AnswerChangeAnalytics;
+      analytics[questionId] = {
+        firstAnsweredAt:
+          typeof parsed.firstAnsweredAt === "string"
+            ? parsed.firstAnsweredAt
+            : null,
+        lastChangedAt:
+          typeof parsed.lastChangedAt === "string"
+            ? parsed.lastChangedAt
+            : null,
+        changeCount: Number(parsed.changeCount ?? 0),
+      };
+    } catch {
+      analytics[questionId] = {
+        firstAnsweredAt: null,
+        lastChangedAt: null,
+        changeCount: 0,
+      };
+    }
+  }
+
+  return analytics;
 }
 
 async function getAssignedPublishedExamRows(
@@ -335,12 +468,14 @@ function mergeAssignedExamAccess(
     latestAttemptNumber: latestSession?.attemptNumber ?? 0,
     latestSessionStartedAt: latestSession?.startedAt ?? null,
   });
+  const proctoringSettings = normalizeProctoringSettings(examRecord);
 
   return {
     ...examRecord,
     start_time: examAccess.effectiveStartTime,
     end_time: examAccess.effectiveEndTime,
     max_attempts: examAccess.effectiveMaxAttempts,
+    ...proctoringSettings,
     mySessionStatus: latestSession?.status ?? null,
     myLifecycleStatus: lifecycle.key,
     myLifecycleLabel: lifecycle.label,
@@ -383,10 +518,13 @@ async function loadStudentExamPayload(
       typeof cached === "string"
         ? JSON.parse(cached)
         : cached;
+    const examBase =
+      ((parsed as { examBase?: Record<string, unknown> }).examBase ?? {});
     return {
       exam: {
-        ...((parsed as { examBase?: Record<string, unknown> }).examBase ?? {}),
+        ...examBase,
         ...exam,
+        ...normalizeProctoringSettings(examBase),
       },
       questions:
         ((parsed as { questions?: StudentSafeQuestion[] }).questions ?? []),
@@ -397,8 +535,9 @@ async function loadStudentExamPayload(
   if (snapshot) {
     const result = {
       exam: {
-        ...exam,
         ...snapshot.exam,
+        ...exam,
+        ...normalizeProctoringSettings(snapshot.exam),
       },
       questions: getStudentSafeQuestions(snapshot.questions) as StudentSafeQuestion[],
     };
@@ -519,6 +658,7 @@ async function getEffectiveExamAccessForStudent(
     start_time: access.effectiveStartTime,
     end_time: access.effectiveEndTime,
     max_attempts: access.effectiveMaxAttempts,
+    ...normalizeProctoringSettings(exam as Partial<StudentExamBase>),
   };
 }
 
@@ -823,14 +963,53 @@ async function finalizeSessionAttempt(
     }
 
     const redisKey = getSessionAnswersCacheKey(sessionId, userId);
-    const redisAnswers = await redis.hgetall(redisKey);
+    const analyticsKey = getSessionAnswerMetaCacheKey(sessionId, userId);
+    const [redisAnswers, redisAnswerMeta] = await Promise.all([
+      redis.hgetall(redisKey),
+      redis.hgetall(analyticsKey),
+    ]);
     if (redisAnswers && Object.keys(redisAnswers).length > 0) {
-      const rows = Object.entries(redisAnswers).map(([questionId, answer]) => ({
-        session_id: sessionId,
-        question_id: questionId,
-        user_id: userId,
-        answer: String(answer),
-      }));
+      const rows = Object.entries(redisAnswers).map(([questionId, answer]) => {
+        const rawAnalytics = redisAnswerMeta?.[questionId];
+        let parsedAnalytics: AnswerChangeAnalytics = {
+          firstAnsweredAt: null,
+          lastChangedAt: null,
+          changeCount: 0,
+        };
+
+        if (typeof rawAnalytics === "string") {
+          try {
+            const parsed = JSON.parse(rawAnalytics) as AnswerChangeAnalytics;
+            parsedAnalytics = {
+              firstAnsweredAt:
+                typeof parsed.firstAnsweredAt === "string"
+                  ? parsed.firstAnsweredAt
+                  : null,
+              lastChangedAt:
+                typeof parsed.lastChangedAt === "string"
+                  ? parsed.lastChangedAt
+                  : null,
+              changeCount: Number(parsed.changeCount ?? 0),
+            };
+          } catch {
+            parsedAnalytics = {
+              firstAnsweredAt: null,
+              lastChangedAt: null,
+              changeCount: 0,
+            };
+          }
+        }
+
+        return {
+          session_id: sessionId,
+          question_id: questionId,
+          user_id: userId,
+          answer: String(answer),
+          first_answered_at: parsedAnalytics.firstAnsweredAt,
+          last_changed_at: parsedAnalytics.lastChangedAt,
+          change_count: parsedAnalytics.changeCount,
+        };
+      });
 
       const { error: flushError } = await supabase.from("answers").upsert(rows, {
         onConflict: "session_id,question_id",
@@ -1039,7 +1218,7 @@ async function finalizeSessionAttempt(
       return { error: "Шалгалтын session шинэчлэгдсэнгүй. Дахин оролдоно уу." };
     }
 
-    await redis.del(redisKey);
+    await Promise.all([redis.del(redisKey), redis.del(analyticsKey)]);
     await cacheSessionMeta(sessionId, userId, finalStatus);
 
     revalidatePath("/student");
@@ -1066,7 +1245,10 @@ async function finalizeSessionAttempt(
     }
 
     if (finalStatus === "graded" || finalStatus === "timed_out") {
-      await recomputeStudentTopicMastery(userId).catch(() => {});
+      await enqueueStudentTopicMasteryRefresh(
+        userId,
+        snapshot?.exam.subject_id ?? null
+      ).catch(() => {});
     }
 
     return {
@@ -1435,6 +1617,246 @@ export async function startExamSession(examId: string) {
   return startExamSessionForUser(supabase, user.id, examId);
 }
 
+async function buildPreparedSessionState(
+  supabase: SupabaseServerClient,
+  userId: string,
+  examId: string,
+  examPayload: Awaited<ReturnType<typeof loadStudentExamPayload>>,
+  session: {
+    id: string;
+    started_at: string;
+    status: string;
+  } | null
+) {
+  if (!examPayload) {
+    return {
+      sessionId: null,
+      savedAnswers: {},
+      answerAnalytics: {},
+      initialTimeLeftSeconds: null,
+      displayQuestions: [] as StudentSafeQuestion[],
+      sessionAlreadyStarted: false,
+    };
+  }
+
+  if (!session) {
+    return {
+      sessionId: null,
+      savedAnswers: {},
+      answerAnalytics: {},
+      initialTimeLeftSeconds: null,
+      displayQuestions: examPayload.questions,
+      sessionAlreadyStarted: false,
+    };
+  }
+
+  const sessionDeadlineMs = getSessionDeadlineMs(session.started_at, {
+    end_time: examPayload.exam.end_time,
+    duration_minutes: Number(examPayload.exam.duration_minutes ?? 0),
+  });
+  const initialTimeLeftSeconds =
+    sessionDeadlineMs === null
+      ? null
+      : Math.max(Math.floor((sessionDeadlineMs - Date.now()) / 1000), 0);
+
+  if (initialTimeLeftSeconds !== null && initialTimeLeftSeconds <= 0) {
+    if (session.status === "in_progress") {
+      const finalized = await finalizeSessionAttempt(supabase, {
+        sessionId: session.id,
+        examId,
+        userId,
+        reason: "timeout",
+      });
+
+      if ("error" in finalized) {
+        return {
+          redirectTo: `/student/exams?error=${encodeURIComponent(finalized.error ?? "timeout_failed")}`,
+        } as const;
+      }
+    }
+
+    return {
+      redirectTo: `/student/exams/${examId}/result`,
+    } as const;
+  }
+
+  const [questionVariantMap, savedAnswers, answerAnalytics] = await Promise.all([
+    getSessionQuestionVariantMap(supabase, session.id),
+    getSessionAnswersForUser(supabase, session.id, userId),
+    getSessionAnswerAnalyticsForUser(session.id, userId),
+  ]);
+
+  return {
+    sessionId: session.id,
+    savedAnswers,
+    answerAnalytics,
+    initialTimeLeftSeconds,
+    displayQuestions: examPayload.questions.map((question) =>
+      applyVariantToStudentSafeQuestion(
+        question,
+        questionVariantMap.get(question.id)
+      )
+    ),
+    sessionAlreadyStarted: true,
+  };
+}
+
+function getSebRequestHash(headerStore: Awaited<ReturnType<typeof headers>>) {
+  return (
+    headerStore.get("x-safeexambrowser-requesthash") ??
+    headerStore.get("x-safeexambrowser-browserexamkeyhash") ??
+    headerStore.get("x-safeexambrowser-configkeyhash")
+  );
+}
+
+async function validateExamReadiness(
+  exam: StudentAssignedExam,
+  readiness: StartExamReadinessPayload
+) {
+  const effectiveDevicePolicy = getEffectiveDevicePolicy(exam);
+  const shouldEnforceFullscreen =
+    exam.require_fullscreen &&
+    !(
+      readiness.deviceType === "mobile" &&
+      exam.proctoring_mode === "standard"
+    );
+
+  if (
+    effectiveDevicePolicy === "desktop_only" &&
+    readiness.deviceType !== "desktop"
+  ) {
+    return "Энэ шалгалтыг зөвхөн desktop эсвэл laptop төхөөрөмж дээр эхлүүлнэ үү.";
+  }
+
+  if (shouldEnforceFullscreen && !readiness.fullscreenReady) {
+    return "Fullscreen горимыг идэвхжүүлсний дараа шалгалтыг эхлүүлнэ үү.";
+  }
+
+  if (exam.require_camera && !readiness.cameraReady) {
+    return "Камер бэлэн болоогүй байна. Камерын зөвшөөрлөө шалгаад дахин оролдоно уу.";
+  }
+
+  if (exam.identity_verification && !readiness.identityVerified) {
+    return "Identity verification амжилтгүй болсон тул шалгалтыг эхлүүлэх боломжгүй.";
+  }
+
+  if (isStrictProctoredExam(exam)) {
+    const headerStore = await headers();
+    const sebRequestHash = getSebRequestHash(headerStore);
+    const userAgent = headerStore.get("user-agent") ?? "";
+    if (!sebRequestHash && !userAgent.includes("SEB")) {
+      return "Strict proctoring шалгалтыг зөвхөн Safe Exam Browser-оор эхлүүлнэ.";
+    }
+  }
+
+  return null;
+}
+
+export async function startExamAttempt(
+  examId: string,
+  readiness: StartExamReadinessPayload
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" } as const;
+
+  const assignedExam = await getAssignedPublishedExamRecord(
+    supabase,
+    user.id,
+    examId
+  );
+  if (!assignedExam?.exam) {
+    return { error: "Шалгалт олдсонгүй" } as const;
+  }
+
+  const readinessError = await validateExamReadiness(assignedExam.exam, readiness);
+  if (readinessError) {
+    return { error: readinessError } as const;
+  }
+
+  const sessionResult = await startExamSessionForUser(
+    supabase,
+    user.id,
+    examId,
+    assignedExam
+  );
+
+  if ("error" in sessionResult) {
+    return sessionResult;
+  }
+
+  const examPayload = await loadStudentExamPayload(supabase, examId, assignedExam);
+  if (!examPayload) {
+    return { error: "Шалгалтын агуулгыг бэлтгэж чадсангүй." } as const;
+  }
+
+  const preparedState = await buildPreparedSessionState(
+    supabase,
+    user.id,
+    examId,
+    examPayload,
+    sessionResult.session
+      ? {
+          id: String(sessionResult.session.id),
+          started_at: String(sessionResult.session.started_at),
+          status: String(sessionResult.session.status),
+        }
+      : null
+  );
+
+  if ("redirectTo" in preparedState && typeof preparedState.redirectTo === "string") {
+    return preparedState;
+  }
+
+  if (!preparedState.sessionId) {
+    return { error: "Шалгалтын session эхлүүлж чадсангүй." } as const;
+  }
+
+  const browserBaselineRisk =
+    assignedExam.exam.proctoring_mode === "standard" &&
+    readiness.deviceType === "mobile" &&
+    !readiness.isStandalonePwa
+      ? 4
+      : 0;
+
+  await supabase
+    .from("exam_sessions")
+    .update({
+      identity_verified_at: readiness.identityVerified
+        ? new Date().toISOString()
+        : null,
+      last_heartbeat_at: new Date().toISOString(),
+      device_type: readiness.deviceType,
+      display_mode: readiness.displayMode,
+      platform: readiness.platform,
+      risk_score: browserBaselineRisk,
+      risk_level: deriveRiskLevel(browserBaselineRisk),
+    })
+    .eq("id", preparedState.sessionId)
+    .eq("user_id", user.id);
+
+  if (readiness.identityVerified) {
+    await logProctorEvent(preparedState.sessionId, "identity_verified", {
+      brightness_score:
+        typeof readiness.brightnessScore === "number"
+          ? readiness.brightnessScore
+          : null,
+    });
+  }
+
+  return {
+    exam: examPayload.exam as StudentAssignedExam & Record<string, unknown>,
+    questions: preparedState.displayQuestions,
+    sessionId: preparedState.sessionId,
+    savedAnswers: preparedState.savedAnswers,
+    answerAnalytics: preparedState.answerAnalytics,
+    initialTimeLeftSeconds: preparedState.initialTimeLeftSeconds,
+    sessionAlreadyStarted: preparedState.sessionAlreadyStarted,
+  } as const;
+}
+
 async function getSessionAnswersForUser(
   supabase: SupabaseServerClient,
   sessionId: string,
@@ -1490,72 +1912,39 @@ export async function prepareExamTakePayload(
     } as const;
   }
 
-  const [examPayload, sessionResult] = await Promise.all([
-    loadStudentExamPayload(supabase, examId, assignedExam),
-    startExamSessionForUser(supabase, user.id, examId, assignedExam),
-  ]);
+  const examPayload = await loadStudentExamPayload(supabase, examId, assignedExam);
 
   if (!examPayload || !Array.isArray(examPayload.questions) || examPayload.questions.length === 0) {
     return { redirectTo: "/student/exams?error=questions_not_ready" } as const;
   }
 
-  if ("error" in sessionResult) {
-    if ("redirectToResult" in sessionResult && sessionResult.redirectToResult) {
-      return { redirectTo: `/student/exams/${examId}/result` } as const;
-    }
-    return {
-      redirectTo: `/student/exams?error=${encodeURIComponent(sessionResult.error ?? "session_failed")}`,
-    } as const;
-  }
-
-  const session = sessionResult.session!;
-  const nowMs = Date.now();
-  const sessionEndsAt =
-    new Date(session.started_at).getTime() +
-    Number(examPayload.exam.duration_minutes) * 60 * 1000;
-  const initialTimeLeftSeconds = Math.max(
-    Math.floor((sessionEndsAt - nowMs) / 1000),
-    0
-  );
-
-  if (initialTimeLeftSeconds <= 0) {
-    if (session.status === "in_progress") {
-      const finalized = await finalizeSessionAttempt(supabase, {
-        sessionId: session.id,
-        examId,
-        userId: user.id,
-        reason: "timeout",
-      });
-
-      if ("error" in finalized) {
-        return {
-          redirectTo: `/student/exams?error=${encodeURIComponent(finalized.error ?? "timeout_failed")}`,
-        } as const;
-      }
-    }
-
-    return { redirectTo: `/student/exams/${examId}/result` } as const;
-  }
-
-  const questionVariantMap = await getSessionQuestionVariantMap(
+  const inProgressSession = await getInProgressSession(supabase, examId, user.id);
+  const preparedState = await buildPreparedSessionState(
     supabase,
-    session.id
-  );
-  const displayQuestions = examPayload.questions.map((question) =>
-    applyVariantToStudentSafeQuestion(
-      question,
-      questionVariantMap.get(question.id)
-    )
+    user.id,
+    examId,
+    examPayload,
+    inProgressSession
+      ? {
+          id: String(inProgressSession.id),
+          started_at: String(inProgressSession.started_at),
+          status: String(inProgressSession.status),
+        }
+      : null
   );
 
-  const savedAnswers = await getSessionAnswersForUser(supabase, session.id, user.id);
+  if ("redirectTo" in preparedState && typeof preparedState.redirectTo === "string") {
+    return preparedState;
+  }
 
   return {
     exam: examPayload.exam as StudentAssignedExam & Record<string, unknown>,
-    questions: displayQuestions,
-    sessionId: session.id,
-    savedAnswers,
-    initialTimeLeftSeconds,
+    questions: preparedState.displayQuestions,
+    sessionId: preparedState.sessionId,
+    savedAnswers: preparedState.savedAnswers,
+    answerAnalytics: preparedState.answerAnalytics,
+    initialTimeLeftSeconds: preparedState.initialTimeLeftSeconds,
+    sessionAlreadyStarted: preparedState.sessionAlreadyStarted,
   } satisfies PrepareExamTakePayloadResult;
 }
 
@@ -1564,7 +1953,8 @@ export async function prepareExamTakePayload(
  */
 export async function saveAnswersBatch(
   sessionId: string,
-  answers: Record<string, string>
+  answers: Record<string, string>,
+  answerAnalytics: Record<string, AnswerChangeAnalytics> = {}
 ) {
   const supabase = await createClient();
   const {
@@ -1579,9 +1969,11 @@ export async function saveAnswersBatch(
   }
 
   const redisKey = getSessionAnswersCacheKey(sessionId, user.id);
+  const analyticsKey = getSessionAnswerMetaCacheKey(sessionId, user.id);
 
   const toSet: Record<string, string> = {};
   const toDelete: string[] = [];
+  const analyticsToSet: Record<string, string> = {};
 
   for (const [questionId, answer] of Object.entries(answers)) {
     if (answer === "") {
@@ -1591,9 +1983,17 @@ export async function saveAnswersBatch(
     }
   }
 
+  for (const [questionId, analytics] of Object.entries(answerAnalytics)) {
+    analyticsToSet[questionId] = JSON.stringify(analytics);
+  }
+
   const ops: Promise<unknown>[] = [];
   if (Object.keys(toSet).length > 0) {
     ops.push(redis.hset(redisKey, toSet));
+  }
+  if (Object.keys(analyticsToSet).length > 0) {
+    ops.push(redis.hset(analyticsKey, analyticsToSet));
+    ops.push(redis.expire(analyticsKey, 7200));
   }
   for (const qId of toDelete) {
     ops.push(redis.hdel(redisKey, qId));
@@ -1611,7 +2011,8 @@ export async function saveAnswersBatch(
  */
 export async function submitExam(
   sessionId: string,
-  clientAnswers?: Record<string, string>
+  clientAnswers?: Record<string, string>,
+  clientAnswerAnalytics: Record<string, AnswerChangeAnalytics> = {}
 ) {
   const supabase = await createClient();
   const {
@@ -1650,7 +2051,12 @@ export async function submitExam(
 
   // Client-ийн хариултыг Redis-д шууд оруулна (DB бичилт зөвхөн finalizeSessionAttempt дотор)
   if (clientAnswers) {
-    await replaceSessionDraftAnswers(sessionId, user.id, clientAnswers);
+    await replaceSessionDraftAnswers(
+      sessionId,
+      user.id,
+      clientAnswers,
+      clientAnswerAnalytics
+    );
   }
 
   return finalizeSessionAttempt(supabase, {
@@ -1691,11 +2097,32 @@ export async function logProctorEvent(
     return { success: true, skipped: true };
   }
 
+  const policy = getProctorEventPolicy(eventType, {
+    deviceType:
+      typeof metadata.device_type === "string"
+        ? (metadata.device_type as StudentDeviceType)
+        : null,
+    displayMode:
+      typeof metadata.display_mode === "string"
+        ? (metadata.display_mode as ProctorDisplayMode)
+        : null,
+    proctoringMode:
+      typeof metadata.proctoring_mode === "string"
+        ? (metadata.proctoring_mode as ProctoringMode)
+        : null,
+  });
+  const snapshotUrl =
+    typeof metadata.snapshot_url === "string" ? metadata.snapshot_url : null;
   const { error } = await supabase.from("proctor_events").insert({
     session_id: sessionId,
     user_id: user.id,
     event_type: eventType,
     metadata,
+    severity: policy.severity,
+    source:
+      typeof metadata.source === "string" ? metadata.source : "client",
+    snapshot_url: snapshotUrl,
+    derived_risk_delta: policy.riskDelta,
   });
 
   if (error) {
@@ -1706,6 +2133,176 @@ export async function logProctorEvent(
     return { error: error.message };
   }
 
+  const { data: currentSession } = await supabase
+    .from("exam_sessions")
+    .select(
+      "risk_score, challenge_count, spot_check_count, flag_status, last_heartbeat_at"
+    )
+    .eq("id", sessionId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (currentSession) {
+    const nextRiskScore =
+      Number(currentSession.risk_score ?? 0) + Number(policy.riskDelta ?? 0);
+    const nextRiskLevel = deriveRiskLevel(nextRiskScore);
+    const nextFlagStatus: ProctorFlagStatus =
+      shouldAutoFlag(nextRiskScore) ||
+      eventType === "challenge_failed" ||
+      eventType === "spot_check_failed" ||
+      eventType === "identity_failed"
+        ? "flagged"
+        : ((currentSession.flag_status as ProctorFlagStatus | null) ?? "clear");
+
+    const updates: Record<string, unknown> = {
+      risk_score: nextRiskScore,
+      risk_level: nextRiskLevel,
+      flag_status: nextFlagStatus,
+      last_heartbeat_at:
+        eventType === "heartbeat_lost"
+          ? currentSession.last_heartbeat_at
+          : new Date().toISOString(),
+    };
+
+    if (eventType === "identity_verified") {
+      updates.identity_verified_at = new Date().toISOString();
+    }
+
+    if (snapshotUrl) {
+      updates.last_snapshot_at = new Date().toISOString();
+    }
+
+    if (eventType === "challenge_required" || eventType === "challenge_failed") {
+      updates.challenge_count = Number(currentSession.challenge_count ?? 0) + 1;
+    }
+
+    if (
+      eventType === "spot_check_required" ||
+      eventType === "spot_check_passed" ||
+      eventType === "spot_check_failed"
+    ) {
+      updates.last_spot_check_at = new Date().toISOString();
+    }
+
+    if (eventType === "spot_check_required") {
+      updates.spot_check_count = Number(currentSession.spot_check_count ?? 0) + 1;
+    }
+
+    await supabase
+      .from("exam_sessions")
+      .update(updates)
+      .eq("id", sessionId)
+      .eq("user_id", user.id);
+  }
+
+  return {
+    success: true,
+    riskDelta: policy.riskDelta,
+    severity: policy.severity,
+  };
+}
+
+export async function recordExamHeartbeat(sessionId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const session = await getSessionMeta(supabase, sessionId, user.id);
+  if (!session) return { error: "Session олдсонгүй" };
+  if (session.status !== "in_progress") {
+    return { success: true, skipped: true };
+  }
+
+  await redis.set(getSessionHeartbeatCacheKey(sessionId), new Date().toISOString(), {
+    ex: 45,
+  });
+
+  return { success: true };
+}
+
+export async function getIdentityEnrollment() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data } = await supabase
+    .from("exam_identity_enrollments")
+    .select("reference_image_data, reference_hash, updated_at")
+    .eq("student_id", user.id)
+    .maybeSingle();
+
+  return data
+    ? {
+        referenceImageData: String(data.reference_image_data),
+        referenceHash: String(data.reference_hash),
+        updatedAt: String(data.updated_at),
+      }
+    : null;
+}
+
+export async function upsertIdentityEnrollment(
+  referenceImageData: string,
+  referenceHash: string
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const { error } = await supabase
+    .from("exam_identity_enrollments")
+    .upsert(
+      {
+        student_id: user.id,
+        reference_image_data: referenceImageData,
+        reference_hash: referenceHash,
+      },
+      { onConflict: "student_id" }
+    );
+
+  if (error) return { error: error.message };
+  return { success: true };
+}
+
+export async function updateSessionFlagStatus(
+  sessionId: string,
+  nextStatus: ProctorFlagStatus,
+  reviewNote: string | null = null
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const { data: session } = await supabase
+    .from("exam_sessions")
+    .select("id, exam_id")
+    .eq("id", sessionId)
+    .maybeSingle();
+
+  if (!session) return { error: "Session олдсонгүй" };
+
+  const scope = await getExamManagementScope(supabase, session.exam_id, user.id);
+  if (!scope.canManage) return { error: "Энэ session-ийг шинэчлэх эрхгүй байна" };
+
+  const { error } = await supabase
+    .from("exam_sessions")
+    .update({
+      flag_status: nextStatus,
+      review_note: reviewNote,
+    })
+    .eq("id", sessionId);
+
+  if (error) return { error: error.message };
+
+  revalidatePath(`/educator/grading/${sessionId}`);
+  revalidatePath(`/educator/exams/${session.exam_id}/results`);
   return { success: true };
 }
 

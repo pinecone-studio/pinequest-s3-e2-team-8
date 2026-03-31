@@ -18,6 +18,11 @@ import {
   ExamScheduleSection,
   ExamSettingsSection,
 } from "@/components/exams/ExamScheduleFields";
+import type {
+  DevicePolicy,
+  EvidenceMode,
+  ProctoringMode,
+} from "@/lib/proctoring";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,6 +68,13 @@ interface ExamFormProps {
   initialMaxAttempts?: number | null;
   initialShuffleQuestions?: boolean;
   initialShuffleOptions?: boolean;
+  initialProctoringMode?: ProctoringMode | null;
+  initialRequireFullscreen?: boolean;
+  initialRequireCamera?: boolean;
+  initialIdentityVerification?: boolean;
+  initialEvidenceMode?: EvidenceMode | null;
+  initialPostExamSimilarityEnabled?: boolean;
+  initialDevicePolicy?: DevicePolicy | null;
   initialError?: string | null;
 }
 
@@ -286,6 +298,13 @@ export default function ExamForm({
   initialMaxAttempts,
   initialShuffleQuestions = false,
   initialShuffleOptions = false,
+  initialProctoringMode,
+  initialRequireFullscreen,
+  initialRequireCamera,
+  initialIdentityVerification,
+  initialEvidenceMode,
+  initialPostExamSimilarityEnabled,
+  initialDevicePolicy,
   initialError = null,
 }: ExamFormProps) {
   const router = useRouter();
@@ -499,6 +518,13 @@ export default function ExamForm({
             initialMaxAttempts={initialMaxAttempts}
             initialShuffleQuestions={initialShuffleQuestions}
             initialShuffleOptions={initialShuffleOptions}
+            initialProctoringMode={initialProctoringMode}
+            initialRequireFullscreen={initialRequireFullscreen}
+            initialRequireCamera={initialRequireCamera}
+            initialIdentityVerification={initialIdentityVerification}
+            initialEvidenceMode={initialEvidenceMode}
+            initialPostExamSimilarityEnabled={initialPostExamSimilarityEnabled}
+            initialDevicePolicy={initialDevicePolicy}
           />
         </div>
 

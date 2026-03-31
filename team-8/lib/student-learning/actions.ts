@@ -12,6 +12,7 @@ import type {
   StudentPracticeAnswer,
   StudentPracticeAttempt,
   StudentPracticeQuestion,
+  StudentPracticeQuestionForTake,
   StudentSubjectStudyPlan,
   StudentTopicMastery,
 } from "@/types";
@@ -153,6 +154,64 @@ type GeneratedPracticeQuestion = {
 type PracticeExamCreationResult =
   | { error: string }
   | { success: true; redirectTo: string };
+
+type PracticeHistoryItem = {
+  id: string;
+  title: string;
+  question_count: number;
+  created_at: string;
+  status: "in_progress" | "graded";
+  submitted_at: string | null;
+  percentage: number | null;
+};
+
+type MasteryRefreshQueueRow = {
+  id: string;
+  student_id: string;
+  subject_id: string | null;
+  scope_key: string;
+  status: "pending" | "processing";
+  attempts: number;
+  next_run_at: string;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+const FULL_MASTERY_REFRESH_SCOPE_KEY = "__all__";
+const DEFAULT_MASTERY_REFRESH_BATCH_SIZE = 10;
+const MAX_MASTERY_REFRESH_BACKOFF_MINUTES = 30;
+
+type LearningOverviewData = {
+  subjects: StudentLearningSubjectSummary[];
+  topics: StudentLearningTopicSummary[];
+  isRefreshing: boolean;
+  selectedSubjectId: string | null;
+  subjectUpdatedAtById: Map<string, string>;
+};
+
+type LearningPageData =
+  | { error: string }
+  | {
+      overview: Pick<
+        LearningOverviewData,
+        "subjects" | "topics" | "isRefreshing" | "selectedSubjectId"
+      >;
+      selectedSubject: {
+        subject: StudentLearningSubjectSummary;
+        topics: StudentLearningTopicSummary[];
+        practiceHistory: PracticeHistoryItem[];
+        isRefreshing: boolean;
+      } | null;
+      studyPlan:
+        | { error: string }
+        | {
+            plan: StudentSubjectStudyPlan | null;
+            isStale: boolean;
+            isRefreshing: boolean;
+          }
+        | null;
+    };
 
 function getRelationObject<T>(value: T | T[] | null | undefined) {
   if (Array.isArray(value)) return value[0] ?? null;
@@ -390,6 +449,210 @@ function finalizeTopicAggregateRows(
   return rows;
 }
 
+function getMasteryRefreshScopeKey(subjectId?: string | null) {
+  return subjectId ?? FULL_MASTERY_REFRESH_SCOPE_KEY;
+}
+
+function getMasteryRefreshBackoffMinutes(attempts: number) {
+  return Math.min(
+    MAX_MASTERY_REFRESH_BACKOFF_MINUTES,
+    2 ** Math.max(1, Number(attempts ?? 1))
+  );
+}
+
+async function hasPendingMasteryRefresh(
+  admin: SupabaseAdminClient,
+  studentId: string,
+  subjectId?: string
+) {
+  let query = admin
+    .from("student_mastery_refresh_queue")
+    .select("id")
+    .eq("student_id", studentId)
+    .in("status", ["pending", "processing"])
+    .limit(1);
+
+  if (subjectId) {
+    query = query.in("scope_key", [
+      FULL_MASTERY_REFRESH_SCOPE_KEY,
+      getMasteryRefreshScopeKey(subjectId),
+    ]);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data?.length ?? 0) > 0;
+}
+
+async function enqueueStudentTopicMasteryRefreshInternal(
+  admin: SupabaseAdminClient,
+  studentId: string,
+  subjectId?: string | null
+) {
+  const scopeKey = getMasteryRefreshScopeKey(subjectId);
+  const nowIso = new Date().toISOString();
+  const { data: existingRows, error: existingError } = await admin
+    .from("student_mastery_refresh_queue")
+    .select("id, subject_id, scope_key, status")
+    .eq("student_id", studentId);
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  const rows = (existingRows ?? []) as Array<{
+    id: string;
+    subject_id: string | null;
+    scope_key: string;
+    status: "pending" | "processing" | "failed";
+  }>;
+  const existingFull = rows.find(
+    (row) => row.scope_key === FULL_MASTERY_REFRESH_SCOPE_KEY
+  );
+
+  if (subjectId && existingFull) {
+    return { success: true, skipped: true as const };
+  }
+
+  if (!subjectId) {
+    const pendingScopedIds = rows
+      .filter(
+        (row) =>
+          row.scope_key !== FULL_MASTERY_REFRESH_SCOPE_KEY &&
+          row.status !== "processing"
+      )
+      .map((row) => row.id);
+
+    if (pendingScopedIds.length > 0) {
+      const { error: deleteError } = await admin
+        .from("student_mastery_refresh_queue")
+        .delete()
+        .in("id", pendingScopedIds);
+
+      if (deleteError) {
+        throw new Error(deleteError.message);
+      }
+    }
+  }
+
+  const existingScope = rows.find((row) => row.scope_key === scopeKey);
+  if (existingScope) {
+    if (existingScope.status === "processing") {
+      return { success: true, skipped: true as const };
+    }
+
+    const { error: updateError } = await admin
+      .from("student_mastery_refresh_queue")
+      .update({
+        status: "pending",
+        attempts: 0,
+        next_run_at: nowIso,
+        last_error: null,
+        subject_id: subjectId ?? null,
+      })
+      .eq("id", existingScope.id);
+
+    if (updateError) {
+      throw new Error(updateError.message);
+    }
+
+    return { success: true };
+  }
+
+  const { error: insertError } = await admin
+    .from("student_mastery_refresh_queue")
+    .insert({
+      student_id: studentId,
+      subject_id: subjectId ?? null,
+      scope_key: scopeKey,
+      status: "pending",
+      attempts: 0,
+      next_run_at: nowIso,
+      last_error: null,
+    });
+
+  if (insertError) {
+    throw new Error(insertError.message);
+  }
+
+  return { success: true };
+}
+
+export async function enqueueStudentTopicMasteryRefresh(
+  studentId: string,
+  subjectId?: string | null
+) {
+  const admin = createAdminClient();
+  return enqueueStudentTopicMasteryRefreshInternal(admin, studentId, subjectId);
+}
+
+export async function processPendingStudentMasteryRefreshJobs(
+  batchSize = DEFAULT_MASTERY_REFRESH_BATCH_SIZE
+) {
+  const admin = createAdminClient();
+  const safeBatchSize = Math.max(1, Math.min(Number(batchSize || 0), 25));
+  const { data, error } = await admin.rpc("claim_student_mastery_refresh_jobs", {
+    p_limit: safeBatchSize,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const jobs = (data ?? []) as MasteryRefreshQueueRow[];
+  let processed = 0;
+  let succeeded = 0;
+  let failed = 0;
+
+  for (const job of jobs) {
+    processed += 1;
+
+    try {
+      await recomputeStudentTopicMastery(job.student_id, job.subject_id ?? undefined);
+
+      const { error: deleteError } = await admin
+        .from("student_mastery_refresh_queue")
+        .delete()
+        .eq("id", job.id);
+
+      if (deleteError) {
+        throw new Error(deleteError.message);
+      }
+
+      succeeded += 1;
+    } catch (queueError) {
+      failed += 1;
+      const nextRunAt = new Date(
+        Date.now() + getMasteryRefreshBackoffMinutes(job.attempts) * 60 * 1000
+      ).toISOString();
+      const { error: updateError } = await admin
+        .from("student_mastery_refresh_queue")
+        .update({
+          status: "pending",
+          next_run_at: nextRunAt,
+          last_error:
+            queueError instanceof Error ? queueError.message : "unknown_error",
+        })
+        .eq("id", job.id);
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+    }
+  }
+
+  return {
+    processed,
+    succeeded,
+    failed,
+    claimed: jobs.length,
+  };
+}
+
 export async function recomputeStudentTopicMastery(
   studentId: string,
   subjectId?: string
@@ -603,52 +866,67 @@ export async function recomputeStudentTopicMastery(
   }
 
   const rows = finalizeTopicAggregateRows(nowIso, perSubject);
-  const deleteQuery = admin.from("student_topic_mastery").delete().eq("student_id", studentId);
-  const { error: deleteError } = subjectId
-    ? await deleteQuery.eq("subject_id", subjectId)
-    : await deleteQuery;
-
-  if (deleteError) {
-    throw new Error(deleteError.message);
-  }
-
-  if (rows.length > 0) {
-    const insertRows = rows.map((row) => ({
-      ...row,
-      topic_label: row.topic_key === SUBJECT_SUMMARY_TOPIC_KEY ? row.topic_label : row.topic_label,
-    }));
-
-    const { error: insertError } = await admin
-      .from("student_topic_mastery")
-      .insert(insertRows);
-
-    if (insertError) {
-      throw new Error(insertError.message);
+  const { error: replaceError } = await admin.rpc(
+    "replace_student_topic_mastery_projection",
+    {
+      p_student_id: studentId,
+      p_subject_id: subjectId ?? null,
+      p_rows: rows,
     }
+  );
+
+  if (replaceError) {
+    throw new Error(replaceError.message);
   }
 
   return rows.length;
 }
 
-async function ensureStudentTopicMasteryAvailable(studentId: string) {
-  const admin = createAdminClient();
-  const { count, error } = await admin
+async function ensureStudentTopicMasteryAvailable(
+  admin: SupabaseAdminClient,
+  studentId: string
+) {
+  const { data, error } = await admin
     .from("student_topic_mastery")
-    .select("id", { head: true, count: "exact" })
-    .eq("student_id", studentId);
+    .select("id")
+    .eq("student_id", studentId)
+    .limit(1);
 
   if (error) {
     throw new Error(error.message);
   }
 
-  if ((count ?? 0) === 0) {
-    await recomputeStudentTopicMastery(studentId);
+  const isRefreshing = await hasPendingMasteryRefresh(admin, studentId);
+  if ((data?.length ?? 0) === 0) {
+    if (!isRefreshing) {
+      await enqueueStudentTopicMasteryRefreshInternal(admin, studentId);
+    }
+
+    return {
+      hasProjection: false,
+      isRefreshing: true,
+    };
   }
+
+  return {
+    hasProjection: true,
+    isRefreshing,
+  };
 }
 
-async function getLearningOverviewForStudent(studentId: string) {
-  await ensureStudentTopicMasteryAvailable(studentId);
+async function getLearningOverviewForStudent(studentId: string): Promise<LearningOverviewData> {
   const admin = createAdminClient();
+  const availability = await ensureStudentTopicMasteryAvailable(admin, studentId);
+
+  if (!availability.hasProjection) {
+    return {
+      subjects: [] as StudentLearningSubjectSummary[],
+      topics: [] as StudentLearningTopicSummary[],
+      isRefreshing: availability.isRefreshing,
+      selectedSubjectId: null,
+      subjectUpdatedAtById: new Map<string, string>(),
+    };
+  }
 
   const { data: rows, error } = await admin
     .from("student_topic_mastery")
@@ -661,6 +939,7 @@ async function getLearningOverviewForStudent(studentId: string) {
 
   const subjectSummaries = new Map<string, StudentLearningSubjectSummary>();
   const topicRows: StudentLearningTopicSummary[] = [];
+  const subjectUpdatedAtById = new Map<string, string>();
 
   for (const rawRow of (rows ?? []) as Array<
     StudentTopicMastery & {
@@ -669,6 +948,15 @@ async function getLearningOverviewForStudent(studentId: string) {
   >) {
     const subject = getRelationObject(rawRow.subjects);
     const subjectName = subject?.name ?? "Хичээл";
+    const currentUpdatedAt = String(rawRow.updated_at ?? "");
+    const existingUpdatedAt = subjectUpdatedAtById.get(rawRow.subject_id);
+    if (
+      currentUpdatedAt &&
+      (!existingUpdatedAt ||
+        new Date(currentUpdatedAt).getTime() > new Date(existingUpdatedAt).getTime())
+    ) {
+      subjectUpdatedAtById.set(rawRow.subject_id, currentUpdatedAt);
+    }
     const officialPercentage = getPercentage(
       Number(rawRow.official_correct_points ?? 0),
       Number(rawRow.official_total_points ?? 0)
@@ -716,64 +1004,45 @@ async function getLearningOverviewForStudent(studentId: string) {
     }
   }
 
+  const sortedSubjects = Array.from(subjectSummaries.values()).sort(
+    (left, right) => left.mastery_score - right.mastery_score
+  );
+
   return {
-    subjects: Array.from(subjectSummaries.values()).sort(
-      (left, right) => left.mastery_score - right.mastery_score
-    ),
+    subjects: sortedSubjects,
     topics: topicRows.sort((left, right) => left.mastery_score - right.mastery_score),
+    isRefreshing: availability.isRefreshing,
+    selectedSubjectId: sortedSubjects[0]?.subject_id ?? null,
+    subjectUpdatedAtById,
   };
 }
 
-export async function getStudentLearningOverview() {
-  const context = await getAuthenticatedStudentContext();
-  if ("error" in context) {
-    return {
-      subjects: [],
-      topics: [],
-      selectedSubjectId: null,
-    };
-  }
-
-  const overview = await getLearningOverviewForStudent(context.userId);
-  return {
-    ...overview,
-    selectedSubjectId: overview.subjects[0]?.subject_id ?? null,
-  };
-}
-
-export async function getStudentLearningDashboardSummary(studentId: string) {
-  const overview = await getLearningOverviewForStudent(studentId);
-
-  return {
-    weakSubjects: overview.subjects.slice(0, 3),
-    weakTopics: pickTopItems(overview.topics, (topic) => topic.mastery_score, 3),
-  };
-}
-
-export async function getStudentSubjectLearning(subjectId: string) {
-  const context = await getAuthenticatedStudentContext();
-  if ("error" in context) {
-    return { error: context.error };
-  }
-
-  const overview = await getLearningOverviewForStudent(context.userId);
+function getSubjectLearningFromOverview(
+  overview: LearningOverviewData,
+  subjectId: string
+) {
   const subjectSummary = overview.subjects.find((subject) => subject.subject_id === subjectId);
-
   if (!subjectSummary) {
-    return { error: "Энэ хичээлийн learning data олдсонгүй." };
+    return null;
   }
 
-  const subjectTopics = overview.topics
-    .filter((topic) => topic.subject_id === subjectId)
-    .sort((left, right) => left.mastery_score - right.mastery_score);
+  return {
+    subject: subjectSummary,
+    topics: overview.topics
+      .filter((topic) => topic.subject_id === subjectId)
+      .sort((left, right) => left.mastery_score - right.mastery_score),
+  };
+}
 
-  const admin = createAdminClient();
+async function getPracticeHistoryForSubject(
+  admin: SupabaseAdminClient,
+  studentId: string,
+  subjectId: string
+): Promise<PracticeHistoryItem[]> {
   const { data: practiceExams, error: practiceError } = await admin
     .from("student_practice_exams")
-    .select(
-      "id, title, description, question_count, created_at, student_practice_attempts(id, status, submitted_at, total_score, max_score)"
-    )
-    .eq("student_id", context.userId)
+    .select("id, title, question_count, created_at")
+    .eq("student_id", studentId)
     .eq("subject_id", subjectId)
     .order("created_at", { ascending: false })
     .limit(8);
@@ -782,26 +1051,71 @@ export async function getStudentSubjectLearning(subjectId: string) {
     throw new Error(practiceError.message);
   }
 
-  const practiceHistory = (practiceExams ?? []).map((exam) => {
-    const attempt = getRelationObject(
-      exam.student_practice_attempts as
-        | {
-            id: string;
-            status: "in_progress" | "graded";
-            submitted_at: string | null;
-            total_score: number | null;
-            max_score: number | null;
-          }
-        | {
-            id: string;
-            status: "in_progress" | "graded";
-            submitted_at: string | null;
-            total_score: number | null;
-            max_score: number | null;
-          }[]
-        | null
-    );
+  const exams = (practiceExams ?? []) as Array<{
+    id: string;
+    title: string;
+    question_count: number | null;
+    created_at: string;
+  }>;
+  if (exams.length === 0) return [];
 
+  const examIds = exams.map((exam) => exam.id);
+  const { data: attemptRows, error: attemptError } = await admin
+    .from("student_practice_attempts")
+    .select(
+      "id, practice_exam_id, status, submitted_at, total_score, max_score, started_at, attempt_number"
+    )
+    .eq("student_id", studentId)
+    .in("practice_exam_id", examIds);
+
+  if (attemptError) {
+    throw new Error(attemptError.message);
+  }
+
+  const attemptsByExamId = new Map<
+    string,
+    {
+      id: string;
+      status: "in_progress" | "graded";
+      submitted_at: string | null;
+      total_score: number | null;
+      max_score: number | null;
+      started_at: string;
+      attempt_number: number;
+    }
+  >();
+
+  for (const attempt of (attemptRows ?? []) as Array<{
+    id: string;
+    practice_exam_id: string;
+    status: "in_progress" | "graded";
+    submitted_at: string | null;
+    total_score: number | null;
+    max_score: number | null;
+    started_at: string;
+    attempt_number: number;
+  }>) {
+    const current = attemptsByExamId.get(attempt.practice_exam_id);
+    if (!current) {
+      attemptsByExamId.set(attempt.practice_exam_id, attempt);
+      continue;
+    }
+
+    const currentStartedAt = new Date(current.started_at).getTime();
+    const nextStartedAt = new Date(attempt.started_at).getTime();
+    if (
+      nextStartedAt > currentStartedAt ||
+      (nextStartedAt === currentStartedAt &&
+        (attempt.attempt_number > current.attempt_number ||
+          (attempt.attempt_number === current.attempt_number &&
+            attempt.id > current.id)))
+    ) {
+      attemptsByExamId.set(attempt.practice_exam_id, attempt);
+    }
+  }
+
+  return exams.map((exam) => {
+    const attempt = attemptsByExamId.get(exam.id);
     const percentage =
       attempt?.max_score && Number(attempt.max_score) > 0
         ? Math.round((Number(attempt.total_score ?? 0) / Number(attempt.max_score)) * 100)
@@ -817,32 +1131,194 @@ export async function getStudentSubjectLearning(subjectId: string) {
       percentage,
     };
   });
-
-  return {
-    subject: subjectSummary,
-    topics: subjectTopics,
-    practiceHistory,
-  };
 }
 
-async function getMasteryUpdatedAt(
+async function getStudentSubjectStudyPlanForContext(
   admin: SupabaseAdminClient,
   studentId: string,
-  subjectId: string
+  subjectId: string,
+  masteryUpdatedAt: string | null,
+  isRefreshing: boolean
 ) {
+  if (!masteryUpdatedAt) {
+    return { plan: null, isStale: false, isRefreshing };
+  }
+
   const { data, error } = await admin
-    .from("student_topic_mastery")
-    .select("updated_at")
+    .from("student_subject_study_plans")
+    .select("student_id, subject_id, mastery_updated_at, plan_json, generated_at")
     .eq("student_id", studentId)
     .eq("subject_id", subjectId)
-    .order("updated_at", { ascending: false })
-    .limit(1);
+    .maybeSingle();
 
   if (error) {
     throw new Error(error.message);
   }
 
-  return data?.[0]?.updated_at ?? null;
+  if (!data) {
+    return { plan: null, isStale: false, isRefreshing };
+  }
+
+  const isStale =
+    new Date(String(data.mastery_updated_at)).getTime() <
+    new Date(masteryUpdatedAt).getTime();
+  const planJson = (data.plan_json ?? {}) as GeneratedStudyPlan;
+
+  return {
+    plan: {
+      student_id: studentId,
+      subject_id: subjectId,
+      mastery_updated_at: String(data.mastery_updated_at),
+      generated_at: String(data.generated_at),
+      summary: String(planJson.summary ?? ""),
+      priorities: Array.isArray(planJson.priorities)
+        ? planJson.priorities.map((item) => String(item))
+        : [],
+      steps: Array.isArray(planJson.steps)
+        ? planJson.steps.map((item) => String(item))
+        : [],
+      next_practice_focus: Array.isArray(planJson.next_practice_focus)
+        ? planJson.next_practice_focus.map((item) => String(item))
+        : [],
+    } satisfies StudentSubjectStudyPlan,
+    isStale,
+    isRefreshing,
+  };
+}
+
+export async function getStudentLearningOverview() {
+  const context = await getAuthenticatedStudentContext();
+  if ("error" in context) {
+    return {
+      subjects: [],
+      topics: [],
+      selectedSubjectId: null,
+      isRefreshing: false,
+    };
+  }
+
+  const overview = await getLearningOverviewForStudent(context.userId);
+  return {
+    subjects: overview.subjects,
+    topics: overview.topics,
+    selectedSubjectId: overview.selectedSubjectId,
+    isRefreshing: overview.isRefreshing,
+  };
+}
+
+export async function getStudentLearningDashboardSummary(studentId: string) {
+  const overview = await getLearningOverviewForStudent(studentId);
+
+  return {
+    weakSubjects: overview.subjects.slice(0, 3),
+    weakTopics: pickTopItems(overview.topics, (topic) => topic.mastery_score, 3),
+    isRefreshing: overview.isRefreshing,
+  };
+}
+
+export async function getStudentLearningPageData(
+  requestedSubjectId?: string
+): Promise<LearningPageData> {
+  const context = await getAuthenticatedStudentContext();
+  if ("error" in context) {
+    return { error: context.error ?? "Нэвтрэх шаардлагатай." };
+  }
+
+  const overview = await getLearningOverviewForStudent(context.userId);
+  const selectedSubjectId =
+    overview.subjects.find((item) => item.subject_id === requestedSubjectId)?.subject_id ??
+    overview.selectedSubjectId;
+
+  if (!selectedSubjectId) {
+    return {
+      overview: {
+        subjects: overview.subjects,
+        topics: overview.topics,
+        isRefreshing: overview.isRefreshing,
+        selectedSubjectId: null,
+      },
+      selectedSubject: null,
+      studyPlan: null,
+    };
+  }
+
+  const subjectLearning = getSubjectLearningFromOverview(overview, selectedSubjectId);
+  if (!subjectLearning) {
+    return {
+      overview: {
+        subjects: overview.subjects,
+        topics: overview.topics,
+        isRefreshing: overview.isRefreshing,
+        selectedSubjectId,
+      },
+      selectedSubject: null,
+      studyPlan: null,
+    };
+  }
+
+  const admin = createAdminClient();
+  const isSubjectRefreshing = await hasPendingMasteryRefresh(
+    admin,
+    context.userId,
+    selectedSubjectId
+  );
+  const masteryUpdatedAt = overview.subjectUpdatedAtById.get(selectedSubjectId) ?? null;
+
+  const [practiceHistory, studyPlan] = await Promise.all([
+    getPracticeHistoryForSubject(admin, context.userId, selectedSubjectId),
+    getStudentSubjectStudyPlanForContext(
+      admin,
+      context.userId,
+      selectedSubjectId,
+      masteryUpdatedAt,
+      isSubjectRefreshing
+    ),
+  ]);
+
+  return {
+    overview: {
+      subjects: overview.subjects,
+      topics: overview.topics,
+      isRefreshing: overview.isRefreshing,
+      selectedSubjectId,
+    },
+    selectedSubject: {
+      subject: subjectLearning.subject,
+      topics: subjectLearning.topics,
+      practiceHistory,
+      isRefreshing: isSubjectRefreshing,
+    },
+    studyPlan,
+  };
+}
+
+export async function getStudentSubjectLearning(subjectId: string) {
+  const context = await getAuthenticatedStudentContext();
+  if ("error" in context) {
+    return { error: context.error };
+  }
+
+  const overview = await getLearningOverviewForStudent(context.userId);
+  const subjectLearning = getSubjectLearningFromOverview(overview, subjectId);
+
+  if (!subjectLearning) {
+    return { error: "Энэ хичээлийн learning data олдсонгүй." };
+  }
+
+  const admin = createAdminClient();
+  const isRefreshing = await hasPendingMasteryRefresh(admin, context.userId, subjectId);
+  const practiceHistory = await getPracticeHistoryForSubject(
+    admin,
+    context.userId,
+    subjectId
+  );
+
+  return {
+    subject: subjectLearning.subject,
+    topics: subjectLearning.topics,
+    practiceHistory,
+    isRefreshing,
+  };
 }
 
 async function generateStudyPlanWithAI(input: {
@@ -904,51 +1380,16 @@ export async function getStudentSubjectStudyPlan(subjectId: string) {
     return { error: context.error };
   }
 
+  const overview = await getLearningOverviewForStudent(context.userId);
   const admin = createAdminClient();
-  const masteryUpdatedAt = await getMasteryUpdatedAt(admin, context.userId, subjectId);
-  if (!masteryUpdatedAt) {
-    return { plan: null, isStale: false };
-  }
-
-  const { data, error } = await admin
-    .from("student_subject_study_plans")
-    .select("student_id, subject_id, mastery_updated_at, plan_json, generated_at")
-    .eq("student_id", context.userId)
-    .eq("subject_id", subjectId)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  if (!data) {
-    return { plan: null, isStale: false };
-  }
-
-  const isStale =
-    new Date(String(data.mastery_updated_at)).getTime() <
-    new Date(masteryUpdatedAt).getTime();
-  const planJson = (data.plan_json ?? {}) as GeneratedStudyPlan;
-
-  return {
-    plan: {
-      student_id: context.userId,
-      subject_id: subjectId,
-      mastery_updated_at: String(data.mastery_updated_at),
-      generated_at: String(data.generated_at),
-      summary: String(planJson.summary ?? ""),
-      priorities: Array.isArray(planJson.priorities)
-        ? planJson.priorities.map((item) => String(item))
-        : [],
-      steps: Array.isArray(planJson.steps)
-        ? planJson.steps.map((item) => String(item))
-        : [],
-      next_practice_focus: Array.isArray(planJson.next_practice_focus)
-        ? planJson.next_practice_focus.map((item) => String(item))
-        : [],
-    } satisfies StudentSubjectStudyPlan,
-    isStale,
-  };
+  const isRefreshing = await hasPendingMasteryRefresh(admin, context.userId, subjectId);
+  return getStudentSubjectStudyPlanForContext(
+    admin,
+    context.userId,
+    subjectId,
+    overview.subjectUpdatedAtById.get(subjectId) ?? null,
+    isRefreshing
+  );
 }
 
 export async function refreshStudentSubjectStudyPlan(subjectId: string) {
@@ -957,13 +1398,14 @@ export async function refreshStudentSubjectStudyPlan(subjectId: string) {
     return { error: context.error };
   }
 
-  const subjectLearning = await getStudentSubjectLearning(subjectId);
-  if ("error" in subjectLearning) {
-    return { error: subjectLearning.error };
+  const overview = await getLearningOverviewForStudent(context.userId);
+  const subjectLearning = getSubjectLearningFromOverview(overview, subjectId);
+  if (!subjectLearning) {
+    return { error: "Энэ хичээлийн learning data олдсонгүй." };
   }
 
   const admin = createAdminClient();
-  const masteryUpdatedAt = await getMasteryUpdatedAt(admin, context.userId, subjectId);
+  const masteryUpdatedAt = overview.subjectUpdatedAtById.get(subjectId) ?? null;
   if (!masteryUpdatedAt) {
     return { error: "Энэ хичээлд study plan үүсгэх mastery data алга." };
   }
@@ -1290,9 +1732,10 @@ export async function createStudentPracticeExam(input: {
     return { error: context.error ?? "Сурагчийн эрх шалгахад алдаа гарлаа." };
   }
 
-  const subjectLearning = await getStudentSubjectLearning(input.subjectId);
-  if ("error" in subjectLearning) {
-    return { error: subjectLearning.error ?? "Learning data ачаалахад алдаа гарлаа." };
+  const overview = await getLearningOverviewForStudent(context.userId);
+  const subjectLearning = getSubjectLearningFromOverview(overview, input.subjectId);
+  if (!subjectLearning) {
+    return { error: "Learning data ачаалахад алдаа гарлаа." };
   }
 
   const admin = createAdminClient();
@@ -1359,33 +1802,7 @@ export async function createStudentPracticeExam(input: {
     return { error: "Practice асуулт үүсгэж чадсангүй. Дараа дахин оролдоно уу." };
   }
 
-  const { data: practiceExam, error: practiceExamError } = await admin
-    .from("student_practice_exams")
-    .insert({
-      student_id: context.userId,
-      subject_id: input.subjectId,
-      title: `${subjectName} - Хувийн дасгал`,
-      description: "AI болон curated bank дээр суурилсан хувийн practice дасгал.",
-      selected_topics: selectedTopics.map((topic) => ({
-        topic_key: topic.topic_key,
-        topic_label: topic.topic_label,
-      })),
-      question_count: finalQuestions.length,
-      generated_metadata: {
-        bank_question_count: selectedBankQuestions.length,
-        ai_question_count: Math.max(finalQuestions.length - selectedBankQuestions.length, 0),
-        grade_level: gradeLevel,
-      },
-    })
-    .select("id")
-    .maybeSingle();
-
-  if (practiceExamError || !practiceExam) {
-    return { error: practiceExamError?.message ?? "Practice exam үүсгэхэд алдаа гарлаа." };
-  }
-
   const questionRows = finalQuestions.map((question, index) => ({
-    practice_exam_id: practiceExam.id,
     subject_id: input.subjectId,
     source_type: question.sourceType,
     source_question_bank_id: question.sourceQuestionBankId,
@@ -1402,29 +1819,28 @@ export async function createStudentPracticeExam(input: {
     explanation: question.explanation,
   }));
 
-  const { error: questionInsertError } = await admin
-    .from("student_practice_questions")
-    .insert(questionRows);
-
-  if (questionInsertError) {
-    return { error: questionInsertError.message };
-  }
-
-  const maxScore = roundToTwo(
-    questionRows.reduce((sum, question) => sum + Number(question.points ?? 0), 0)
+  const { data: practiceExamId, error: practiceExamError } = await admin.rpc(
+    "create_student_practice_exam_bundle",
+    {
+      p_student_id: context.userId,
+      p_subject_id: input.subjectId,
+      p_title: `${subjectName} - Хувийн дасгал`,
+      p_description: "AI болон curated bank дээр суурилсан хувийн practice дасгал.",
+      p_selected_topics: selectedTopics.map((topic) => ({
+        topic_key: topic.topic_key,
+        topic_label: topic.topic_label,
+      })),
+      p_generated_metadata: {
+        bank_question_count: selectedBankQuestions.length,
+        ai_question_count: Math.max(finalQuestions.length - selectedBankQuestions.length, 0),
+        grade_level: gradeLevel,
+      },
+      p_questions: questionRows,
+    }
   );
-  const { error: attemptError } = await admin
-    .from("student_practice_attempts")
-    .insert({
-      practice_exam_id: practiceExam.id,
-      student_id: context.userId,
-      status: "in_progress",
-      attempt_number: 1,
-      max_score: maxScore,
-    });
 
-  if (attemptError) {
-    return { error: attemptError.message };
+  if (practiceExamError || !practiceExamId) {
+    return { error: practiceExamError?.message ?? "Practice exam үүсгэхэд алдаа гарлаа." };
   }
 
   revalidatePath("/student");
@@ -1432,47 +1848,41 @@ export async function createStudentPracticeExam(input: {
 
   return {
     success: true,
-    redirectTo: `/student/learning/practice/${practiceExam.id}`,
+    redirectTo: `/student/learning/practice/${String(practiceExamId)}`,
   };
 }
 
-export async function getStudentPracticeExam(practiceExamId: string) {
-  const context = await getAuthenticatedStudentContext();
-  if ("error" in context) {
-    return null;
-  }
-
-  const admin = createAdminClient();
+async function getStudentPracticeExamBase(
+  admin: SupabaseAdminClient,
+  studentId: string,
+  practiceExamId: string
+) {
   const { data: exam, error: examError } = await admin
     .from("student_practice_exams")
     .select("id, student_id, subject_id, title, description, selected_topics, question_count, created_at, subjects(name)")
     .eq("id", practiceExamId)
-    .eq("student_id", context.userId)
+    .eq("student_id", studentId)
     .maybeSingle();
 
   if (examError || !exam) {
     return null;
   }
 
-  const [{ data: questions }, { data: attempt }] = await Promise.all([
-    admin
-      .from("student_practice_questions")
-      .select(
-        "id, practice_exam_id, subject_id, source_type, source_question_bank_id, topic_key, subtopic, type, content, content_html, image_url, options, correct_answer, points, order_index, explanation"
-      )
-      .eq("practice_exam_id", practiceExamId)
-      .order("order_index", { ascending: true }),
-    admin
-      .from("student_practice_attempts")
-      .select(
-        "id, practice_exam_id, student_id, status, started_at, submitted_at, total_score, max_score, attempt_number"
-      )
-      .eq("practice_exam_id", practiceExamId)
-      .eq("student_id", context.userId)
-      .order("attempt_number", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
+  const { data: attempt, error: attemptError } = await admin
+    .from("student_practice_attempts")
+    .select(
+      "id, practice_exam_id, student_id, status, started_at, submitted_at, total_score, max_score, attempt_number"
+    )
+    .eq("practice_exam_id", practiceExamId)
+    .eq("student_id", studentId)
+    .order("started_at", { ascending: false })
+    .order("attempt_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (attemptError) {
+    throw new Error(attemptError.message);
+  }
 
   const subject = getRelationObject(exam.subjects as { name: string } | { name: string }[] | null);
 
@@ -1488,22 +1898,103 @@ export async function getStudentPracticeExam(practiceExamId: string) {
       created_at: exam.created_at,
     },
     attempt: attempt as StudentPracticeAttempt | null,
-    questions: (questions ?? []) as StudentPracticeQuestion[],
   };
 }
 
-export async function getStudentPracticeResult(practiceExamId: string) {
-  const practice = await getStudentPracticeExam(practiceExamId);
-  if (!practice?.attempt || practice.attempt.status !== "graded") {
-    return null;
+async function getStudentPracticeQuestionsForTake(
+  admin: SupabaseAdminClient,
+  practiceExamId: string
+) {
+  const { data, error } = await admin
+    .from("student_practice_questions")
+    .select(
+      "id, practice_exam_id, subject_id, topic_key, subtopic, type, content, content_html, image_url, options, points, order_index"
+    )
+    .eq("practice_exam_id", practiceExamId)
+    .order("order_index", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
   }
 
+  return (data ?? []) as StudentPracticeQuestionForTake[];
+}
+
+async function getStudentPracticeQuestionsForGrading(
+  admin: SupabaseAdminClient,
+  practiceExamId: string
+) {
+  const { data, error } = await admin
+    .from("student_practice_questions")
+    .select(
+      "id, practice_exam_id, subject_id, source_type, source_question_bank_id, topic_key, subtopic, type, content, content_html, image_url, options, correct_answer, points, order_index, explanation"
+    )
+    .eq("practice_exam_id", practiceExamId)
+    .order("order_index", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as StudentPracticeQuestion[];
+}
+
+async function getStudentPracticeExamForGradingInternal(
+  admin: SupabaseAdminClient,
+  studentId: string,
+  practiceExamId: string
+) {
+  const [base, questions] = await Promise.all([
+    getStudentPracticeExamBase(admin, studentId, practiceExamId),
+    getStudentPracticeQuestionsForGrading(admin, practiceExamId),
+  ]);
+
+  if (!base) return null;
+
+  return {
+    ...base,
+    questions,
+  };
+}
+
+export async function getStudentPracticeExamForTake(practiceExamId: string) {
   const context = await getAuthenticatedStudentContext();
   if ("error" in context) {
     return null;
   }
 
   const admin = createAdminClient();
+  const [base, questions] = await Promise.all([
+    getStudentPracticeExamBase(admin, context.userId, practiceExamId),
+    getStudentPracticeQuestionsForTake(admin, practiceExamId),
+  ]);
+
+  if (!base) {
+    return null;
+  }
+
+  return {
+    ...base,
+    questions,
+  };
+}
+
+export async function getStudentPracticeResult(practiceExamId: string) {
+  const context = await getAuthenticatedStudentContext();
+  if ("error" in context) {
+    return null;
+  }
+
+  const admin = createAdminClient();
+  const practice = await getStudentPracticeExamForGradingInternal(
+    admin,
+    context.userId,
+    practiceExamId
+  );
+  if (!practice?.attempt || practice.attempt.status !== "graded") {
+    return null;
+  }
+
   const { data: answers, error } = await admin
     .from("student_practice_answers")
     .select(
@@ -1580,16 +2071,23 @@ export async function submitStudentPracticeExam(
     return { error: context.error };
   }
 
-  const practice = await getStudentPracticeExam(practiceExamId);
+  const admin = createAdminClient();
+  const practice = await getStudentPracticeExamForGradingInternal(
+    admin,
+    context.userId,
+    practiceExamId
+  );
   if (!practice?.attempt) {
     return { error: "Practice attempt олдсонгүй." };
+  }
+  if (practice.questions.length === 0) {
+    return { error: "Practice асуулт олдсонгүй." };
   }
 
   if (practice.attempt.status === "graded") {
     return { success: true, redirectTo: `/student/learning/practice/${practiceExamId}/result` };
   }
 
-  const admin = createAdminClient();
   let totalScore = 0;
   const answerRows = practice.questions.map((question) => {
     const answerValue = answers[question.id] ?? null;
@@ -1636,7 +2134,10 @@ export async function submitStudentPracticeExam(
     return { error: attemptError.message };
   }
 
-  await recomputeStudentTopicMastery(context.userId, practice.exam.subject_id);
+  await enqueueStudentTopicMasteryRefresh(
+    context.userId,
+    practice.exam.subject_id
+  ).catch(() => {});
 
   revalidatePath("/student");
   revalidatePath("/student/learning");

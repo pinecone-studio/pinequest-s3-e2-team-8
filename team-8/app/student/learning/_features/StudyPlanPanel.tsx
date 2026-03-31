@@ -11,11 +11,13 @@ export default function StudyPlanPanel({
   subjectId,
   plan,
   isStale,
+  isRefreshing,
   disabled,
 }: {
   subjectId: string;
   plan: StudentSubjectStudyPlan | null;
   isStale: boolean;
+  isRefreshing: boolean;
   disabled: boolean;
 }) {
   const router = useRouter();
@@ -50,6 +52,9 @@ export default function StudyPlanPanel({
               {isStale ? "Шинэчлэлт хэрэгтэй" : "Cache бэлэн"}
             </Badge>
           )}
+          {isRefreshing && (
+            <Badge variant="outline">Mastery шинэчлэгдэж байна</Badge>
+          )}
           <Button
             type="button"
             size="sm"
@@ -75,7 +80,9 @@ export default function StudyPlanPanel({
       {!plan ? (
         <div className="mt-4 rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
           {disabled
-            ? "Энэ хичээл дээр topic-level data хангалтгүй байна."
+            ? isRefreshing
+              ? "Mastery profile шинэчлэгдэж байна. Дараа нь AI төлөвлөгөө гарна."
+              : "Энэ хичээл дээр topic-level data хангалтгүй байна."
             : "AI таны сул сэдвүүд дээр тулгуурлан 3 алхамтай хувийн төлөвлөгөө гаргана."}
         </div>
       ) : (

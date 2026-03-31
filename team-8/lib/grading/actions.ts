@@ -20,7 +20,7 @@ import {
   notifyStudentOfGrading,
   notifyParentOfGrading,
 } from "@/lib/notification/actions";
-import { recomputeStudentTopicMastery } from "@/lib/student-learning/actions";
+import { enqueueStudentTopicMasteryRefresh } from "@/lib/student-learning/actions";
 
 function getRelationObject<T>(value: T | T[] | null | undefined) {
   if (Array.isArray(value)) {
@@ -262,7 +262,7 @@ export async function getSessionForGrading(sessionId: string) {
       .order("questions(order_index)", { ascending: true }),
     supabase
       .from("proctor_events")
-      .select("id, event_type, metadata, created_at")
+      .select("id, event_type, metadata, created_at, severity, snapshot_url, derived_risk_delta")
       .eq("session_id", sessionId)
       .order("created_at", { ascending: false }),
       getSessionQuestionVariantMap(supabase, sessionId),
@@ -402,7 +402,7 @@ export async function gradeAnswer(
   }
 
   if (session.status === "graded") {
-    await recomputeStudentTopicMastery(session.user_id).catch(() => {});
+    await enqueueStudentTopicMasteryRefresh(session.user_id).catch(() => {});
   }
 
   revalidateExamResultPaths(question.exam_id, answer.session_id);
@@ -418,7 +418,7 @@ export async function finalizeGrading(sessionId: string) {
 
   const { data: session } = await supabase
     .from("exam_sessions")
-    .select("exam_id, user_id")
+    .select("exam_id, user_id, exams(subject_id)")
     .eq("id", sessionId)
     .maybeSingle();
 
@@ -470,7 +470,13 @@ export async function finalizeGrading(sessionId: string) {
     ).catch(() => {});
   }
 
-  await recomputeStudentTopicMastery(session.user_id).catch(() => {});
+  const sessionExam = getRelationObject(
+    session.exams as { subject_id: string | null } | { subject_id: string | null }[] | null
+  );
+  await enqueueStudentTopicMasteryRefresh(
+    session.user_id,
+    sessionExam?.subject_id ?? null
+  ).catch(() => {});
 
   revalidateExamResultPaths(session.exam_id, sessionId);
   return { success: true, totalScore: totals.totalScore, maxScore: totals.maxScore };

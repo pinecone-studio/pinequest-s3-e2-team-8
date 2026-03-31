@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { logProctorEvent } from "@/lib/student/actions";
+import { getPreferredCameraConstraints } from "@/lib/proctoring-client";
 
 export type CameraStatus = "pending" | "granted" | "denied" | "unavailable";
 
@@ -9,6 +10,7 @@ interface UseCameraMonitorOptions {
   sessionId: string;
   /** Set to false to skip camera entirely (e.g. SEB not detected when required). */
   enabled?: boolean;
+  preferFrontCamera?: boolean;
 }
 
 export interface UseCameraMonitorResult {
@@ -26,6 +28,7 @@ export interface UseCameraMonitorResult {
 export function useCameraMonitor({
   sessionId,
   enabled = true,
+  preferFrontCamera = true,
 }: UseCameraMonitorOptions): UseCameraMonitorResult {
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>("pending");
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -48,7 +51,7 @@ export function useCameraMonitor({
     let cancelled = false;
 
     navigator.mediaDevices
-      .getUserMedia({ video: true, audio: false })
+      .getUserMedia(getPreferredCameraConstraints(preferFrontCamera))
       .then((stream) => {
         if (cancelled) {
           // Unmounted before stream arrived — release immediately.
@@ -81,7 +84,7 @@ export function useCameraMonitor({
         streamRef.current = null;
       }
     };
-  }, [cameraApiAvailable, sessionId, enabled]);
+  }, [cameraApiAvailable, sessionId, enabled, preferFrontCamera]);
 
   return { cameraStatus: effectiveCameraStatus, videoRef };
 }

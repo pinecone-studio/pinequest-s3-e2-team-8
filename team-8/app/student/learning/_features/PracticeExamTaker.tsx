@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import MathContent from "@/components/math/MathContent";
 import { submitStudentPracticeExam } from "@/lib/student-learning/actions";
-import type { StudentPracticeQuestion } from "@/types";
+import type { StudentPracticeQuestionForTake } from "@/types";
 
 function parseStoredArray(value: string | undefined) {
   if (!value) return [];
@@ -64,7 +64,10 @@ function normalizeDraftAnswer(questionType: string, answer: string) {
   return answer.trim() ? answer : null;
 }
 
-function isQuestionAnswered(question: StudentPracticeQuestion, answer: string | undefined) {
+function isQuestionAnswered(
+  question: StudentPracticeQuestionForTake,
+  answer: string | undefined
+) {
   return normalizeDraftAnswer(question.type, answer ?? "") !== null;
 }
 
@@ -77,7 +80,7 @@ export default function PracticeExamTaker({
   practiceExamId: string;
   examTitle: string;
   subjectName: string;
-  questions: StudentPracticeQuestion[];
+  questions: StudentPracticeQuestionForTake[];
 }) {
   const router = useRouter();
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -98,12 +101,13 @@ export default function PracticeExamTaker({
   const [isPending, startTransition] = useTransition();
 
   const storageKey = `student-practice:${practiceExamId}:draft`;
-  const currentQuestion = questions[currentIndex];
-  const currentMultiAnswer = parseStoredArray(answers[currentQuestion.id]);
-  const matchingOptions = parseMatchingOptions(currentQuestion.options);
+  const currentQuestion = questions[currentIndex] ?? questions[0] ?? null;
+  const currentQuestionId = currentQuestion?.id ?? "";
+  const currentMultiAnswer = parseStoredArray(answers[currentQuestionId]);
+  const matchingOptions = parseMatchingOptions(currentQuestion?.options);
   const currentMatchingAnswer = (() => {
     try {
-      return JSON.parse(answers[currentQuestion.id] ?? "{}") as Record<string, string>;
+      return JSON.parse(answers[currentQuestionId] ?? "{}") as Record<string, string>;
     } catch {
       return {};
     }
@@ -117,6 +121,10 @@ export default function PracticeExamTaker({
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(answers));
   }, [answers, storageKey]);
+
+  if (!currentQuestion) {
+    return null;
+  }
 
   const handleAnswerChange = (questionId: string, value: string) => {
     setAnswers((current) => ({

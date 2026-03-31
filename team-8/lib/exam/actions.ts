@@ -33,6 +33,13 @@ import {
   getAllowedSubjectIds,
 } from "@/lib/teacher/permissions";
 import { redis } from "@/lib/redis";
+import {
+  DEFAULT_PROCTORING_SETTINGS,
+  getEffectiveDevicePolicy,
+  type DevicePolicy,
+  type EvidenceMode,
+  type ProctoringMode,
+} from "@/lib/proctoring";
 
 function toUlaanbaatarTimestamp(rawValue: FormDataEntryValue | null) {
   const value = String(rawValue ?? "").trim();
@@ -43,6 +50,79 @@ function toUlaanbaatarTimestamp(rawValue: FormDataEntryValue | null) {
 function parsePositiveInteger(rawValue: FormDataEntryValue | null) {
   const value = Number.parseInt(String(rawValue ?? "").trim(), 10);
   return Number.isFinite(value) ? value : null;
+}
+
+function parseCheckbox(formData: FormData, name: string) {
+  return formData.get(name) === "on";
+}
+
+function parseProctoringMode(rawValue: FormDataEntryValue | null): ProctoringMode {
+  const value = String(rawValue ?? "").trim();
+  if (value === "standard" || value === "strict") return value;
+  return "off";
+}
+
+function parseEvidenceMode(rawValue: FormDataEntryValue | null): EvidenceMode {
+  return String(rawValue ?? "").trim() === "metadata_snapshots"
+    ? "metadata_snapshots"
+    : "metadata_only";
+}
+
+function parseDevicePolicy(rawValue: FormDataEntryValue | null): DevicePolicy {
+  const value = String(rawValue ?? "").trim();
+  if (
+    value === "any" ||
+    value === "mobile_preferred" ||
+    value === "desktop_only"
+  ) {
+    return value;
+  }
+  return DEFAULT_PROCTORING_SETTINGS.device_policy;
+}
+
+function getExamProctoringPayload(formData: FormData) {
+  const proctoringMode = parseProctoringMode(formData.get("proctoring_mode"));
+  const devicePolicy =
+    proctoringMode === "off"
+      ? "any"
+      : proctoringMode === "strict"
+        ? "desktop_only"
+        : parseDevicePolicy(formData.get("device_policy"));
+  const requireFullscreen =
+    proctoringMode === "strict"
+      ? true
+      : proctoringMode === "off"
+      ? false
+      : parseCheckbox(formData, "require_fullscreen");
+  const identityVerification =
+    proctoringMode === "off"
+      ? false
+      : parseCheckbox(formData, "identity_verification");
+  const requireCamera =
+    proctoringMode === "strict"
+      ? true
+      : proctoringMode === "off"
+      ? false
+      : parseCheckbox(formData, "require_camera") || identityVerification;
+
+  return {
+    proctoring_mode: proctoringMode,
+    device_policy: getEffectiveDevicePolicy({
+      proctoring_mode: proctoringMode,
+      device_policy: devicePolicy,
+    }),
+    require_fullscreen: requireFullscreen,
+    require_camera: requireCamera,
+    identity_verification: identityVerification,
+    evidence_mode:
+      proctoringMode === "off"
+        ? DEFAULT_PROCTORING_SETTINGS.evidence_mode
+        : parseEvidenceMode(formData.get("evidence_mode")),
+    post_exam_similarity_enabled:
+      proctoringMode === "off"
+        ? false
+        : parseCheckbox(formData, "post_exam_similarity_enabled"),
+  };
 }
 
 function getExamQuestionCacheKey(examId: string) {
@@ -77,8 +157,9 @@ export async function createExam(formData: FormData) {
   const end_time = toUlaanbaatarTimestamp(formData.get("end_time"));
   const passing_score = parseFloat(formData.get("passing_score") as string) || 60;
   const max_attempts = parseInt(formData.get("max_attempts") as string) || 1;
-  const shuffle_questions = formData.get("shuffle_questions") === "on";
-  const shuffle_options = formData.get("shuffle_options") === "on";
+  const shuffle_questions = parseCheckbox(formData, "shuffle_questions");
+  const shuffle_options = parseCheckbox(formData, "shuffle_options");
+  const proctoringPayload = getExamProctoringPayload(formData);
 
   if (!title || !start_time || !end_time || !duration_minutes) {
     return { error: "Бүх талбарыг бөглөнө үү" };
@@ -153,6 +234,7 @@ export async function createExam(formData: FormData) {
       max_attempts,
       shuffle_questions,
       shuffle_options,
+      ...proctoringPayload,
       is_published: false,
     })
     .select()
@@ -345,11 +427,12 @@ async function legacyUpdateExam(examId: string, formData: FormData) {
       passing_score: parseFloat(formData.get("passing_score") as string) || 60,
       max_attempts: parseInt(formData.get("max_attempts") as string) || 1,
       shuffle_questions: formData.has("shuffle_questions")
-        ? formData.get("shuffle_questions") === "on"
+        ? parseCheckbox(formData, "shuffle_questions")
         : existingExam.shuffle_questions,
       shuffle_options: formData.has("shuffle_options")
-        ? formData.get("shuffle_options") === "on"
+        ? parseCheckbox(formData, "shuffle_options")
         : existingExam.shuffle_options,
+      ...getExamProctoringPayload(formData),
     })
     .eq("id", examId)
     .eq("created_by", user.id);
@@ -576,11 +659,12 @@ export async function updateExam(examId: string, formData: FormData) {
       passing_score: parseFloat(formData.get("passing_score") as string) || 60,
       max_attempts: parseInt(formData.get("max_attempts") as string) || 1,
       shuffle_questions: formData.has("shuffle_questions")
-        ? formData.get("shuffle_questions") === "on"
+        ? parseCheckbox(formData, "shuffle_questions")
         : existingExam.shuffle_questions,
       shuffle_options: formData.has("shuffle_options")
-        ? formData.get("shuffle_options") === "on"
+        ? parseCheckbox(formData, "shuffle_options")
         : existingExam.shuffle_options,
+      ...getExamProctoringPayload(formData),
     })
     .eq("id", examId)
     .eq("created_by", user.id);
@@ -919,7 +1003,7 @@ export async function getExamResults(examId: string) {
     supabase
       .from("exam_sessions")
       .select(
-        "id, user_id, status, total_score, max_score, submitted_at, started_at, attempt_number, profiles(full_name, email, avatar_url)"
+        "id, user_id, status, total_score, max_score, submitted_at, started_at, attempt_number, risk_score, risk_level, flag_status, flag_summary, last_snapshot_at, review_note, profiles(full_name, email, avatar_url)"
       )
       .eq("exam_id", examId)
       .in("status", ["in_progress", "submitted", "graded", "timed_out"])
@@ -1081,6 +1165,18 @@ export async function getExamResults(examId: string) {
       has_retake_override: access.hasRetakeOverride,
       has_remaining_attempts: hasRemainingAttempts,
       status_note: recipient?.status_note ?? null,
+      risk_score: Number(bestSession?.risk_score ?? latestSession?.risk_score ?? 0),
+      risk_level: String(bestSession?.risk_level ?? latestSession?.risk_level ?? "low"),
+      flag_status: String(bestSession?.flag_status ?? latestSession?.flag_status ?? "clear"),
+      flag_summary:
+        String(bestSession?.flag_summary ?? latestSession?.flag_summary ?? "").trim() ||
+        null,
+      last_snapshot_at:
+        String(bestSession?.last_snapshot_at ?? latestSession?.last_snapshot_at ?? "").trim() ||
+        null,
+      review_note:
+        String(bestSession?.review_note ?? latestSession?.review_note ?? "").trim() ||
+        null,
     };
   });
 
@@ -1106,7 +1202,7 @@ export async function getExamResults(examId: string) {
     bestSessionIds.length > 0
       ? supabase
           .from("answers")
-          .select("session_id, question_id, answer, score, is_correct")
+          .select("session_id, question_id, answer, score, is_correct, first_answered_at, last_changed_at, change_count")
           .in("session_id", bestSessionIds)
       : Promise.resolve({
           data: [] as Array<{
@@ -1173,6 +1269,18 @@ export async function getExamResults(examId: string) {
         score: answer.score === null ? null : Number(answer.score),
         is_correct:
           typeof answer.is_correct === "boolean" ? answer.is_correct : null,
+        first_answered_at:
+          "first_answered_at" in answer &&
+          typeof answer.first_answered_at === "string"
+            ? answer.first_answered_at
+            : null,
+        last_changed_at:
+          "last_changed_at" in answer &&
+          typeof answer.last_changed_at === "string"
+            ? answer.last_changed_at
+            : null,
+        change_count:
+          "change_count" in answer ? Number(answer.change_count ?? 0) : 0,
       })) ?? [],
     groups: visibleGroups,
   };

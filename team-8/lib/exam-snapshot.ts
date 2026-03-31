@@ -129,7 +129,7 @@ export async function buildPublishedExamSnapshot(
       supabase
         .from("exams")
         .select(
-          "id, title, description, subject_id, start_time, end_time, duration_minutes, max_attempts, shuffle_questions, shuffle_options, passing_score"
+          "id, title, description, subject_id, start_time, end_time, duration_minutes, max_attempts, shuffle_questions, shuffle_options, passing_score, proctoring_mode, device_policy, require_fullscreen, require_camera, identity_verification, evidence_mode, post_exam_similarity_enabled"
         )
         .eq("id", examId)
         .maybeSingle(),
@@ -171,6 +171,13 @@ export async function buildPublishedExamSnapshot(
       shuffle_options: Boolean(exam.shuffle_options),
       passing_score:
         exam.passing_score === null ? null : Number(exam.passing_score),
+      proctoring_mode: exam.proctoring_mode,
+      device_policy: exam.device_policy,
+      require_fullscreen: Boolean(exam.require_fullscreen),
+      require_camera: Boolean(exam.require_camera),
+      identity_verification: Boolean(exam.identity_verification),
+      evidence_mode: exam.evidence_mode,
+      post_exam_similarity_enabled: Boolean(exam.post_exam_similarity_enabled),
       published_at: publishedAt,
     },
     questions,

@@ -243,6 +243,7 @@ export async function getStudentStats() {
       learningSummary: {
         weakSubjects: [],
         weakTopics: [],
+        isRefreshing: false,
       },
     };
   }
@@ -274,6 +275,7 @@ export async function getStudentStats() {
       learningSummary: {
         weakSubjects: [],
         weakTopics: [],
+        isRefreshing: false,
       },
     };
   }
@@ -299,6 +301,7 @@ export async function getStudentStats() {
       learningSummary: {
         weakSubjects: [],
         weakTopics: [],
+        isRefreshing: false,
       },
     };
   }

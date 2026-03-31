@@ -3,20 +3,39 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  getStudentLearningOverview,
-  getStudentSubjectLearning,
-  getStudentSubjectStudyPlan,
+  getStudentLearningPageData,
 } from "@/lib/student-learning/actions";
 import StudyPlanPanel from "./_features/StudyPlanPanel";
 import PracticeBuilder from "./_features/PracticeBuilder";
 
+const LEARNING_ERROR_MESSAGES: Record<string, string> = {
+  practice_empty: "Practice шалгалтын өгөгдөл дутуу байна. Шинээр practice үүсгээд дахин оролдоно уу.",
+};
+
 export default async function StudentLearningPage({
   searchParams,
 }: {
-  searchParams: Promise<{ subject?: string }>;
+  searchParams: Promise<{ subject?: string; error?: string }>;
 }) {
-  const { subject: requestedSubjectId } = await searchParams;
-  const overview = await getStudentLearningOverview();
+  const { subject: requestedSubjectId, error: requestedError } = await searchParams;
+  const pageData = await getStudentLearningPageData(requestedSubjectId);
+
+  if ("error" in pageData) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Learning Hub</h2>
+        </div>
+        <Card>
+          <CardContent className="py-10 text-center text-muted-foreground">
+            {pageData.error}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const { overview, selectedSubject, studyPlan: studyPlanState } = pageData;
 
   if (overview.subjects.length === 0) {
     return (
@@ -30,25 +49,16 @@ export default async function StudentLearningPage({
 
         <Card>
           <CardContent className="py-10 text-center text-muted-foreground">
-            Одоогоор weak-topic profile үүсгэх хангалттай data алга.
+            {overview.isRefreshing
+              ? "Mastery profile шинэчлэгдэж байна. Түр хүлээгээд дахин шалгана уу."
+              : "Одоогоор weak-topic profile үүсгэх хангалттай data алга."}
           </CardContent>
         </Card>
       </div>
     );
   }
 
-  const selectedSubjectId =
-    overview.subjects.find((item) => item.subject_id === requestedSubjectId)?.subject_id ??
-    overview.selectedSubjectId;
-  const subjectLearning = selectedSubjectId
-    ? await getStudentSubjectLearning(selectedSubjectId)
-    : null;
-  const studyPlanState =
-    selectedSubjectId && !subjectLearning?.error
-      ? await getStudentSubjectStudyPlan(selectedSubjectId)
-      : null;
-
-  if (!selectedSubjectId || !subjectLearning || "error" in subjectLearning) {
+  if (!overview.selectedSubjectId || !selectedSubject) {
     return (
       <div className="space-y-6">
         <div>
@@ -63,6 +73,8 @@ export default async function StudentLearningPage({
     );
   }
 
+  const selectedSubjectId = overview.selectedSubjectId;
+  const subjectLearning = selectedSubject;
   const plan = studyPlanState && !("error" in studyPlanState) ? studyPlanState.plan : null;
   const isStale =
     studyPlanState && !("error" in studyPlanState) ? studyPlanState.isStale : false;
@@ -80,6 +92,12 @@ export default async function StudentLearningPage({
           <Button variant="outline">Dashboard руу буцах</Button>
         </Link>
       </div>
+
+      {requestedError && LEARNING_ERROR_MESSAGES[requestedError] ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {LEARNING_ERROR_MESSAGES[requestedError]}
+        </div>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {overview.subjects.map((subject) => {
@@ -182,6 +200,10 @@ export default async function StudentLearningPage({
           subjectId={selectedSubjectId}
           plan={plan}
           isStale={isStale}
+          isRefreshing={
+            Boolean(subjectLearning.isRefreshing) ||
+            Boolean(studyPlanState && !("error" in studyPlanState) && studyPlanState.isRefreshing)
+          }
           disabled={subjectLearning.topics.length === 0}
         />
       </div>

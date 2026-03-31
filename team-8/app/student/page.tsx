@@ -88,7 +88,9 @@ export default async function StudentDashboard() {
         <CardContent>
           {stats.learningSummary.weakSubjects.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Одоогоор mastery profile үүсгэх data хангалтгүй байна.
+              {stats.learningSummary.isRefreshing
+                ? "Mastery profile шинэчлэгдэж байна. Түр хүлээгээд дахин шалгана уу."
+                : "Одоогоор mastery profile үүсгэх data хангалтгүй байна."}
             </p>
           ) : (
             <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
