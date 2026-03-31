@@ -229,6 +229,19 @@ function ArrowIcon({ direction }: { direction: "left" | "right" }) {
   );
 }
 
+function getRiskLabel(level: ReturnType<typeof deriveRiskLevel>) {
+  switch (level) {
+    case "critical":
+      return "Эрсдэл маш өндөр";
+    case "high":
+      return "Эрсдэл өндөр";
+    case "medium":
+      return "Эрсдэл дунд";
+    default:
+      return "Эрсдэл бага";
+  }
+}
+
 export default function ExamTaker({
   exam,
   questions,
@@ -1105,6 +1118,7 @@ export default function ExamTaker({
       : 0;
   const minutesLeft = Math.floor(timeLeft / 60);
   const secondsLeft = timeLeft % 60;
+  const riskLevel = deriveRiskLevel(riskScore);
   const currentQuestionOptions = getDisplayOptions(
     currentQuestion.options ?? [],
     Boolean(exam.shuffle_options),
@@ -1352,6 +1366,24 @@ export default function ExamTaker({
       )}
 
       <div className="mx-auto flex w-full max-w-[1090px] flex-col items-center gap-[30px] px-4 py-8 lg:py-10">
+        <div className="w-screen bg-[#FAFAFA] shadow-[0_4px_10px_rgba(0,0,0,0.1)]">
+          <div className="mx-auto flex h-[59px] w-full max-w-[1512px] items-center justify-center gap-[18px] px-4">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#EEE1FE]">
+              <AlarmIcon />
+            </div>
+            <div className="flex items-center gap-2 text-[#575555]">
+              <span className={`text-[20px] leading-[120%] ${isTimeWarning ? "text-red-600" : ""}`}>
+                {minutesLeft.toString().padStart(2, "0")}
+              </span>
+              <span className="text-sm">мин</span>
+              <span className={`text-[20px] leading-[120%] ${isTimeWarning ? "text-red-600" : ""}`}>
+                {secondsLeft.toString().padStart(2, "0")}
+              </span>
+              <span className="text-sm">сек</span>
+            </div>
+          </div>
+        </div>
+
         {!isOnline && (
           <div className="w-full rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm font-medium text-amber-800">
             Сүлжээ тасарсан байна. Хариултыг төхөөрөмж дээр хадгалж, холболт сэргээхийг хүлээж байна.
@@ -1366,7 +1398,7 @@ export default function ExamTaker({
         )}
 
         <div className="flex w-full flex-col gap-8">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center">
             <div className="flex flex-col gap-6 lg:flex-row lg:items-center">
               <div className="min-w-[260px]">
                 <h1 className="text-[20px] font-medium leading-[120%] text-black">
@@ -1390,33 +1422,6 @@ export default function ExamTaker({
                     className="h-2 rounded-[64px] bg-[#C59CFC]"
                     style={{ width: `${progressPercent}%` }}
                   />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-[18px] self-start lg:self-auto">
-              <div className="hidden lg:block">
-                <DividerLine />
-              </div>
-
-              <div className="flex items-center gap-[18px]">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#EEE1FE]">
-                  <AlarmIcon />
-                </div>
-                <div className="flex flex-col items-start">
-                  <div className="flex items-center gap-2 text-[#7F7F7F]">
-                    <span className={`text-[20px] leading-[120%] ${isTimeWarning ? "text-red-600" : ""}`}>
-                      {minutesLeft.toString().padStart(2, "0")}
-                    </span>
-                    <span className="text-sm">мин</span>
-                    <span className={`text-[20px] leading-[120%] ${isTimeWarning ? "text-red-600" : ""}`}>
-                      {secondsLeft.toString().padStart(2, "0")}
-                    </span>
-                    <span className="text-sm">сек</span>
-                  </div>
-                  <p className="text-[13px] leading-[120%] text-[#7F7F7F]">
-                    үлдсэн байна
-                  </p>
                 </div>
               </div>
             </div>
@@ -1446,7 +1451,7 @@ export default function ExamTaker({
               <Badge variant="outline">Landscape</Badge>
             )}
             <Badge variant={riskScore >= 40 ? "destructive" : "outline"}>
-              Risk {deriveRiskLevel(riskScore)}
+              {getRiskLabel(riskLevel)}
             </Badge>
           </div>
 
@@ -1689,7 +1694,7 @@ export default function ExamTaker({
               onClick={() => setShowSubmitConfirm(true)}
               loading={isSubmitting}
               loadingText="Илгээж байна..."
-              className="h-11 w-full rounded-full bg-[#7F32F5] text-[20px] font-normal leading-[120%] text-white hover:bg-[#712adf]"
+              className="mx-auto h-11 w-full max-w-[208px] rounded-full bg-[#7F32F5] text-[20px] font-normal leading-[120%] text-white hover:bg-[#712adf]"
             >
               Дуусгах
             </Button>

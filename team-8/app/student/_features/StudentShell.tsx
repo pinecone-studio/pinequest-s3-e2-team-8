@@ -19,10 +19,11 @@ export default function StudentShell({
 }: StudentShellProps) {
   const pathname = usePathname();
   const hideChrome =
-    pathname?.startsWith("/student/exams/") && pathname.endsWith("/result");
+    pathname?.startsWith("/student/exams/") &&
+    (pathname.endsWith("/result") || pathname.endsWith("/take"));
 
   const mainClassName = hideChrome
-    ? "flex-1 px-4 pb-8 pt-4 md:px-8"
+    ? "flex-1 p-0"
     : "flex-1 px-4 pb-[calc(96px+env(safe-area-inset-bottom))] pt-4 md:pb-8 md:pl-19 md:pr-30 md:pt-0";
 
   return (
