@@ -2,19 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  BatteryCharging,
   Camera,
   CheckCircle2,
   Loader2,
-  Monitor,
-  RefreshCw,
   ShieldCheck,
   Wifi,
   XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
-  captureVideoSnapshot,
   computeBrightnessScore,
   computeVideoFingerprint,
   getDisplayMode,
@@ -24,7 +21,7 @@ import {
   getPreferredCameraConstraints,
   getStudentDeviceType,
 } from "@/lib/proctoring-client";
-import { getIdentityEnrollment, upsertIdentityEnrollment } from "@/lib/student/actions";
+import { getIdentityEnrollment } from "@/lib/student/actions";
 import type {
   DevicePolicy,
   ProctorDisplayMode,
@@ -72,55 +69,7 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
 }
 
-function StatusBadge({ status }: { status: CheckStatus }) {
-  if (status === "ok") {
-    return <Badge className="bg-emerald-100 text-emerald-700">OK</Badge>;
-  }
-  if (status === "warning") {
-    return <Badge className="bg-amber-100 text-amber-700">Warning</Badge>;
-  }
-  if (status === "checking") {
-    return <Badge variant="outline">Checking</Badge>;
-  }
-  return <Badge variant="destructive">Error</Badge>;
-}
-
-function CheckRow({
-  icon,
-  title,
-  message,
-  status,
-  action,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  message: string;
-  status: CheckStatus;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex gap-3">
-          <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 text-zinc-700">
-            {icon}
-          </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-semibold text-zinc-950">{title}</p>
-              <StatusBadge status={status} />
-            </div>
-            <p className="text-xs leading-relaxed text-zinc-500">{message}</p>
-          </div>
-        </div>
-        {action}
-      </div>
-    </div>
-  );
-}
-
 export default function PreExamCheck({
-  examTitle,
   proctoringMode,
   devicePolicy,
   requireFullscreen,
@@ -133,6 +82,8 @@ export default function PreExamCheck({
   const streamRef = useRef<MediaStream | null>(null);
   const [internetStatus, setInternetStatus] = useState<CheckStatus>("checking");
   const [internetMessage, setInternetMessage] = useState("Сүлжээг шалгаж байна...");
+  const [batteryStatus, setBatteryStatus] = useState<CheckStatus>("checking");
+  const [batteryMessage, setBatteryMessage] = useState("Цэнэг шалгаж байна...");
   const [cameraStatus, setCameraStatus] = useState<CheckStatus>(
     requireCamera ? "checking" : "ok"
   );
@@ -144,7 +95,7 @@ export default function PreExamCheck({
   const [fullscreenStatus, setFullscreenStatus] = useState<CheckStatus>(
     requireFullscreen ? "warning" : "ok"
   );
-  const [fullscreenMessage, setFullscreenMessage] = useState(
+  const [, setFullscreenMessage] = useState(
     requireFullscreen
       ? "Шалгалтаас өмнө fullscreen горимд орно."
       : "Fullscreen заавал биш."
@@ -152,20 +103,20 @@ export default function PreExamCheck({
   const [identityStatus, setIdentityStatus] = useState<CheckStatus>(
     identityVerification ? "checking" : "ok"
   );
-  const [identityMessage, setIdentityMessage] = useState(
+  const [, setIdentityMessage] = useState(
     identityVerification
       ? "Identity enrollment мэдээлэл уншиж байна..."
       : "Identity verification унтраалттай."
   );
   const [brightnessScore, setBrightnessScore] = useState<number | null>(null);
   const [enrollment, setEnrollment] = useState<EnrollmentState>(null);
-  const [loadingEnrollment, setLoadingEnrollment] = useState(identityVerification);
+  const [, setLoadingEnrollment] = useState(identityVerification);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pwaStatus, setPwaStatus] = useState<CheckStatus>("checking");
-  const [pwaMessage, setPwaMessage] = useState("PWA төлөв шалгаж байна...");
-  const [orientationStatus, setOrientationStatus] = useState<CheckStatus>("checking");
-  const [orientationMessage, setOrientationMessage] = useState(
+  const [, setPwaStatus] = useState<CheckStatus>("checking");
+  const [, setPwaMessage] = useState("PWA төлөв шалгаж байна...");
+  const [, setOrientationStatus] = useState<CheckStatus>("checking");
+  const [, setOrientationMessage] = useState(
     "Дэлгэцийн байрлалыг шалгаж байна..."
   );
   const deferredPromptRef = useRef<BeforeInstallPromptEvent | null>(null);
@@ -191,6 +142,51 @@ export default function PreExamCheck({
     (!requireCamera || cameraStatus === "ok" || cameraStatus === "warning") &&
     (!shouldEnforceFullscreen || fullscreenStatus === "ok") &&
     (!identityVerification || identityStatus === "ok");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkBattery() {
+      const nav = navigator as Navigator & {
+        getBattery?: () => Promise<{
+          level: number;
+          charging: boolean;
+        }>;
+      };
+
+      if (!nav.getBattery) {
+        if (!cancelled) {
+          setBatteryStatus("ok");
+          setBatteryMessage("Цэнэгийн мэдээлэл уншигдахгүй байна.");
+        }
+        return;
+      }
+
+      try {
+        const battery = await nav.getBattery();
+        if (cancelled) return;
+
+        const percentage = Math.round(battery.level * 100);
+        const isHealthy = percentage >= 20 || battery.charging;
+        setBatteryStatus(isHealthy ? "ok" : "warning");
+        setBatteryMessage(
+          battery.charging
+            ? `Цэнэг ${percentage}% (цэнэглэж байна)`
+            : `Цэнэг ${percentage}%`
+        );
+      } catch {
+        if (!cancelled) {
+          setBatteryStatus("ok");
+          setBatteryMessage("Цэнэгийн мэдээллийг шалгаж чадсангүй.");
+        }
+      }
+    }
+
+    void checkBattery();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -419,62 +415,6 @@ export default function PreExamCheck({
     }
   }
 
-  async function promptInstall() {
-    const deferredPrompt = deferredPromptRef.current;
-    if (!deferredPrompt) {
-      setPwaMessage(
-        platform === "ios"
-          ? "Safari дээр Share товчоор Add to Home Screen хийж суулгаарай."
-          : "Browser тань install prompt дэмжихгүй байна."
-      );
-      return;
-    }
-
-    await deferredPrompt.prompt();
-    await deferredPrompt.userChoice.catch(() => undefined);
-    deferredPromptRef.current = null;
-    const nextDisplayMode = getDisplayMode();
-    setDisplayMode(nextDisplayMode);
-    setPwaStatus(
-      nextDisplayMode === "standalone" || nextDisplayMode === "fullscreen"
-        ? "ok"
-        : "warning"
-    );
-  }
-
-  async function createEnrollment() {
-    const video = videoRef.current;
-    if (!video) {
-      setError("Камерын preview хараахан бэлэн болоогүй байна.");
-      return;
-    }
-
-    setActionLoading(true);
-    setError(null);
-
-    try {
-      const snapshot = captureVideoSnapshot(video);
-      const hash = computeVideoFingerprint(video);
-      const result = await upsertIdentityEnrollment(snapshot, hash);
-      if (result?.error) {
-        setError(result.error);
-        return;
-      }
-
-      setEnrollment({
-        referenceImageData: snapshot,
-        referenceHash: hash,
-        updatedAt: new Date().toISOString(),
-      });
-      setIdentityStatus("warning");
-      setIdentityMessage("Enrollment selfie хадгалагдлаа. Одоо live verification хийнэ.");
-    } catch {
-      setError("Enrollment selfie үүсгэж чадсангүй.");
-    } finally {
-      setActionLoading(false);
-    }
-  }
-
   async function verifyIdentity() {
     if (!identityVerification) {
       return { ok: true, hash: null };
@@ -550,202 +490,151 @@ export default function PreExamCheck({
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 py-8">
-      <div className="w-full max-w-3xl space-y-6">
-        <div className="text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
-            <ShieldCheck className="h-7 w-7 text-primary" />
+    <div className="flex min-h-screen items-center justify-center bg-[rgba(250,250,250,0.98)] px-4 py-10">
+      <div className="w-full max-w-[664px] space-y-[30px]">
+        <div className="flex flex-col items-center gap-5 text-center">
+          <div className="flex h-[60px] w-[60px] items-center justify-center rounded-full bg-[#D1D1D1]">
+            <ShieldCheck className="h-8 w-8 text-black" />
           </div>
-          <h1 className="text-xl font-semibold text-zinc-950">
-            {resumeMode ? "Шалгалтыг үргэлжлүүлэхийн өмнөх шалгалт" : "Шалгалтын өмнөх систем шалгалт"}
-          </h1>
-          {examTitle ? (
-            <p className="mt-1 text-sm text-zinc-500">{examTitle}</p>
-          ) : null}
-          <p className="mt-2 text-sm text-zinc-500">
-            {isProctored
-              ? `Энэ шалгалт ${proctoringMode} integrity profile ашиглаж байна.`
-              : "Энэ шалгалтад basic readiness check ажиллана."}
-          </p>
+          <div className="space-y-3">
+            <h1 className="text-[24px] font-semibold leading-[120%] text-black">
+              Системийн шалгалт
+            </h1>
+            <p className="text-base leading-[120%] text-[#6B6B6B]">
+              Таны төхөөрөмж шалгалтад бэлэн эсэхийг шалгаж байна. Түр хүлээнэ үү.
+            </p>
+          </div>
         </div>
 
         {!isDesktop && requiresDesktop ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="rounded-[16px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             Энэ шалгалтыг mobile төхөөрөмж дээр эхлүүлэхгүй. Desktop эсвэл laptop ашиглана уу.
           </div>
         ) : null}
 
         {error ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="rounded-[16px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </div>
         ) : null}
 
-        <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="space-y-3">
-            <CheckRow
-              icon={<Wifi className="h-5 w-5" />}
-              title="Internet"
-              status={internetStatus}
-              message={internetMessage}
-            />
-            <CheckRow
-              icon={<Camera className="h-5 w-5" />}
-              title="Camera"
-              status={cameraStatus}
-              message={
-                brightnessScore !== null
-                  ? `${cameraMessage} Brightness: ${brightnessScore}.`
-                  : cameraMessage
-              }
-            />
-            <CheckRow
-              icon={<Monitor className="h-5 w-5" />}
-              title="Fullscreen"
-              status={fullscreenStatus}
-              message={fullscreenMessage}
-              action={
-                shouldEnforceFullscreen ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void ensureFullscreen()}
-                  >
-                    Идэвхжүүлэх
-                  </Button>
-                ) : undefined
-              }
-            />
-            <CheckRow
-              icon={<Monitor className="h-5 w-5" />}
-              title="PWA / App mode"
-              status={pwaStatus}
-              message={pwaMessage}
-              action={
-                !isStandalonePwa && deviceType === "mobile" ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void promptInstall()}
-                  >
-                    App болгох
-                  </Button>
-                ) : undefined
-              }
-            />
-            <CheckRow
-              icon={<Monitor className="h-5 w-5" />}
-              title="Orientation"
-              status={orientationStatus}
-              message={orientationMessage}
-            />
-            <CheckRow
-              icon={<ShieldCheck className="h-5 w-5" />}
-              title="Identity"
-              status={loadingEnrollment ? "checking" : identityStatus}
-              message={loadingEnrollment ? "Enrollment шалгаж байна..." : identityMessage}
-              action={
-                identityVerification ? (
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void createEnrollment()}
-                      disabled={actionLoading || cameraStatus === "error"}
-                    >
-                      <RefreshCw className="mr-1 h-4 w-4" />
-                      Enroll
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void verifyIdentity()}
-                      disabled={actionLoading || !enrollment}
-                    >
-                      Verify
-                    </Button>
-                  </div>
-                ) : undefined
-              }
-            />
-          </div>
-
-          <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-            <p className="mb-3 text-sm font-semibold text-zinc-950">Live preview</p>
-            <div className="relative overflow-hidden rounded-2xl bg-black">
-              <video
-                ref={videoRef}
-                autoPlay
-                muted
-                playsInline
-                className="aspect-[4/3] w-full object-cover"
-              />
-              {cameraStatus === "checking" ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/55 text-white">
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Камер ачаалж байна...
-                </div>
-              ) : null}
-            </div>
-
-            {enrollment?.referenceImageData ? (
-              <div className="mt-4 space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-                  Reference selfie
-                </p>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={enrollment.referenceImageData}
-                  alt="Reference selfie"
-                  className="h-24 w-24 rounded-2xl border object-cover"
-                />
+        <div className="space-y-[9px]">
+          <div className="flex items-center justify-between rounded-[16px] border border-[#BDBDBD] bg-white px-6 py-4 shadow-sm">
+            <div className="flex items-center gap-5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md">
+                <BatteryCharging className="h-7 w-7 text-black" />
               </div>
-            ) : null}
+              <div className="space-y-1">
+                <p className="text-base font-medium leading-[120%] text-black">Цэнэг</p>
+                <p className="text-sm leading-[120%] text-[#6B6B6B]">{batteryMessage}</p>
+              </div>
+            </div>
+            <div className="flex w-[43px] flex-col items-center gap-0.5">
+              <CheckCircle2 className={`h-6 w-6 ${batteryStatus === "error" ? "text-[#E05252]" : "text-[#6BBF7A]"}`} />
+              <span className={`text-[12px] leading-[120%] ${batteryStatus === "error" ? "text-[#E05252]" : "text-[#3B8748]"}`}>
+                {batteryStatus === "warning" ? "Анхаар" : batteryStatus === "error" ? "Алдаа" : "Хэвийн"}
+              </span>
+            </div>
           </div>
-        </div>
 
-        <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600">
-          {canStart ? (
-            <div className="flex items-center gap-2 text-emerald-700">
-              <CheckCircle2 className="h-4 w-4" />
-              Start хийхэд бэлэн байна.
+          <div className="flex items-center justify-between rounded-[16px] border border-[#BDBDBD] bg-white px-6 py-4 shadow-sm">
+            <div className="flex items-center gap-5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md">
+                <Wifi className="h-7 w-7 text-black" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-base font-medium leading-[120%] text-black">Интернет холболт</p>
+                <p className="text-sm leading-[120%] text-[#6B6B6B]">{internetMessage}</p>
+              </div>
             </div>
-          ) : (
-            <div className="flex items-center gap-2 text-amber-700">
-              <XCircle className="h-4 w-4" />
-              Дээрх шалгалтуудыг гүйцээгээд дахин оролдоно уу.
+            <div className="flex w-[43px] flex-col items-center gap-0.5">
+              <CheckCircle2 className={`h-6 w-6 ${internetStatus === "error" ? "text-[#E05252]" : "text-[#6BBF7A]"}`} />
+              <span className={`text-[12px] leading-[120%] ${internetStatus === "error" ? "text-[#E05252]" : "text-[#3B8748]"}`}>
+                {internetStatus === "warning" ? "Анхаар" : internetStatus === "error" ? "Алдаа" : "Хэвийн"}
+              </span>
             </div>
-          )}
-        </div>
+          </div>
 
-        <div className="flex justify-end gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => window.location.reload()}
-          >
-            Дахин шалгах
-          </Button>
-          <Button
-            type="button"
-            onClick={() => void handleStart()}
-            disabled={!canStart || actionLoading || (requiresDesktop && !isDesktop)}
-          >
-            {actionLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Бэлтгэж байна...
-              </>
-            ) : resumeMode ? (
-              "Шалгалтыг үргэлжлүүлэх"
-            ) : (
-              "Шалгалт эхлүүлэх"
-            )}
-          </Button>
+          <div className="flex items-center justify-between rounded-[16px] border border-[#BDBDBD] bg-white px-6 py-4 shadow-sm">
+            <div className="flex items-center gap-5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md">
+                <Camera className="h-7 w-7 text-black" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-base font-medium leading-[120%] text-black">Камер</p>
+                <p className="text-sm leading-[120%] text-[#6B6B6B]">
+                  {brightnessScore !== null
+                    ? `${cameraMessage}${cameraMessage.endsWith(".") ? "" : "."}`
+                    : cameraMessage}
+                </p>
+              </div>
+            </div>
+            <div className="flex w-[43px] flex-col items-center gap-0.5">
+              {cameraStatus === "error" ? (
+                <XCircle className="h-6 w-6 text-[#E05252]" />
+              ) : (
+                <CheckCircle2 className="h-6 w-6 text-[#6BBF7A]" />
+              )}
+              <span className={`text-[12px] leading-[120%] ${cameraStatus === "error" ? "text-[#E05252]" : "text-[#3B8748]"}`}>
+                {cameraStatus === "warning" ? "Анхаар" : cameraStatus === "error" ? "Алдаа" : "Хэвийн"}
+              </span>
+            </div>
+          </div>
+
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            playsInline
+            className="absolute h-0 w-0 opacity-0 pointer-events-none"
+          />
+
+          <div className="rounded-[16px] border border-[#6BBF7A] bg-[#DBF0DF] px-6 py-3 text-sm font-medium text-[#3B8748]">
+            Бүгд хэвийн. Таны төхөөрөмж шалгалтад бэлэн байна.
+          </div>
+
+          <div className="rounded-[16px] border border-[#E05252] bg-[#FBE9E9] px-5 py-5 text-[#E05252]">
+            <div className="mb-4 flex items-center gap-3">
+              <XCircle className="h-7 w-7" />
+              <p className="text-base font-medium leading-[120%]">Анхааруулга</p>
+            </div>
+            <div className="space-y-3 text-sm leading-[140%]">
+              <p>
+                Шалгалтын явцад таны камер идэвхтэй ажиллаж, таны үйлдлийг хянах болно. Иймд шалгалтын хугацаанд өөр таб нээх, цонх солих, гаднын эх сурвалж ашиглах зэрэг зөрчил гаргавал систем илрүүлж, тухайн үйлдлийг хуулбарлах оролдлого гэж үзнэ.
+              </p>
+              <p className="font-medium">
+                Ийм тохиолдолд таны шалгалтыг хүчингүйд тооцох боломжтойг анхаарна уу.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:gap-7">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 flex-1 rounded-[8px] border border-[#BDBDBD] bg-white text-sm font-medium text-black hover:bg-zinc-50"
+              onClick={() => window.location.reload()}
+            >
+              Дахин шалгах
+            </Button>
+            <Button
+              type="button"
+              className="h-10 flex-1 rounded-[8px] bg-black text-sm font-medium text-white hover:bg-black/90"
+              onClick={() => void handleStart()}
+              disabled={!canStart || actionLoading || (requiresDesktop && !isDesktop)}
+            >
+              {actionLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Бэлтгэж байна...
+                </>
+              ) : resumeMode ? (
+                "Шалгалтыг үргэлжлүүлэх"
+              ) : (
+                "Шалгалт эхлүүлэх"
+              )}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
