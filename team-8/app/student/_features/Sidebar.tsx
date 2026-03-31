@@ -11,7 +11,7 @@ import {
   HomeIcon,
   ListCheck,
   LogOut,
-  LucideIcon,
+  type LucideIcon,
 } from "lucide-react";
 import Logo from "@/app/_icons/Logo";
 import Tsunh from "@/app/_icons/Tsunh";
@@ -22,7 +22,7 @@ interface NavItem {
   icon: LucideIcon;
 }
 
-const ALL_NAV_ITEMS: NavItem[] = [
+const allNavItems: NavItem[] = [
   { href: "/student", label: "Нүүр хуудас", icon: HomeIcon },
   { href: "/student/exams", label: "Шалгалт өгөх", icon: FileText },
   { href: "/student/results", label: "Миний шалгалтууд", icon: ListCheck },
@@ -60,7 +60,7 @@ export default function Sidebar() {
           </div>
 
           <nav className="flex flex-col gap-1.5">
-            {ALL_NAV_ITEMS.map((item) => {
+            {allNavItems.map((item) => {
               const Icon = item.icon;
               const isActive =
                 pathname === item.href ||
