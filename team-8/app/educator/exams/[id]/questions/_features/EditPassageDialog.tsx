@@ -175,8 +175,7 @@ export default function EditPassageDialog({
             <LatexShortcutPanel
               targetId={activeFormulaTarget.id}
               targetLabel={activeFormulaTarget.label}
-              title="Эх материалын томьёоны самбар"
-              description="Текст эсвэл HTML талбар дээр дарж байгаад томьёогоо оруулна."
+              minimal
             />
           )}
 

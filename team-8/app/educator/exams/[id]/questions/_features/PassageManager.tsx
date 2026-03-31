@@ -198,8 +198,7 @@ export default function PassageManager({
                 <LatexShortcutPanel
                   targetId={activeFormulaTarget.id}
                   targetLabel={activeFormulaTarget.label}
-                  title="Эх материалын томьёоны самбар"
-                  description="Талбар дээр дараад томьёогоо оруулна."
+                  minimal
                 />
               )}
 

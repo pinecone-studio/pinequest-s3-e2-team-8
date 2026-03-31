@@ -58,6 +58,10 @@ function buildSelectionOptions(options: string[]) {
     : [...options, ...Array.from({ length: 4 - options.length }, () => "")];
 }
 
+function hasMathMarkup(value: string) {
+  return value.includes("$") || value.includes("\\(") || value.includes("\\[");
+}
+
 export default function AddQuestionForm({ examId, passages }: Props) {
   const [type, setType] = useState<QuestionType>("multiple_choice");
   const [isFormulaToolOpen, setIsFormulaToolOpen] = useState(false);
@@ -94,33 +98,6 @@ export default function AddQuestionForm({ examId, passages }: Props) {
     setCorrectAnswer("");
     setMultipleCorrectAnswers([]);
     setMatchingPairs([createEmptyMatchingPair(), createEmptyMatchingPair()]);
-  }
-
-  function getActiveTargetValue() {
-    if (activeFormulaTarget.id === "content") {
-      return content;
-    }
-
-    if (activeFormulaTarget.id === "fill_blank_answer") {
-      return correctAnswer;
-    }
-
-    if (activeFormulaTarget.id.startsWith("option-")) {
-      const index = Number(activeFormulaTarget.id.replace("option-", ""));
-      return Number.isNaN(index) ? "" : options[index] ?? "";
-    }
-
-    if (activeFormulaTarget.id.startsWith("matching-left-")) {
-      const index = Number(activeFormulaTarget.id.replace("matching-left-", ""));
-      return Number.isNaN(index) ? "" : matchingPairs[index]?.left ?? "";
-    }
-
-    if (activeFormulaTarget.id.startsWith("matching-right-")) {
-      const index = Number(activeFormulaTarget.id.replace("matching-right-", ""));
-      return Number.isNaN(index) ? "" : matchingPairs[index]?.right ?? "";
-    }
-
-    return "";
   }
 
   function applyParsedQuestion(rawText: string) {
@@ -357,44 +334,6 @@ export default function AddQuestionForm({ examId, passages }: Props) {
     setTimeout(() => setSuccess(false), 3000);
   }
 
-  const activeTargetValue = getActiveTargetValue().trim();
-  const activeFormulaPreview = activeTargetValue ? (
-    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-semibold text-zinc-950">Харагдах байдал</p>
-          <p className="text-xs text-zinc-500">
-            Томьёо талбарт LaTeX кодоор хадгалагдаж, доорх шиг render хийгдэнэ.
-          </p>
-        </div>
-        <p className="text-xs text-zinc-500">{activeFormulaTarget.label}</p>
-      </div>
-
-      <div className="mt-3 grid gap-3 lg:grid-cols-2">
-        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
-            Code
-          </p>
-          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-sm text-zinc-900">
-            {activeTargetValue}
-          </pre>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
-            Preview
-          </p>
-          <div className="mt-2 min-h-16">
-            <MathContent
-              text={activeTargetValue}
-              className="prose prose-sm max-w-none text-zinc-900"
-            />
-          </div>
-        </div>
-      </div>
-    </div>
-  ) : null;
-
   return (
     <div className="rounded-[28px] border border-zinc-200 bg-white p-6 shadow-[0_12px_40px_-18px_rgba(15,23,42,0.16)] md:p-8">
       <form id="question-form" action={handleSubmit} className="space-y-6">
@@ -584,65 +523,12 @@ export default function AddQuestionForm({ examId, passages }: Props) {
         ) : null}
 
         {isFormulaToolOpen ? (
-          <div className="space-y-3 rounded-[24px] border border-zinc-200 bg-zinc-50/80 p-4">
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-zinc-950">
-                Томьёоны хэрэгсэл
-              </p>
-              <p className="text-sm text-zinc-500">
-                Идэвхтэй талбар дээр дарж байгаад томьёогоо шууд оруулна.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <LatexShortcutPanel
-                targetId={activeFormulaTarget.id}
-                targetLabel={activeFormulaTarget.label}
-                title="Томьёоны самбар"
-                description="Асуулт, хариулт эсвэл холбох мөр дээр дарж байгаад томьёогоо шууд оруулна."
-              />
-
-              {activeFormulaPreview}
-            </div>
-          </div>
+          <LatexShortcutPanel
+            targetId={activeFormulaTarget.id}
+            targetLabel={activeFormulaTarget.label}
+            minimal
+          />
         ) : null}
-
-        <div className="hidden">
-        <div className="space-y-3 rounded-[24px] border border-zinc-200 bg-zinc-50/80 p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-zinc-950">Томьёоны хэрэгсэл</p>
-              <p className="text-sm text-zinc-500">
-                Хуучин shortcut panel-аар томьёогоо сонгож, идэвхтэй талбартаа
-                шууд оруулна.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-10 rounded-full border-zinc-300 px-4 text-sm"
-              onClick={() => setIsFormulaToolOpen((prev) => !prev)}
-            >
-              {isFormulaToolOpen ? "Томьёо хаах" : "𝑓(x) Томьёо"}
-            </Button>
-          </div>
-
-          {isFormulaToolOpen ? (
-            <div className="space-y-4">
-              <LatexShortcutPanel
-                targetId={activeFormulaTarget.id}
-                targetLabel={activeFormulaTarget.label}
-                title="Томьёоны самбар"
-                description="Асуулт, хариулт эсвэл холбох мөр дээр дарж байгаад томьёогоо шууд оруулна."
-              />
-
-              {activeFormulaPreview}
-            </div>
-          ) : null}
-        </div>
-
-        </div>
 
         <div className="space-y-2.5">
           <Label htmlFor="content" className="text-sm font-medium text-zinc-700">
@@ -666,6 +552,25 @@ export default function AddQuestionForm({ examId, passages }: Props) {
             className="min-h-[180px] rounded-[24px] border-zinc-200 bg-white px-4 py-3 text-base leading-7 shadow-none focus-visible:ring-zinc-200"
           />
         </div>
+
+        {hasMathMarkup(content) ? (
+          <div className="space-y-3 rounded-[24px] border border-zinc-200 bg-zinc-50 p-4">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-zinc-950">
+                Асуултын харагдах байдал
+              </p>
+              <p className="text-xs text-zinc-500">
+                Сонгосон томьёо асуулт дээр ингэж render хийгдэнэ.
+              </p>
+            </div>
+            <div className="rounded-[20px] border border-zinc-200 bg-white px-4 py-3">
+              <MathContent
+                text={content}
+                className="prose prose-sm max-w-none text-zinc-900"
+              />
+            </div>
+          </div>
+        ) : null}
 
         {isSelectionType ? (
           <div className="space-y-3">
