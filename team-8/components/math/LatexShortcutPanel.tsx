@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
+import MathContent from "@/components/math/MathContent";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -180,6 +181,15 @@ function setNativeFieldValue(
   field.value = nextValue;
 }
 
+function buildPreviewFormula(snippet: string) {
+  return snippet
+    .replaceAll(SELECTION_MARKER, "x")
+    .replaceAll(CURSOR_MARKER, "")
+    .replace(/\{\s*\}/g, "{y}")
+    .replace(/\\to\s*}/g, "\\to 0}")
+    .replace(/=\s*(\$\$|\$|\\\]|\\\))/g, "= y$1");
+}
+
 export default function LatexShortcutPanel({
   targetId,
   targetLabel = "Асуултын талбар",
@@ -329,11 +339,17 @@ export default function LatexShortcutPanel({
                     className="h-auto items-start justify-start rounded-xl px-3 py-3 text-left"
                     onClick={() => insertSnippet(item.snippet)}
                   >
-                    <div className="space-y-1">
+                    <div className="w-full space-y-2">
                       <div className="text-xs font-medium text-muted-foreground">
                         {item.label}
                       </div>
-                      <div className="font-mono text-sm text-foreground">
+                      <div className="min-h-14 rounded-lg border bg-muted/30 px-3 py-2">
+                        <MathContent
+                          text={buildPreviewFormula(item.snippet)}
+                          className="prose prose-sm max-w-none text-foreground"
+                        />
+                      </div>
+                      <div className="text-xs text-muted-foreground">
                         {item.preview}
                       </div>
                     </div>
