@@ -20,7 +20,12 @@ export default function StudentShell({
   const pathname = usePathname();
   const hideChrome = Boolean(
     pathname?.startsWith("/student/exams/") &&
-    (pathname.endsWith("/result") || pathname.endsWith("/take") || pathname.includes("/take/run"));
+      (
+        pathname.endsWith("/result") ||
+        pathname.endsWith("/take") ||
+        pathname.includes("/take/run")
+      )
+  );
 
   const mainClassName = hideChrome
     ? "flex-1 p-0 bg-gradient-to-b from-[#f5eef9] to-[#fbfbfb]"
