@@ -727,44 +727,58 @@ export default function QuestionBankBrowser({
                 sampleExam.subject_id &&
                 sampleExam.subject_id !== targetExamSubjectId,
               );
+              const subtitle = [
+                sampleExam.subtopic,
+                `${sampleExam.grade_level}-р анги`,
+              ]
+                .filter(Boolean)
+                .join(" · ");
 
               return (
                 <Card
                   key={sampleExam.id}
-                  className="w-full self-start sm:w-[360px] shadow-sm"
+                  className="flex min-h-[320px] w-full self-start sm:w-[360px] shadow-sm"
                 >
-                  <CardContent className="space-y-4 pt-4">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                      <div className="space-y-0">
-                        <h3 className="mb-1 font-semibold">{sampleExam.title}</h3>
+                  <CardContent className="flex h-full flex-col gap-4 pt-4">
+                    <div className="flex flex-1 flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="flex items-start gap-3">
+                          <div className="h-11 w-11 shrink-0 rounded-lg bg-muted/60 ring-1 ring-foreground/10" />
+                          <div className="min-w-0">
+                            <h3 className="line-clamp-2 text-base font-semibold leading-snug">
+                              {sampleExam.title}
+                            </h3>
+                            {subtitle ? (
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                {subtitle}
+                              </p>
+                            ) : null}
+                          </div>
+                        </div>
                         {sampleExam.description ? (
-                          <p className="mt-2 text-sm text-muted-foreground">
+                          <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
                             {sampleExam.description}
                           </p>
                         ) : null}
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {sampleExam.subjects?.name ? (
+                        <div className="mt-3 space-y-2">
+                          <div className="flex flex-wrap gap-2">
                             <Badge variant="outline">
-                              {sampleExam.subjects.name}
+                              {sampleExam.question_count} асуулт
                             </Badge>
-                          ) : null}
-                          <Badge variant="outline">
-                            {sampleExam.grade_level}-р анги
-                          </Badge>
-                          {sampleExam.subtopic ? (
+                            <Badge variant="secondary">
+                              {difficultyLabels[sampleExam.difficulty_level]}
+                            </Badge>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {sampleExam.subjects?.name ? (
+                              <Badge variant="outline">
+                                {sampleExam.subjects.name}
+                              </Badge>
+                            ) : null}
                             <Badge variant="outline">
-                              {sampleExam.subtopic}
+                              {sampleExam.duration_minutes} минут
                             </Badge>
-                          ) : null}
-                          <Badge variant="secondary">
-                            {difficultyLabels[sampleExam.difficulty_level]}
-                          </Badge>
-                          <Badge variant="outline">
-                            {sampleExam.duration_minutes} минут
-                          </Badge>
-                          <Badge variant="outline">
-                            {sampleExam.question_count} асуулт
-                          </Badge>
+                          </div>
                         </div>
                       </div>
 
@@ -789,12 +803,12 @@ export default function QuestionBankBrowser({
 
                     {sampleExam.sample_exam_items &&
                     sampleExam.sample_exam_items.length > 0 ? (
-                      <details className="rounded-lg  bg-muted/10 p-3">
-                        <summary className="flex h-[40px] w-[306px] cursor-pointer list-none items-center justify-center gap-[10px] rounded-xl border border-gray-300 bg-gray-50 px-[10px] py-[8px] text-sm font-semibold text-gray-900 transition hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+                      <details className="mt-auto">
+                        <summary className="mx-auto flex h-[40px] w-[306px] cursor-pointer list-none items-center justify-center gap-[10px] rounded-xl border border-gray-300 bg-gray-50 px-[10px] py-[8px] text-sm font-semibold text-gray-900 transition hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
                           <Eye className="h-4 w-4" />
                           Үзэх
                         </summary>
-                        <div className="mt-3 space-y-3">
+                        <div className="mt-3 space-y-3 rounded-lg bg-muted/10 p-3">
                           {sampleExam.sample_exam_items
                             .sort(
                               (left, right) =>
