@@ -203,7 +203,7 @@ export default async function StudentDashboard() {
       </div>
 
       {/* 2. The Image Layer - Moved OUTSIDE the overflow-hidden div */}
-      <div className="pointer-events-none absolute -top-42 right-0 z-[60] hidden h-full w-auto scale-77 origin-bottom-right md:block">
+      <div className="pointer-events-none absolute -top-32 right-0 z-[60] hidden h-full w-auto scale-77 origin-bottom-right md:block">
         <DashboardImage />
       </div>
 

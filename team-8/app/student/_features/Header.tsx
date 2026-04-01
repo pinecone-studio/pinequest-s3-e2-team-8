@@ -3,7 +3,7 @@ import NotificationBell from "@/components/NotificationBell";
 
 export default function Header() {
   return (
-    <header className="hidden h-21.25 w-full shrink-0 items-center justify-between pl-19 pr-30 md:flex">
+    <header className="hidden h-21.25 w-full bg-[#f5eef9] shrink-0 items-center justify-between pl-19 pr-30 md:flex">
       {/* Right Side: Notifications & Profile */}
       <div className="flex flex-col">
         <p className="text-[22px] font-medium">Сайн байна уу, Намуун</p>

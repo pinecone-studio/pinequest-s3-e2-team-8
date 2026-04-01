@@ -1458,8 +1458,8 @@ export default function ExamTaker({
         </div>
       )}
 
-      <div className="mx-auto flex w-full max-w-[1090px] flex-col items-center gap-[30px] px-4 py-8 lg:py-10">
-        <div className="w-screen bg-[#FAFAFA] shadow-[0_4px_10px_rgba(0,0,0,0.1)]">
+      <div className="mx-auto flex w-full max-w-[1090px] flex-col items-center gap-[30px] px-4 pb-8 pt-[91px] lg:pt-[99px]">
+        <div className="fixed left-0 right-0 top-0 z-50 w-screen bg-[#FAFAFA] shadow-[0_4px_10px_rgba(0,0,0,0.1)]">
           <div className="mx-auto flex h-[59px] w-full max-w-[1512px] items-center justify-center gap-[18px] px-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#EEE1FE]">
               <AlarmIcon />
