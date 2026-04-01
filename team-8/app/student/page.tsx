@@ -189,20 +189,22 @@ export default async function StudentDashboard() {
   );
 
   return (
-    <div className="space-y-[35px]">
-      {/* Hero Banner */}
-      <div className="relative overflow-hidden rounded-3xl bg-linear-to-r from-white via-[#ffeac0] to-[#ffd474] px-8 py-8 min-h-37">
-        <div className="relative z-10 max-w-lg space-y-2">
+    <div className="relative space-y-6">
+      {/* 1. The Background Card */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#ffffff] via-[#ffeac0] to-[#ffd474] px-8 py-6">
+        <div className="relative z-0 max-w-2xl space-y-2">
           <h2 className="text-2xl font-bold tracking-tight md:text-3xl">
-            Сурагчийн самбар
+            Сурагчын самбар
           </h2>
           <p className="text-sm text-muted-foreground md:text-base">
-            Шалгалт, дүнгийн мэдээллээ нэг дороос хянаарай.
+            Шалгалт, дүнгийн мэдээллээ нэг доороос хянаарай.
           </p>
         </div>
-        <div className="pointer-events-none absolute bottom-0 right-0 h-full w-auto hidden md:block">
-          <DashboardImage />
-        </div>
+      </div>
+
+      {/* 2. The Image Layer - Moved OUTSIDE the overflow-hidden div */}
+      <div className="pointer-events-none absolute -top-42 right-0 z-[60] hidden h-full w-auto scale-77 origin-bottom-right md:block">
+        <DashboardImage />
       </div>
 
       {/* Active Exams Section */}
