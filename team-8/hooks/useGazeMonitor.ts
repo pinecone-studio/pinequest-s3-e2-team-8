@@ -27,8 +27,8 @@ const GAZE_HOLD_MS = 3000; // ms
 // After a warning fires, suppress new warnings for this long.
 const COOLDOWN_MS = 8000; // ms
 
-// Detection runs at most every 100 ms (~10 fps) to keep CPU low.
-const DETECTION_INTERVAL_MS = 100;
+// Detection runs at most every 160 ms (~6 fps) to keep CPU low.
+const DETECTION_INTERVAL_MS = 160;
 
 // Hard cap on warnings — never exceeded.
 const MAX_WARNINGS = 3;
@@ -80,8 +80,11 @@ export function useGazeMonitor({
 
   // rAF / lifecycle.
   const lastDetectionRef = useRef<number>(0);
+  const lastVideoTimeRef = useRef<number>(-1);
+  const consecutiveDetectErrorCountRef = useRef(0);
   const rafIdRef = useRef<number | null>(null);
   const destroyedRef = useRef(false);
+  const stoppedRef = useRef(false);
 
   // Stable callback refs so the rAF loop never closes over stale values.
   const onWarningRef = useRef(onWarning);
@@ -173,10 +176,47 @@ export function useGazeMonitor({
   // MediaPipe lifecycle.
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      stoppedRef.current = true;
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      return;
+    }
 
     destroyedRef.current = false;
+    stoppedRef.current = false;
+    lastDetectionRef.current = 0;
+    lastVideoTimeRef.current = -1;
+    consecutiveDetectErrorCountRef.current = 0;
     let faceLandmarker: import("@mediapipe/tasks-vision").FaceLandmarker | null = null;
+    let isFaceLandmarkerReady = false;
+
+    function stopMonitoring() {
+      stoppedRef.current = true;
+      isFaceLandmarkerReady = false;
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      if (faceLandmarker) {
+        faceLandmarker.close();
+        faceLandmarker = null;
+      }
+    }
+
+    function scheduleNextFrame(detect: () => void) {
+      if (
+        destroyedRef.current ||
+        stoppedRef.current ||
+        maxReachedRef.current
+      ) {
+        return;
+      }
+
+      rafIdRef.current = requestAnimationFrame(detect);
+    }
 
     async function init() {
       const { FaceLandmarker, FilesetResolver } = await import(
@@ -205,26 +245,57 @@ export function useGazeMonitor({
         return;
       }
 
+      isFaceLandmarkerReady = true;
+
       function detect() {
-        if (destroyedRef.current || maxReachedRef.current) return;
+        if (destroyedRef.current || stoppedRef.current || maxReachedRef.current) {
+          return;
+        }
 
         try {
           const video = videoRef.current;
           if (
             !video ||
+            !(video instanceof HTMLVideoElement) ||
             !faceLandmarker ||
-            video.readyState < HTMLMediaElement.HAVE_ENOUGH_DATA ||
+            !isFaceLandmarkerReady ||
+            video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
             video.videoWidth === 0 ||
-            video.videoHeight === 0
+            video.videoHeight === 0 ||
+            !Number.isFinite(video.currentTime) ||
+            video.paused ||
+            video.ended
           ) {
+            consecutiveDetectErrorCountRef.current = 0;
             return;
           }
 
           const now = performance.now();
           if (now - lastDetectionRef.current < DETECTION_INTERVAL_MS) return;
-          lastDetectionRef.current = now;
+          if (video.currentTime === lastVideoTimeRef.current) return;
 
-          const results = faceLandmarker.detectForVideo(video, now);
+          lastDetectionRef.current = now;
+          lastVideoTimeRef.current = video.currentTime;
+
+          if (
+            destroyedRef.current ||
+            stoppedRef.current ||
+            maxReachedRef.current ||
+            !faceLandmarker ||
+            !isFaceLandmarkerReady
+          ) {
+            return;
+          }
+
+          let results: ReturnType<typeof faceLandmarker.detectForVideo>;
+          try {
+            results = faceLandmarker.detectForVideo(video, now);
+            consecutiveDetectErrorCountRef.current = 0;
+          } catch (error) {
+            console.warn("Stopping gaze monitor after detectForVideo error", error);
+            stopMonitoring();
+            return;
+          }
 
           if (!results.faceLandmarks || results.faceLandmarks.length === 0) {
             onStateChangeRef.current?.("missing", 0);
@@ -265,14 +336,13 @@ export function useGazeMonitor({
 
           onStateChangeRef.current?.(state, 1);
           handleFrameState(state);
-        } catch {
-          // Any runtime error (invalid video element, MediaPipe internal error,
-          // navigation teardown) — skip this frame silently.
+        } catch (error) {
+          consecutiveDetectErrorCountRef.current += 1;
+          console.warn("Stopping gaze monitor after runtime error", error);
+          stopMonitoring();
+          return;
         } finally {
-          // Schedule the next frame only if still active.
-          if (!destroyedRef.current && !maxReachedRef.current) {
-            rafIdRef.current = requestAnimationFrame(detect);
-          }
+          scheduleNextFrame(detect);
         }
       }
 
@@ -285,14 +355,7 @@ export function useGazeMonitor({
 
     return () => {
       destroyedRef.current = true;
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
-      if (faceLandmarker) {
-        faceLandmarker.close();
-        faceLandmarker = null;
-      }
+      stopMonitoring();
     };
   }, [enabled, sessionId, videoRef, handleFrameState]);
 }

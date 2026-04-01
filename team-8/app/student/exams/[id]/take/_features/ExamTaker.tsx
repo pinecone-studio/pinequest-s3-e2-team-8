@@ -418,7 +418,7 @@ export default function ExamTaker({
   );
   const requireCamera = Boolean(exam.require_camera);
   const requireFullscreen = Boolean(exam.require_fullscreen);
-  const shouldEnforceFullscreen = requireFullscreen && !isMobileStandard;
+  const shouldEnforceFullscreen = requireFullscreen && (!isMobileStandard || isStandalonePwa);
   const shouldUseSpotChecks = requireCamera && isMobileStandard;
   const shouldRunContinuousCamera = requireCamera && (!isMobileStandard || spotCheckOpen);
   const heartbeatIntervalMs =
@@ -441,23 +441,34 @@ export default function ExamTaker({
   // The ref inside useGazeMonitor is the authoritative counter.
   const [gazeWarningCount, setGazeWarningCount] = useState(0);
 
+  const handleGazeWarning = useCallback((total: number) => {
+    setGazeWarningCount((current) => (current === total ? current : total));
+  }, []);
+
+  const handleGazeStateChange = useCallback(
+    (
+      state: "center" | "left" | "right" | "missing" | "multi_face",
+      faceCount: number
+    ) => {
+      setFaceDirection((current) => (current === state ? current : state));
+      setMultiFaceCount((current) => (current === faceCount ? current : faceCount));
+    },
+    []
+  );
+
   useGazeMonitor({
     sessionId,
     videoRef,
     enabled:
+      !isSubmitting &&
       requireCamera &&
       cameraStatus === "granted" &&
       (!isMobileStandard || spotCheckOpen),
-    onWarning: (total) => {
-      setGazeWarningCount(total);
-    },
+    onWarning: handleGazeWarning,
     onMaxWarnings: () => {
       handleSubmitRef.current();
     },
-    onStateChange: (state, faceCount) => {
-      setFaceDirection(state);
-      setMultiFaceCount(faceCount);
-    },
+    onStateChange: handleGazeStateChange,
   });
 
   const currentQuestion = displayQuestions[currentIndex] ?? null;
@@ -885,7 +896,7 @@ export default function ExamTaker({
         );
         void checkpointDirtyAnswers();
 
-        if (!isMobileSession && newCount >= 5) {
+        if (!isMobileSession && newCount >= 3) {
           alert(
             `Анхааруулга: Та ${newCount} удаа цонхноос гарлаа. Integrity challenge идэвхжиж болно.`
           );
@@ -1000,6 +1011,17 @@ export default function ExamTaker({
     };
   }, [emitProctorEvent, isMobileSession]);
 
+  // Lock screen orientation to portrait on mobile PWA (Screen Orientation API)
+  useEffect(() => {
+    if (!isMobileSession || !isStandalonePwa) return;
+    const orientationApi = screen.orientation as ScreenOrientation & { lock?: (orientation: string) => Promise<void> };
+    if (typeof orientationApi?.lock !== "function") return;
+    orientationApi.lock("portrait").catch(() => {});
+    return () => {
+      screen.orientation.unlock();
+    };
+  }, [isMobileSession, isStandalonePwa]);
+
   useEffect(() => {
     if (!shouldUseSpotChecks) return;
 
@@ -1051,6 +1073,65 @@ export default function ExamTaker({
       document.removeEventListener("contextmenu", handleContextMenu);
     };
   }, [emitProctorEvent]);
+
+  // Keyboard shortcut blocking + text selection prevention
+  useEffect(() => {
+    const BLOCKED_KEYS: { key: string; ctrlKey?: boolean; shiftKey?: boolean }[] = [
+      { key: "F12" },
+      { key: "I", ctrlKey: true, shiftKey: true },
+      { key: "J", ctrlKey: true, shiftKey: true },
+      { key: "C", ctrlKey: true, shiftKey: true },
+      { key: "U", ctrlKey: true },
+      { key: "S", ctrlKey: true },
+      { key: "P", ctrlKey: true },
+      { key: "F5" },
+    ];
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const blocked = BLOCKED_KEYS.some((combo) => {
+        if (combo.key.toLowerCase() !== event.key.toLowerCase()) return false;
+        if (combo.ctrlKey !== undefined && combo.ctrlKey !== event.ctrlKey) return false;
+        if (combo.shiftKey !== undefined && combo.shiftKey !== event.shiftKey) return false;
+        return true;
+      });
+      if (blocked) {
+        event.preventDefault();
+        emitProctorEvent("keyboard_shortcut", { key: event.key }, 2000);
+      }
+    };
+
+    const handleSelectStart = (event: Event) => {
+      const target = event.target as HTMLElement;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+      event.preventDefault();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("selectstart", handleSelectStart);
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("selectstart", handleSelectStart);
+    };
+  }, [emitProctorEvent]);
+
+  // Multiple monitor detection (desktop only, Chrome 93+ Window Management API)
+  useEffect(() => {
+    if (isMobileSession) return;
+
+    const checkMultiMonitor = () => {
+      if ((window.screen as Screen & { isExtended?: boolean }).isExtended === true) {
+        emitProctorEvent("multi_monitor", { source: "screen_check" }, 10000);
+      }
+    };
+
+    checkMultiMonitor();
+    window.addEventListener("resize", checkMultiMonitor);
+
+    return () => {
+      window.removeEventListener("resize", checkMultiMonitor);
+    };
+  }, [emitProctorEvent, isMobileSession]);
 
   useEffect(() => {
     if (!requireCamera) return;
