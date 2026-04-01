@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import NotificationBell from "@/components/NotificationBell";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import type { Profile } from "@/types";
@@ -34,13 +34,28 @@ export default function Header({ profile }: { profile: Profile }) {
   const displayName = getDisplayName(profile);
   const initials = getInitials(profile);
   const pathname = usePathname();
-  const hideGreeting = pathname === "/educator/groups";
+  const searchParams = useSearchParams();
+  const subjectId = searchParams.get("subjectId");
+  const hideGreeting =
+    pathname === "/educator/groups" ||
+    pathname?.startsWith("/educator/question-bank");
   const showGroupsBackLink = pathname?.startsWith("/educator/groups/");
+  const showQuestionBankBackLink =
+    pathname?.startsWith("/educator/question-bank") && Boolean(subjectId);
+  const questionBankBackHref = pathname?.startsWith(
+    "/educator/question-bank/private",
+  )
+    ? "/educator/question-bank/private"
+    : "/educator/question-bank";
 
   return (
     <header
       className={`flex flex-col gap-5 py-2 sm:flex-row sm:items-center ${
-        hideGreeting ? "sm:justify-end" : "sm:justify-between"
+        hideGreeting && !showGroupsBackLink && !showQuestionBankBackLink
+          ? "sm:justify-end"
+          : showGroupsBackLink || showQuestionBankBackLink
+            ? "sm:justify-start"
+            : "sm:justify-between"
       }`}
     >
       {showGroupsBackLink ? (
@@ -51,6 +66,16 @@ export default function Header({ profile }: { profile: Profile }) {
           <div className="flex items-center gap-1 text-[#030217]">
             <ArrowLeft size={16} />
             Ангиуд руу буцах
+          </div>
+        </Link>
+      ) : showQuestionBankBackLink ? (
+        <Link
+          href={questionBankBackHref}
+          className="text-[15px] font-medium text-[#111111] hover:text-[#1f2937] hover:underline"
+        >
+          <div className="flex items-center gap-1 text-[#030217]">
+            <ArrowLeft size={16} />
+            Асуултын сан руу буцах
           </div>
         </Link>
       ) : !hideGreeting ? (
@@ -64,7 +89,11 @@ export default function Header({ profile }: { profile: Profile }) {
         </div>
       ) : null}
 
-      <div className="flex h-[40px] w-[100px] items-center justify-end gap-[20px] self-end sm:self-auto">
+      <div
+        className={`flex h-[40px] w-[100px] items-center justify-end gap-[20px] self-end sm:self-auto ${
+          showGroupsBackLink || showQuestionBankBackLink ? "sm:ml-auto" : ""
+        }`}
+      >
         <NotificationBell />
 
         <Link
