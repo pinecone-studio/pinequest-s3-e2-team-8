@@ -86,7 +86,7 @@ export default function RegisterPage() {
             <div className="space-y-2">
               <Label htmlFor="email">Имэйл</Label>
               <Input
-                id="email"
+                 id="email"
                 name="email"
                 type="email"
                 placeholder="example@pinecone.mn"
