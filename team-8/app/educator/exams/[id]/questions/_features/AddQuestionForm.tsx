@@ -25,7 +25,11 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { QuestionPassage, QuestionType } from "@/types";
+import type {
+  AiQuestionVariantMode,
+  QuestionPassage,
+  QuestionType,
+} from "@/types";
 import QuestionImportActions from "./QuestionImportActions";
 
 interface Props {
@@ -46,6 +50,23 @@ const questionTypes: { value: QuestionType; label: string }[] = [
   { value: "fill_blank", label: "Нөхөх" },
   { value: "essay", label: "Эссэ" },
   { value: "matching", label: "Холбох" },
+];
+
+const aiVariantModes: Array<{
+  value: AiQuestionVariantMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "two_fixed",
+    label: "2 хувилбар",
+    description: "AI энэ асуултад тогтмол 2 хувилбар бэлдэнэ.",
+  },
+  {
+    value: "per_student",
+    label: "Сурагч бүрт өөр",
+    description: "Session эхлэхэд сурагч бүр өөр өгөгдөлтэй хувилбар авна.",
+  },
 ];
 
 function createEmptyMatchingPair(): MatchingPair {
@@ -80,6 +101,8 @@ export default function AddQuestionForm({ examId, passages }: Props) {
   ]);
   const [points, setPoints] = useState(1);
   const [aiVariantEnabled, setAiVariantEnabled] = useState(false);
+  const [aiVariantMode, setAiVariantMode] =
+    useState<AiQuestionVariantMode>("per_student");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -241,6 +264,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
     formData.set("image_url", "");
     formData.set("explanation", "");
     formData.set("ai_variant_enabled", aiVariantEnabled ? "on" : "off");
+    formData.set("ai_variant_mode", aiVariantMode);
     formData.set(
       "passage_id",
       selectedPassageId === "__none" ? "" : selectedPassageId
@@ -325,6 +349,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
     setContent("");
     setPoints(1);
     setAiVariantEnabled(false);
+    setAiVariantMode("per_student");
     setSelectedPassageId("__none");
 
     const form = document.getElementById("question-form") as HTMLFormElement | null;
@@ -341,6 +366,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
           examId={examId}
           aiVariantEnabled={aiVariantEnabled}
           onAiVariantEnabledChange={setAiVariantEnabled}
+          aiVariantMode={aiVariantMode}
           formulaToolOpen={isFormulaToolOpen}
           onFormulaToolOpenChange={setIsFormulaToolOpen}
         />
@@ -411,17 +437,49 @@ export default function AddQuestionForm({ examId, passages }: Props) {
               </div>
               <div className="space-y-1">
                 <p className="text-sm font-semibold text-zinc-950">
-                  AI ашиглах идэвхтэй
+                  AI хувилбар идэвхтэй
                 </p>
                 <p className="text-sm text-zinc-600">
-                  Идэвхжүүлсэн үед сурагч бүр энэ асуултыг өөр тоо, нэр,
-                  өгөгдөлтэй хувилбараар авна.
+                  Идэвхжүүлсэн үед сурагч бүр энэ асуултын ижил түвшний өөр
+                  өгөгдөлтэй хувилбарыг авна.
                 </p>
               </div>
             </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {aiVariantModes.map((mode) => {
+                const isActive = aiVariantMode === mode.value;
+
+                return (
+                  <button
+                    key={mode.value}
+                    type="button"
+                    onClick={() => setAiVariantMode(mode.value)}
+                    className={cn(
+                      "rounded-[20px] border px-4 py-3 text-left transition-colors",
+                      isActive
+                        ? "border-amber-300 bg-white text-zinc-950 shadow-sm"
+                        : "border-amber-100 bg-amber-50/60 text-zinc-600 hover:border-amber-200 hover:bg-white/80"
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold">{mode.label}</p>
+                      {isActive ? (
+                        <Check className="h-4 w-4 text-amber-700" />
+                      ) : null}
+                    </div>
+                    <p className="mt-1 text-sm leading-6">{mode.description}</p>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="rounded-2xl border border-amber-200/70 bg-amber-100/70 px-3 py-2 text-sm text-amber-950">
+              {aiVariantMode === "two_fixed"
+                ? "2 хувилбарын mode сонговол AI тогтмол хоёр хувилбар бэлдэж, сурагч бүр тэр хоёроос нэгийг нь авна."
+                : "Сурагч бүрт өөр mode сонговол session эхлэх бүрт сурагчид шинэ өгөгдөлтэй AI хувилбар үүсгэнэ."}
+            </p>
             <p className="rounded-2xl bg-white/80 px-3 py-2 text-sm text-amber-900">
-              Session эхлэх үед AI зөвхөн асуултын өгөгдлийг хувиргаж, зөв
-              хариултыг нь шинэчилнэ.
+              Асуултын логик, түвшин, төрөл өөрчлөгдөхгүй. Зөвхөн тоо, нэр,
+              өгөгдөл, сонголтын текст шинэчлэгдэнэ.
             </p>
           </div>
         ) : null}
