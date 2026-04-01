@@ -15,6 +15,7 @@ import {
   parseImportedQuestionFile,
 } from "@/lib/question/actions";
 import type {
+  AiQuestionVariantMode,
   QuestionImportDraft,
   QuestionImportMatchingPair,
   QuestionType,
@@ -75,6 +76,7 @@ interface SelectedImportFile {
 interface QuestionImportActionsProps {
   examId: string;
   aiVariantEnabled: boolean;
+  aiVariantMode: AiQuestionVariantMode;
   onAiVariantEnabledChange: (value: boolean) => void;
   formulaToolOpen: boolean;
   onFormulaToolOpenChange: (value: boolean) => void;
@@ -194,6 +196,7 @@ function resetDraftForType(
 export default function QuestionImportActions({
   examId,
   aiVariantEnabled,
+  aiVariantMode,
   onAiVariantEnabledChange,
   formulaToolOpen,
   onFormulaToolOpenChange,
@@ -651,7 +654,7 @@ export default function QuestionImportActions({
                   }
                 >
                   <Sparkles className="h-4 w-4" />
-                  AI ашиглах
+                  AI-аар хувилбар үүсгэх
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem
                   checked={formulaToolOpen}
@@ -667,10 +670,18 @@ export default function QuestionImportActions({
         </div>
 
         {aiVariantEnabled ? (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
             <Badge variant="outline" className="border-amber-300 text-amber-700">
-              AI ашиглах идэвхтэй
+              AI хувилбар идэвхтэй
             </Badge>
+            <Badge variant="outline" className="border-amber-200 text-amber-700">
+              {aiVariantMode === "two_fixed"
+                ? "2 хувилбар"
+                : "Сурагч бүрт өөр"}
+            </Badge>
+            <span>
+              Түвшин өөрчлөхгүй, зөвхөн тоо, нэр, өгөгдөл, сонголтын текстийг хувиргана.
+            </span>
           </div>
         ) : null}
 

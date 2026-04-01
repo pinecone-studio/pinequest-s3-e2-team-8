@@ -18,12 +18,18 @@ export default function StudentShell({
   children,
 }: StudentShellProps) {
   const pathname = usePathname();
-  const hideChrome =
-    pathname?.startsWith("/student/exams/") && pathname.endsWith("/result");
+  const hideChrome = Boolean(
+    pathname?.startsWith("/student/exams/") &&
+      (
+        pathname.endsWith("/result") ||
+        pathname.endsWith("/take") ||
+        pathname.includes("/take/run")
+      )
+  );
 
   const mainClassName = hideChrome
-    ? "flex-1 px-4 pb-8 pt-4 md:px-8"
-    : "flex-1 px-4 pb-[calc(96px+env(safe-area-inset-bottom))] pt-4 md:pb-8 md:pl-19 md:pr-30 md:pt-0";
+    ? "flex-1 p-0 bg-gradient-to-b from-[#f5eef9] to-[#fbfbfb]"
+    : "flex-1 bg-gradient-to-b from-[#f5eef9] to-[#fbfbfb] px-4 pb-[calc(96px+env(safe-area-inset-bottom))] pt-4 md:pb-8 md:pl-19 md:pr-30 md:pt-0";
 
   return (
     <div className="flex min-h-[100dvh] bg-zinc-50 text-zinc-900">
@@ -31,7 +37,13 @@ export default function StudentShell({
       <div className="flex min-h-[100dvh] flex-1 flex-col">
         {!hideChrome && mobileHeader}
         {!hideChrome && header}
-        <main className={mainClassName}>{children}</main>
+        <main className={mainClassName}>
+          {hideChrome ? (
+            children
+          ) : (
+            <div className="mx-auto w-full max-w-[1440px]">{children}</div>
+          )}
+        </main>
         {!hideChrome && bottomNav}
       </div>
     </div>

@@ -194,6 +194,18 @@ export default function PrivateBankAddMaterial({
             onSubmit={handleTextSubmit}
             className="space-y-4 border-t bg-background/50 px-1 py-4"
           >
+            <div className="space-y-2">
+              <Label htmlFor="pb-t-batch">Багц нэр (заавал биш)</Label>
+              <Input
+                id="pb-t-batch"
+                name="batch_label"
+                placeholder="Жишээ: ЭЕШ 2023 · Хувилбар A"
+              />
+              <p className="text-xs text-muted-foreground">
+                Нэг дор оруулсан материалуудаа дараа нь багцаар нь шүүж/устгахад тусална.
+              </p>
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="pb-t-subject">
@@ -359,6 +371,18 @@ export default function PrivateBankAddMaterial({
             onSubmit={handleImageSubmit}
             className="space-y-4 border-t bg-background/50 px-1 py-4"
           >
+            <div className="space-y-2">
+              <Label htmlFor="pb-img-batch">Багц нэр (заавал биш)</Label>
+              <Input
+                id="pb-img-batch"
+                name="batch_label"
+                placeholder="Жишээ: 10-р анги · Сорил 2"
+              />
+              <p className="text-xs text-muted-foreground">
+                Олон бодлого салгаж хадгалсан ч нэг багцад байлгах нэр.
+              </p>
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="pb-img-subject">

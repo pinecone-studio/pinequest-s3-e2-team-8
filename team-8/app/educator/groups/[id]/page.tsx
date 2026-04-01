@@ -8,10 +8,11 @@ import {
 } from "@/lib/group/actions";
 import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Users } from "lucide-react";
+import { ArrowLeft, Search, Users } from "lucide-react";
 import AddMemberForm from "./_features/AddMemberForm";
 import MemberList from "./_features/MemberList";
 import AssignExamSection from "./_features/AssignExamSection";
+import { Input } from "@/components/ui/input";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -21,7 +22,9 @@ export default async function GroupDetailPage({ params }: Props) {
   const { id } = await params;
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
@@ -48,20 +51,14 @@ export default async function GroupDetailPage({ params }: Props) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <Link
-          href="/educator/groups"
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-3 w-3" />
-          Бүлгүүд
-        </Link>
-        <div className="mt-1 flex items-center gap-3">
-          <h2 className="text-2xl font-bold tracking-tight">{group.name}</h2>
-          <Badge variant="outline">
-            {groupTypeLabel[group.group_type] || group.group_type}
-          </Badge>
-          {group.grade && <Badge variant="secondary">{group.grade}-р анги</Badge>}
+      <div className="flex justify-between">
+        <div className="flex">
+          <Search />
+          <Input />
+        </div>
+        <div className="flex items-center gap-2">
+          <div>Өгөгдөл татах</div>
+          <div>Сурагч нэмэх</div>
         </div>
       </div>
 

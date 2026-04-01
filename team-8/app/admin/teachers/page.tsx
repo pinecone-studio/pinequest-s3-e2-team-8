@@ -2,14 +2,12 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { getTeachersWithAssignments } from "@/lib/admin/actions";
 import { getSubjects } from "@/lib/subject/actions";
-import { getAllGroupsAdmin } from "@/lib/group/actions";
-import TeacherAssignmentPanel from "./_features/TeacherAssignmentPanel";
+import TeacherDepartmentBoard from "./_features/TeacherDepartmentBoard";
 
 export default async function AdminTeachersPage() {
-  const [teachers, subjects, groups] = await Promise.all([
+  const [teachers, subjects] = await Promise.all([
     getTeachersWithAssignments(),
     getSubjects(),
-    getAllGroupsAdmin(),
   ]);
 
   return (
@@ -23,9 +21,12 @@ export default async function AdminTeachersPage() {
           Буцах
         </Link>
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Багш нарын хичээл оноолт</h2>
+          <h2 className="text-2xl font-bold tracking-tight">
+            Багш нарын хичээл оноолт
+          </h2>
           <p className="text-muted-foreground">
-            Багш бүрт заах хичээл болон бүлгийн оноолтыг удирдана.
+            Багш нарыг тэнхимээр нь харж, тухайн багшид оноосон хичээлүүдийг
+            дэлгэрэнгүй удирдана.
           </p>
         </div>
       </div>
@@ -35,21 +36,7 @@ export default async function AdminTeachersPage() {
           Багш бүртгэлгүй байна.
         </div>
       ) : (
-        <div className="space-y-4">
-          {teachers.map((teacher) => (
-            <TeacherAssignmentPanel
-              key={teacher.id}
-              teacher={teacher}
-              allSubjects={subjects}
-              allGroups={groups.map((g) => ({
-                id: g.id,
-                name: g.name,
-                grade: g.grade,
-                group_type: g.group_type,
-              }))}
-            />
-          ))}
-        </div>
+        <TeacherDepartmentBoard teachers={teachers} allSubjects={subjects} />
       )}
     </div>
   );

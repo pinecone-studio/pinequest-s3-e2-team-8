@@ -7,7 +7,9 @@ import ExamTaker from "./ExamTaker";
 import PreExamCheck from "./PreExamCheck";
 import {
   markStoredExamStartTelemetryPersisted,
-  readStoredExamStartContext,
+  parseStoredExamStartContext,
+  readStoredExamStartContextSnapshot,
+  subscribeStoredExamStartContext,
   writeStoredExamStartContext,
   type ExamRuntimeReadiness,
 } from "./runtime-readiness";
@@ -30,10 +32,14 @@ export default function ExamRunnerClient({
   initialTimeLeftSeconds,
 }: ExamRunnerClientProps) {
   const examId = String(exam.id ?? "");
-  const storedContext = useSyncExternalStore(
-    () => () => {},
-    () => readStoredExamStartContext(examId, sessionId),
+  const storedContextRaw = useSyncExternalStore(
+    (onStoreChange) => subscribeStoredExamStartContext(examId, onStoreChange),
+    () => readStoredExamStartContextSnapshot(examId),
     () => null
+  );
+  const storedContext = useMemo(
+    () => parseStoredExamStartContext(storedContextRaw, sessionId),
+    [sessionId, storedContextRaw]
   );
   const [runtimeReadiness, setRuntimeReadiness] = useState<ExamRuntimeReadiness | null>(null);
   const [telemetryPersisted, setTelemetryPersisted] = useState(false);

@@ -34,6 +34,26 @@ type StudentDashboardExam = {
   max_attempts: number;
 };
 
+type StudentRecipientRow = {
+  exam_id: string;
+  access_start_time: string | null;
+  access_end_time: string | null;
+  max_attempts_override: number | null;
+  excused_at: string | null;
+};
+
+type StudentLearningSummary = Awaited<
+  ReturnType<typeof getStudentLearningDashboardSummary>
+>;
+
+function getEmptyLearningSummary(): StudentLearningSummary {
+  return {
+    weakSubjects: [],
+    weakTopics: [],
+    isRefreshing: false,
+  };
+}
+
 export async function getEducatorStats() {
   const supabase = await createClient();
   const {
@@ -240,23 +260,22 @@ export async function getStudentStats() {
       avgScore: null,
       upcomingExams: [],
       recentResults: [],
-      learningSummary: {
-        weakSubjects: [],
-        weakTopics: [],
-        isRefreshing: false,
-      },
+      learningSummary: getEmptyLearningSummary(),
     };
   }
 
   const now = new Date().toISOString();
 
-  const [assignedRowsRes, sessionsRes] = await Promise.all([
+  const buildRecipientQuery = (selectClause: string) =>
     supabase
       .from("exam_recipients")
-      .select(
-        "exam_id, access_start_time, access_end_time, max_attempts_override, excused_at"
-      )
-      .eq("student_id", user.id),
+      .select(selectClause)
+      .eq("student_id", user.id);
+
+  const [assignedRowsRes, sessionsRes] = await Promise.all([
+    buildRecipientQuery(
+      "exam_id, access_start_time, access_end_time, max_attempts_override, excused_at"
+    ),
     supabase
       .from("exam_sessions")
       .select(
@@ -265,22 +284,212 @@ export async function getStudentStats() {
       .eq("user_id", user.id)
       .in("status", ["in_progress", "submitted", "graded", "timed_out"]),
   ]);
-  if (assignedRowsRes.error || sessionsRes.error) {
+  if (sessionsRes.error) {
     return {
       activeExams: 0,
       completedExams: 0,
       avgScore: null,
       upcomingExams: [],
       recentResults: [],
-      learningSummary: {
-        weakSubjects: [],
-        weakTopics: [],
-        isRefreshing: false,
-      },
+      learningSummary: getEmptyLearningSummary(),
+    };
+  }
+
+  if (assignedRowsRes.error) {
+    const fallbackAssignedRowsRes = await buildRecipientQuery("exam_id");
+    if (fallbackAssignedRowsRes.error) {
+      return {
+        activeExams: 0,
+        completedExams: 0,
+        avgScore: null,
+        upcomingExams: [],
+        recentResults: [],
+        learningSummary: getEmptyLearningSummary(),
+      };
+    }
+    const sessions = sessionsRes.data ?? [];
+    const assignedRows: StudentRecipientRow[] = (
+      fallbackAssignedRowsRes.data ?? []
+    ).map((row) => ({
+      exam_id: String((row as unknown as { exam_id: string }).exam_id),
+      access_start_time: null,
+      access_end_time: null,
+      max_attempts_override: null,
+      excused_at: null,
+    }));
+
+    const assignedExamIds = [...new Set(assignedRows.map((row) => String(row.exam_id)))];
+    const { data: examRows, error: examRowsError } =
+      assignedExamIds.length > 0
+        ? await supabase
+            .from("exams")
+            .select("id, title, start_time, end_time, duration_minutes, max_attempts")
+            .eq("is_published", true)
+            .in("id", assignedExamIds)
+        : { data: [], error: null };
+
+    if (examRowsError) {
+      return {
+        activeExams: 0,
+        completedExams: 0,
+        avgScore: null,
+        upcomingExams: [],
+        recentResults: [],
+        learningSummary: getEmptyLearningSummary(),
+      };
+    }
+
+    const examMap = new Map<string, StudentDashboardExam>(
+      ((examRows ?? []) as StudentDashboardExam[]).map((exam) => [String(exam.id), exam])
+    );
+    const sessionsByExam = new Map<string, typeof sessions>();
+    for (const session of sessions) {
+      const examSessions = sessionsByExam.get(String(session.exam_id)) ?? [];
+      examSessions.push(session);
+      sessionsByExam.set(String(session.exam_id), examSessions);
+    }
+
+    const bestSessionsByExam = Array.from(sessionsByExam.values())
+      .map((examSessions) =>
+        pickBestAttempt(
+          examSessions.filter((session) =>
+            ["submitted", "graded", "timed_out"].includes(String(session.status))
+          )
+        )
+      )
+      .filter((session): session is NonNullable<typeof session> => Boolean(session));
+    let avgScore: number | null = null;
+    if (bestSessionsByExam.length > 0) {
+      const totalPct = bestSessionsByExam.reduce(
+        (sum, session) => sum + getAttemptPercentage(session),
+        0
+      );
+      avgScore = Math.round(totalPct / bestSessionsByExam.length);
+    }
+
+    const latestSessionByExam = new Map<
+      string,
+      { status: string; attemptNumber: number; startedAt: string | null }
+    >();
+    for (const [examId, examSessions] of sessionsByExam.entries()) {
+      const latestSession = pickLatestAttempt(examSessions);
+      if (!latestSession) continue;
+
+      latestSessionByExam.set(examId, {
+        status: String(latestSession.status),
+        attemptNumber: Number(latestSession.attempt_number ?? 0),
+        startedAt: (latestSession.started_at as string | null) ?? null,
+      });
+    }
+
+    const nowMs = new Date(now).getTime();
+    const decoratedExamMap = new Map<string, StudentUpcomingExam>();
+
+    for (const row of assignedRows) {
+      const exam = examMap.get(String(row.exam_id));
+      if (!exam) continue;
+
+      const access = getEffectiveExamAccess(
+        {
+          start_time: exam.start_time,
+          end_time: exam.end_time,
+          duration_minutes: exam.duration_minutes,
+          max_attempts: exam.max_attempts,
+        },
+        row
+      );
+      const lifecycle = deriveStudentExamLifecycle({
+        exam: {
+          start_time: exam.start_time,
+          end_time: exam.end_time,
+          duration_minutes: exam.duration_minutes,
+          max_attempts: exam.max_attempts,
+        },
+        recipient: row,
+        latestSessionStatus:
+          latestSessionByExam.get(String(exam.id))?.status ?? null,
+        latestAttemptNumber:
+          latestSessionByExam.get(String(exam.id))?.attemptNumber ?? 0,
+        latestSessionStartedAt:
+          latestSessionByExam.get(String(exam.id))?.startedAt ?? null,
+        nowMs,
+      });
+
+      decoratedExamMap.set(String(exam.id), {
+        id: exam.id,
+        title: exam.title,
+        start_time: access.effectiveStartTime,
+        end_time: access.effectiveEndTime,
+        duration_minutes: exam.duration_minutes,
+        session_status: latestSessionByExam.get(exam.id)?.status ?? null,
+        lifecycle_status: lifecycle.key,
+        lifecycle_label: lifecycle.label,
+      });
+    }
+
+    const decoratedExams = Array.from(decoratedExamMap.values());
+    const activeExams = decoratedExams.filter(
+      (exam) =>
+        exam.lifecycle_status === "available" ||
+        exam.lifecycle_status === "retake_available" ||
+        exam.lifecycle_status === "in_progress"
+    ).length;
+
+    const upcomingExams = decoratedExams
+      .filter(
+        (exam) =>
+          exam.lifecycle_status === "scheduled" ||
+          exam.lifecycle_status === "retake_scheduled" ||
+          exam.lifecycle_status === "available" ||
+          exam.lifecycle_status === "retake_available" ||
+          exam.lifecycle_status === "in_progress"
+      )
+      .sort(
+        (left, right) =>
+          new Date(left.start_time).getTime() -
+          new Date(right.start_time).getTime()
+      )
+      .slice(0, 5);
+
+    const recentResults = bestSessionsByExam
+      .slice()
+      .sort(
+        (left, right) =>
+          new Date(String(right.submitted_at ?? right.started_at ?? 0)).getTime() -
+          new Date(String(left.submitted_at ?? left.started_at ?? 0)).getTime()
+      )
+      .slice(0, 3)
+      .map((session) => {
+        const exam = getRelationObject(session.exams);
+        const percentage = getAttemptPercentage(session);
+
+        return {
+          id: session.exam_id,
+          exam_title: exam?.title ?? "Шалгалт",
+          submitted_at: session.submitted_at,
+          percentage,
+          status: session.status,
+        };
+      });
+
+    let learningSummary = getEmptyLearningSummary();
+    try {
+      learningSummary = await getStudentLearningDashboardSummary(user.id);
+    } catch (error) {
+      console.error("Failed to load student learning dashboard summary", error);
+    }
+
+    return {
+      activeExams,
+      completedExams: bestSessionsByExam.length,
+      avgScore,
+      upcomingExams,
+      recentResults,
+      learningSummary,
     };
   }
   const sessions = sessionsRes.data ?? [];
-  const assignedRows = assignedRowsRes.data ?? [];
+  const assignedRows = ((assignedRowsRes.data ?? []) as unknown) as StudentRecipientRow[];
   const assignedExamIds = [...new Set(assignedRows.map((row) => row.exam_id))];
   const { data: examRows, error: examRowsError } =
     assignedExamIds.length > 0
@@ -298,11 +507,7 @@ export async function getStudentStats() {
       avgScore: null,
       upcomingExams: [],
       recentResults: [],
-      learningSummary: {
-        weakSubjects: [],
-        weakTopics: [],
-        isRefreshing: false,
-      },
+      learningSummary: getEmptyLearningSummary(),
     };
   }
 
@@ -441,7 +646,14 @@ export async function getStudentStats() {
       };
     });
 
-  const learningSummary = await getStudentLearningDashboardSummary(user.id);
+  let learningSummary = getEmptyLearningSummary();
+  try {
+    // Learning Hub summary is optional for the dashboard.
+    // If its projection/admin client is not ready yet, keep exam data usable.
+    learningSummary = await getStudentLearningDashboardSummary(user.id);
+  } catch (error) {
+    console.error("Failed to load student learning dashboard summary", error);
+  }
 
   return {
     activeExams,
