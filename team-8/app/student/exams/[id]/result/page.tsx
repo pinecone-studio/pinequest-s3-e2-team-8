@@ -1,7 +1,14 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getExamResult } from "@/lib/student/actions";
-import { CheckCircle2, XCircle, MinusCircle, ChevronLeft } from "lucide-react";
+import {
+  CheckCircle2,
+  XCircle,
+  MinusCircle,
+  ChevronLeft,
+  LockKeyhole,
+} from "lucide-react";
+import { formatDateTimeUB } from "@/lib/utils/date";
 import QuestionStepper from "./_components/QuestionStepper";
 function parseStringArray(value: unknown) {
   try {
@@ -51,6 +58,63 @@ export default async function ExamResultPage({
   if (!data) redirect("/student/exams");
 
   const examMeta = Array.isArray(data.exams) ? data.exams[0] : data.exams;
+  const canViewResults = Boolean(data.can_view_results ?? true);
+  const lockedReason = String(data.result_locked_reason ?? "release_pending");
+
+  if (!canViewResults) {
+    return (
+      <div className="mx-auto mt-12 flex max-w-3xl flex-col items-center px-4">
+        <div className="w-full rounded-[28px] border bg-white p-8 shadow-sm">
+          <Link
+            href="/student/results"
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground"
+          >
+            <ChevronLeft size={18} />
+            Миний шалгалтууд руу буцах
+          </Link>
+
+          <div className="mt-8 flex flex-col items-center text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+              <LockKeyhole className="h-8 w-8 text-foreground" />
+            </div>
+            <h1 className="mt-5 text-2xl font-semibold text-foreground">
+              {examMeta?.title ?? "Шалгалтын үр дүн"}
+            </h1>
+            <p className="mt-3 max-w-xl text-sm text-muted-foreground">
+              {lockedReason === "retake_pending"
+                ? "Танд дахин оролдох боломж нээлттэй эсвэл товлогдсон байгаа тул дүн, зөв хариулт одоогоор харагдахгүй."
+                : "Таны хариулт амжилттай илгээгдсэн. Шалгалтын нийт хугацаа дууссаны дараа дүн болон дэлгэрэнгүй задрал нээгдэнэ."}
+            </p>
+            {data.result_release_at ? (
+              <div className="mt-5 rounded-2xl bg-muted/60 px-5 py-4 text-sm text-foreground">
+                Дүн нээгдэх хугацаа: {formatDateTimeUB(data.result_release_at)}
+              </div>
+            ) : null}
+            {data.grading_pending ? (
+              <p className="mt-4 text-sm text-muted-foreground">
+                Одоогоор үр дүн боловсруулагдаж байна.
+              </p>
+            ) : null}
+            <div className="mt-8 flex flex-wrap justify-center gap-3">
+              <Link
+                href="/student/results"
+                className="inline-flex items-center justify-center rounded-xl bg-black px-5 py-2.5 text-sm font-medium text-white"
+              >
+                Миний дүн рүү очих
+              </Link>
+              <Link
+                href="/student/exams"
+                className="inline-flex items-center justify-center rounded-xl border px-5 py-2.5 text-sm font-medium text-foreground"
+              >
+                Шалгалтын жагсаалт
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const canViewDetailedFeedback = Boolean(
     data.can_view_detailed_feedback ?? true,
   );

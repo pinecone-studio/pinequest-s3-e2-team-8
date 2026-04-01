@@ -41,13 +41,24 @@ export default async function StudentExamsPage({
               persistedSessionStatus === "submitted" ||
               persistedSessionStatus === "graded" ||
               persistedSessionStatus === "timed_out";
+            const canViewResults = Boolean(exam.can_view_results);
             const isInProgress = lifecycle === "in_progress";
             const isAvailable =
               lifecycle === "available" || lifecycle === "retake_available";
             const isUpcoming =
               lifecycle === "scheduled" || lifecycle === "retake_scheduled";
             const isResultAvailable =
-              hasResultRecord && !isAvailable && !isUpcoming && !isInProgress;
+              hasResultRecord &&
+              canViewResults &&
+              !isAvailable &&
+              !isUpcoming &&
+              !isInProgress;
+            const isResultLocked =
+              hasResultRecord &&
+              !canViewResults &&
+              !isAvailable &&
+              !isUpcoming &&
+              !isInProgress;
             const isExcused = lifecycle === "excused";
             const isAbsent = lifecycle === "absent";
             const isTimedOut = lifecycle === "timed_out";
@@ -62,6 +73,11 @@ export default async function StudentExamsPage({
                     {isResultAvailable && (
                       <Badge variant="secondary" className="shrink-0">
                         Өгсөн
+                      </Badge>
+                    )}
+                    {!isResultAvailable && isResultLocked && (
+                      <Badge variant="outline" className="shrink-0">
+                        Түгжээтэй
                       </Badge>
                     )}
                     {!isResultAvailable && isAvailable && (
@@ -108,6 +124,12 @@ export default async function StudentExamsPage({
                         Үр дүн харах
                       </Button>
                     </Link>
+                  )}
+
+                  {!isResultAvailable && isResultLocked && (
+                    <Button disabled variant="outline" className="w-full">
+                      Дүн дараа нээгдэнэ
+                    </Button>
                   )}
 
                   {!isResultAvailable && isInProgress && (

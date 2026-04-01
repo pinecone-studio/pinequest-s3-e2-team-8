@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getStudentResults } from "@/lib/student/actions";
-import { Eye } from "lucide-react";
+import { Eye, LockKeyhole } from "lucide-react";
 
 const TIMEZONE = "Asia/Ulaanbaatar";
 
@@ -17,6 +17,18 @@ function formatDateOnly(iso?: string | null) {
 function formatTimeOnly(iso?: string | null) {
   if (!iso) return "";
   return new Date(iso).toLocaleTimeString("mn-MN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: TIMEZONE,
+  });
+}
+
+function formatDateTimeLabel(iso?: string | null) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("mn-MN", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
     timeZone: TIMEZONE,
@@ -50,6 +62,9 @@ export default async function StudentResultsPage() {
       ) : (
         <div className="grid gap-6 md:grid-cols-2">
           {results.map((r) => {
+            const canViewResults = Boolean(r.can_view_results);
+            const hasScore =
+              r.total_score != null && r.max_score != null && canViewResults;
             const pct =
               r.max_score && r.max_score > 0
                 ? Math.round((r.total_score / r.max_score) * 100)
@@ -62,6 +77,7 @@ export default async function StudentResultsPage() {
             );
             const timeStart = formatTimeOnly(r.started_at ?? null);
             const timeEnd = formatTimeOnly(r.submitted_at ?? null);
+            const releaseLabel = formatDateTimeLabel(r.result_release_at ?? null);
 
             return (
               <div
@@ -73,7 +89,9 @@ export default async function StudentResultsPage() {
                     {exam?.title ?? "Шалгалт"}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    {r.status === "graded"
+                    {!canViewResults
+                      ? "Дүн дараа нээгдэнэ"
+                      : r.status === "graded"
                       ? "Шалгалтын дүн гарсан"
                       : r.status === "timed_out"
                         ? "Хугацаа дууссан"
@@ -90,30 +108,60 @@ export default async function StudentResultsPage() {
 
                 <div className="my-4 h-px bg-muted" />
 
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium text-foreground">
-                    Шалгалтын дүн
-                  </span>
-                  <span className="font-semibold text-foreground">{pct}%</span>
-                </div>
+                {hasScore ? (
+                  <>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-foreground">
+                        Шалгалтын дүн
+                      </span>
+                      <span className="font-semibold text-foreground">
+                        {pct}%
+                      </span>
+                    </div>
 
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${Math.min(pct, 100)}%`,
-                      background: scoreColor,
-                    }}
-                  />
-                </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${Math.min(pct, 100)}%`,
+                          background: scoreColor,
+                        }}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-xl bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+                    <p className="font-medium text-foreground">
+                      Таны хариулт амжилттай илгээгдсэн.
+                    </p>
+                    <p className="mt-1">
+                      {releaseLabel
+                        ? `Дүн ${releaseLabel}-с хойш нээгдэнэ.`
+                        : "Дүн шалгалтын нийт хугацаа дууссаны дараа нээгдэнэ."}
+                    </p>
+                    {r.grading_pending ? (
+                      <p className="mt-1">Одоогоор үр дүн боловсруулагдаж байна.</p>
+                    ) : null}
+                  </div>
+                )}
 
                 <div className="mt-4 flex justify-end">
-                  <Link href={`/student/exams/${r.exam_id}/result`}>
-                    <button className="inline-flex items-center gap-2 rounded-lg bg-black px-5.5 py-2.5 text-xs font-semibold text-white">
-                      <Eye className="h-4 w-4" />
-                      Үр дүн
+                  {canViewResults ? (
+                    <Link href={`/student/exams/${r.exam_id}/result`}>
+                      <button className="inline-flex items-center gap-2 rounded-lg bg-black px-5.5 py-2.5 text-xs font-semibold text-white">
+                        <Eye className="h-4 w-4" />
+                        Үр дүн
+                      </button>
+                    </Link>
+                  ) : (
+                    <button
+                      disabled
+                      className="inline-flex items-center gap-2 rounded-lg bg-muted px-5.5 py-2.5 text-xs font-semibold text-muted-foreground"
+                    >
+                      <LockKeyhole className="h-4 w-4" />
+                      Түгжээтэй
                     </button>
-                  </Link>
+                  )}
                 </div>
               </div>
             );

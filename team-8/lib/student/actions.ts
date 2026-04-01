@@ -2,7 +2,12 @@
 
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import {
+  deriveResultVisibility,
+  type StudentResultLockedReason,
+} from "@/lib/exam-result-release";
 import {
   examBurstRateLimit,
   proctorEventRateLimit,
@@ -181,6 +186,10 @@ export type StudentAssignedExam = StudentExamBase & {
   hasRetakeOverride: boolean;
   isExcused: boolean;
   status_note: string | null;
+  result_release_at: string | null;
+  can_view_results: boolean;
+  is_result_released: boolean;
+  result_locked_reason: StudentResultLockedReason | null;
 };
 
 type StartExamReadinessPayload = {
@@ -236,6 +245,63 @@ function normalizeProctoringSettings(
         ? exam.post_exam_similarity_enabled
         : DEFAULT_PROCTORING_SETTINGS.post_exam_similarity_enabled,
   };
+}
+
+function buildStudentAssignedExam(
+  examRecord: StudentExamBase,
+  recipient: RecipientAccessOverride,
+  latestSession: StudentExamAttemptSummary | null = null,
+  statusNote: string | null = null,
+) {
+  const examAccess = getEffectiveExamAccess(
+    {
+      start_time: String(examRecord.start_time),
+      end_time: String(examRecord.end_time),
+      duration_minutes: Number(examRecord.duration_minutes ?? 0),
+      max_attempts: Number(examRecord.max_attempts ?? 1),
+    },
+    recipient,
+  );
+  const lifecycle = deriveStudentExamLifecycle({
+    exam: {
+      start_time: String(examRecord.start_time),
+      end_time: String(examRecord.end_time),
+      duration_minutes: Number(examRecord.duration_minutes ?? 0),
+      max_attempts: Number(examRecord.max_attempts ?? 1),
+    },
+    recipient,
+    latestSessionStatus: latestSession?.status ?? null,
+    latestAttemptNumber: latestSession?.attemptNumber ?? 0,
+    latestSessionStartedAt: latestSession?.startedAt ?? null,
+  });
+  const resultVisibility = deriveResultVisibility(
+    {
+      end_time: examAccess.effectiveEndTime,
+      duration_minutes: Number(examRecord.duration_minutes ?? 0),
+    },
+    {
+      canAttemptAgain: canAttemptExamAgain(lifecycle.key),
+    },
+  );
+  const proctoringSettings = normalizeProctoringSettings(examRecord);
+
+  return {
+    ...examRecord,
+    start_time: examAccess.effectiveStartTime,
+    end_time: examAccess.effectiveEndTime,
+    max_attempts: examAccess.effectiveMaxAttempts,
+    ...proctoringSettings,
+    mySessionStatus: latestSession?.status ?? null,
+    myLifecycleStatus: lifecycle.key,
+    myLifecycleLabel: lifecycle.label,
+    hasRetakeOverride: examAccess.hasRetakeOverride,
+    isExcused: examAccess.isExcused,
+    status_note: statusNote,
+    result_release_at: resultVisibility.resultReleaseAt,
+    can_view_results: resultVisibility.canViewResults,
+    is_result_released: resultVisibility.isReleased,
+    result_locked_reason: resultVisibility.lockedReason,
+  } satisfies StudentAssignedExam;
 }
 
 function getSessionAnswersCacheKey(sessionId: string, userId: string) {
@@ -451,44 +517,12 @@ function mergeAssignedExamAccess(
 ) : StudentAssignedExam | null {
   const exam = getRelationObject(row.exams);
   if (!exam) return null;
-  const examRecord = exam as StudentExamBase;
-
-  const examAccess = getEffectiveExamAccess(
-    {
-      start_time: String(examRecord.start_time),
-      end_time: String(examRecord.end_time),
-      duration_minutes: Number(examRecord.duration_minutes ?? 0),
-      max_attempts: Number(examRecord.max_attempts ?? 1),
-    },
-    row as RecipientAccessOverride
+  return buildStudentAssignedExam(
+    exam as StudentExamBase,
+    row as RecipientAccessOverride,
+    latestSession,
+    row.status_note ?? null,
   );
-  const lifecycle = deriveStudentExamLifecycle({
-    exam: {
-      start_time: String(examRecord.start_time),
-      end_time: String(examRecord.end_time),
-      duration_minutes: Number(examRecord.duration_minutes ?? 0),
-      max_attempts: Number(examRecord.max_attempts ?? 1),
-    },
-    recipient: row,
-    latestSessionStatus: latestSession?.status ?? null,
-    latestAttemptNumber: latestSession?.attemptNumber ?? 0,
-    latestSessionStartedAt: latestSession?.startedAt ?? null,
-  });
-  const proctoringSettings = normalizeProctoringSettings(examRecord);
-
-  return {
-    ...examRecord,
-    start_time: examAccess.effectiveStartTime,
-    end_time: examAccess.effectiveEndTime,
-    max_attempts: examAccess.effectiveMaxAttempts,
-    ...proctoringSettings,
-    mySessionStatus: latestSession?.status ?? null,
-    myLifecycleStatus: lifecycle.key,
-    myLifecycleLabel: lifecycle.label,
-    hasRetakeOverride: examAccess.hasRetakeOverride,
-    isExcused: examAccess.isExcused,
-    status_note: row.status_note ?? null,
-  };
 }
 
 async function getAssignedPublishedExamRecord(
@@ -624,15 +658,16 @@ function applyVariantToStudentSafeQuestion(
 async function getEffectiveExamAccessForStudent(
   supabase: SupabaseActionClient,
   userId: string,
-  examId: string
+  examId: string,
+  latestSession: StudentExamAttemptSummary | null = null
 ) {
   const assignedExam = await getAssignedPublishedExamRecord(
     supabase,
     userId,
     examId
   );
-  if (assignedExam?.exam) {
-    return assignedExam.exam;
+  if (assignedExam?.row) {
+    return mergeAssignedExamAccess(assignedExam.row, latestSession);
   }
 
   const { data: exam } = await supabase
@@ -652,23 +687,12 @@ async function getEffectiveExamAccessForStudent(
     .eq("student_id", userId)
     .maybeSingle();
 
-  const access = getEffectiveExamAccess(
-    {
-      start_time: String(exam.start_time),
-      end_time: String(exam.end_time),
-      duration_minutes: Number(exam.duration_minutes ?? 0),
-      max_attempts: Number(exam.max_attempts ?? 1),
-    },
-    (recipient ?? {}) as RecipientAccessOverride
+  return buildStudentAssignedExam(
+    exam as StudentExamBase,
+    (recipient ?? {}) as RecipientAccessOverride,
+    latestSession,
+    (recipient?.status_note as string | null | undefined) ?? null,
   );
-
-  return {
-    ...(exam as StudentExamBase),
-    start_time: access.effectiveStartTime,
-    end_time: access.effectiveEndTime,
-    max_attempts: access.effectiveMaxAttempts,
-    ...normalizeProctoringSettings(exam as Partial<StudentExamBase>),
-  };
 }
 
 function isSessionExpiredForExam(
@@ -686,6 +710,22 @@ function isSessionExpiredForExam(
 
 function getPercentage(totalScore: number, maxScore: number) {
   return maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
+}
+
+function isSessionScorePending(session: {
+  total_score?: number | null;
+  max_score?: number | null;
+}) {
+  return session.total_score == null || session.max_score == null;
+}
+
+function revalidateStudentResultPaths(examId: string) {
+  revalidatePath("/student");
+  revalidatePath("/student/exams");
+  revalidatePath("/student/results");
+  revalidatePath("/student/schedule");
+  revalidatePath("/student/learning");
+  revalidatePath(`/student/exams/${examId}/result`);
 }
 
 function toStudentAttemptSummary(
@@ -814,24 +854,6 @@ function isMatchingAnswerCorrect(
       normalizeTextAnswer(pair.right)
     );
   });
-}
-
-function isFinalizeExamSessionAtomicMissing(error: {
-  code?: string | null;
-  message?: string | null;
-  details?: string | null;
-}) {
-  const normalized = `${String(error.message ?? "")} ${String(
-    error.details ?? ""
-  )}`.toLowerCase();
-
-  return (
-    error.code === "42883" ||
-    (normalized.includes("finalize_exam_session_atomic") &&
-      (normalized.includes("could not find the function") ||
-        normalized.includes("does not exist") ||
-        normalized.includes("schema cache")))
-  );
 }
 
 type FinalizeAnswerPayload = {
@@ -1031,192 +1053,336 @@ export async function getExamForStudent(examId: string) {
 
 type FinalizeSessionReason = "submit" | "timeout";
 
-async function finalizeSessionAttemptFallback(
+function buildFinalizeAnswerPayload(
+  redisAnswers: Record<string, string> | null,
+  redisAnswerMeta: Record<string, string> | null,
+) {
+  const answersPayload: FinalizeAnswerPayload[] = [];
+
+  if (!redisAnswers || Object.keys(redisAnswers).length === 0) {
+    return answersPayload;
+  }
+
+  for (const [questionId, answer] of Object.entries(redisAnswers)) {
+    let firstAnsweredAt: string | null = null;
+    let lastChangedAt: string | null = null;
+    let changeCount = 0;
+
+    const rawAnalytics = redisAnswerMeta?.[questionId];
+    if (typeof rawAnalytics === "string") {
+      try {
+        const parsed = JSON.parse(rawAnalytics) as AnswerChangeAnalytics;
+        firstAnsweredAt =
+          typeof parsed.firstAnsweredAt === "string"
+            ? parsed.firstAnsweredAt
+            : null;
+        lastChangedAt =
+          typeof parsed.lastChangedAt === "string"
+            ? parsed.lastChangedAt
+            : null;
+        changeCount = Number(parsed.changeCount ?? 0);
+      } catch {
+        // ignore parse errors
+      }
+    }
+
+    answersPayload.push({
+      question_id: questionId,
+      answer: String(answer),
+      first_answered_at: firstAnsweredAt,
+      last_changed_at: lastChangedAt,
+      change_count: changeCount,
+    });
+  }
+
+  return answersPayload;
+}
+
+function getClosedSessionStatus(
+  reason: FinalizeSessionReason,
+  hasEssay: boolean,
+) {
+  return reason === "timeout" && !hasEssay ? "timed_out" : "submitted";
+}
+
+async function materializeSessionScoresIfNeeded(
   supabase: SupabaseActionClient,
   {
     sessionId,
     examId,
     userId,
-    reason,
-    answersPayload,
+    skipSideEffects = false,
   }: {
     sessionId: string;
     examId: string;
     userId: string;
-    reason: FinalizeSessionReason;
-    answersPayload: FinalizeAnswerPayload[];
-  }
+    skipSideEffects?: boolean;
+  },
 ) {
-  const lockKey = getSubmitSessionLockKey(sessionId, userId);
-  const lockAcquired = await redis.set(lockKey, "1", {
-    ex: 30,
-    nx: true,
-  });
+  const { data: session, error: sessionError } = await supabase
+    .from("exam_sessions")
+    .select("id, status, total_score, max_score")
+    .eq("id", sessionId)
+    .eq("user_id", userId)
+    .maybeSingle();
 
-  if (!lockAcquired) {
-    const { data: lockedSession } = await supabase
-      .from("exam_sessions")
-      .select("status, total_score, max_score")
-      .eq("id", sessionId)
-      .eq("user_id", userId)
-      .maybeSingle();
+  if (sessionError) return { error: sessionError.message };
+  if (!session) return { error: "Session олдсонгүй" };
 
-    if (lockedSession && lockedSession.status !== "in_progress") {
-      const totalScore = Number(lockedSession.total_score ?? 0);
-      const maxScore = Number(lockedSession.max_score ?? 0);
-      return {
-        success: true as const,
-        finalStatus: String(lockedSession.status),
-        totalScore,
-        maxScore,
-        percentage: getPercentage(totalScore, maxScore),
-      };
-    }
-
-    return { error: "Шалгалтыг илгээж байна. Дахин оролдоно уу." };
+  if (!["submitted", "timed_out", "graded"].includes(String(session.status))) {
+    return {
+      success: true as const,
+      finalStatus: String(session.status ?? ""),
+      totalScore:
+        session.total_score == null ? null : Number(session.total_score),
+      maxScore: session.max_score == null ? null : Number(session.max_score),
+      percentage:
+        session.total_score == null || session.max_score == null
+          ? null
+          : getPercentage(
+              Number(session.total_score),
+              Number(session.max_score),
+            ),
+      gradingPending: isSessionScorePending(session),
+    };
   }
 
-  try {
-    const { data: session, error: sessionError } = await supabase
-      .from("exam_sessions")
-      .select("id, status, total_score, max_score")
-      .eq("id", sessionId)
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (sessionError) return { error: sessionError.message };
-    if (!session) return { error: "Session олдсонгүй" };
-
-    if (session.status !== "in_progress") {
-      const totalScore = Number(session.total_score ?? 0);
-      const maxScore = Number(session.max_score ?? 0);
-      return {
-        success: true as const,
-        finalStatus: String(session.status),
-        totalScore,
-        maxScore,
-        percentage: getPercentage(totalScore, maxScore),
-      };
-    }
-
-    if (answersPayload.length > 0) {
-      const { error: answerUpsertError } = await supabase.from("answers").upsert(
-        answersPayload.map((answer) => ({
-          session_id: sessionId,
-          question_id: answer.question_id,
-          user_id: userId,
-          answer: answer.answer,
-          first_answered_at: answer.first_answered_at,
-          last_changed_at: answer.last_changed_at,
-          change_count: answer.change_count,
-        })),
-        { onConflict: "session_id,question_id" }
-      );
-
-      if (answerUpsertError) return { error: answerUpsertError.message };
-    }
-
-    const [questionContext, answerRowsResult, questionVariantMap] =
-      await Promise.all([
-        loadFinalizeQuestionContext(supabase, examId),
-        supabase
-          .from("answers")
-          .select(
-            "question_id, answer, score, first_answered_at, last_changed_at, change_count"
-          )
-          .eq("session_id", sessionId),
-        getSessionQuestionVariantMap(supabase as SupabaseServerClient, sessionId),
-      ]);
-
-    if ("error" in questionContext) return { error: questionContext.error };
-    if (answerRowsResult.error) return { error: answerRowsResult.error.message };
-
-    let totalScore = 0;
-    const gradedAnswerRows = (answerRowsResult.data ?? [])
-      .map((answerRow) => {
-        const baseQuestion = questionContext.questionMap.get(
-          String(answerRow.question_id)
-        );
-        if (!baseQuestion) return null;
-
-        const effectiveQuestion = applyStoredVariantToQuestion(
-          baseQuestion,
-          questionVariantMap.get(String(answerRow.question_id))
-        );
-        const graded = gradeAnswerForFinalize(
-          effectiveQuestion,
-          String(answerRow.answer ?? ""),
-          Number(answerRow.score ?? 0)
-        );
-
-        totalScore += graded.score;
-
-        return {
-          session_id: sessionId,
-          question_id: String(answerRow.question_id),
-          user_id: userId,
-          answer: String(answerRow.answer ?? ""),
-          first_answered_at: answerRow.first_answered_at,
-          last_changed_at: answerRow.last_changed_at,
-          change_count: Number(answerRow.change_count ?? 0),
-          is_correct: graded.isCorrect,
-          score: graded.score,
-        };
-      })
-      .filter(
-        (
-          row
-        ): row is {
-          session_id: string;
-          question_id: string;
-          user_id: string;
-          answer: string;
-          first_answered_at: string | null;
-          last_changed_at: string | null;
-          change_count: number;
-          is_correct: boolean | null;
-          score: number;
-        } => Boolean(row)
-      );
-
-    if (gradedAnswerRows.length > 0) {
-      const { error: gradedUpsertError } = await supabase.from("answers").upsert(
-        gradedAnswerRows,
-        { onConflict: "session_id,question_id" }
-      );
-
-      if (gradedUpsertError) return { error: gradedUpsertError.message };
-    }
-
-    const finalStatus = questionContext.hasEssay
-      ? "submitted"
-      : reason === "timeout"
-        ? "timed_out"
-        : "graded";
-
-    const { error: sessionUpdateError } = await supabase
-      .from("exam_sessions")
-      .update({
-        status: finalStatus,
-        submitted_at: new Date().toISOString(),
-        total_score: totalScore,
-        max_score: questionContext.maxScore,
-      })
-      .eq("id", sessionId)
-      .eq("status", "in_progress");
-
-    if (sessionUpdateError) return { error: sessionUpdateError.message };
+  if (!isSessionScorePending(session)) {
+    const totalScore = Number(session.total_score ?? 0);
+    const maxScore = Number(session.max_score ?? 0);
 
     return {
       success: true as const,
-      finalStatus,
+      finalStatus: String(session.status ?? ""),
       totalScore,
-      maxScore: questionContext.maxScore,
-      percentage: getPercentage(totalScore, questionContext.maxScore),
+      maxScore,
+      percentage: getPercentage(totalScore, maxScore),
+      gradingPending: false,
     };
-  } finally {
-    await redis.del(lockKey);
   }
+
+  const [questionContext, answerRowsResult, questionVariantMap] =
+    await Promise.all([
+      loadFinalizeQuestionContext(supabase, examId),
+      supabase
+        .from("answers")
+        .select(
+          "question_id, answer, score, first_answered_at, last_changed_at, change_count",
+        )
+        .eq("session_id", sessionId),
+      getSessionQuestionVariantMap(supabase as SupabaseServerClient, sessionId),
+    ]);
+
+  if ("error" in questionContext) return { error: questionContext.error };
+  if (answerRowsResult.error) return { error: answerRowsResult.error.message };
+
+  let totalScore = 0;
+  const gradedAnswerRows = (answerRowsResult.data ?? [])
+    .map((answerRow) => {
+      const baseQuestion = questionContext.questionMap.get(
+        String(answerRow.question_id),
+      );
+      if (!baseQuestion) return null;
+
+      const effectiveQuestion = applyStoredVariantToQuestion(
+        baseQuestion,
+        questionVariantMap.get(String(answerRow.question_id)),
+      );
+      const graded = gradeAnswerForFinalize(
+        effectiveQuestion,
+        String(answerRow.answer ?? ""),
+        Number(answerRow.score ?? 0),
+      );
+
+      totalScore += graded.score;
+
+      return {
+        session_id: sessionId,
+        question_id: String(answerRow.question_id),
+        user_id: userId,
+        answer: String(answerRow.answer ?? ""),
+        first_answered_at: answerRow.first_answered_at,
+        last_changed_at: answerRow.last_changed_at,
+        change_count: Number(answerRow.change_count ?? 0),
+        is_correct: graded.isCorrect,
+        score: graded.score,
+      };
+    })
+    .filter(
+      (
+        row,
+      ): row is {
+        session_id: string;
+        question_id: string;
+        user_id: string;
+        answer: string;
+        first_answered_at: string | null;
+        last_changed_at: string | null;
+        change_count: number;
+        is_correct: boolean | null;
+        score: number;
+      } => Boolean(row),
+    );
+
+  if (gradedAnswerRows.length > 0) {
+    const { error: gradedUpsertError } = await supabase.from("answers").upsert(
+      gradedAnswerRows,
+      { onConflict: "session_id,question_id" },
+    );
+
+    if (gradedUpsertError) return { error: gradedUpsertError.message };
+  }
+
+  const nextStatus = questionContext.hasEssay
+    ? "submitted"
+    : session.status === "timed_out"
+      ? "timed_out"
+      : "graded";
+
+  const { error: sessionUpdateError } = await supabase
+    .from("exam_sessions")
+    .update({
+      status: nextStatus,
+      total_score: totalScore,
+      max_score: questionContext.maxScore,
+    })
+    .eq("id", sessionId)
+    .eq("user_id", userId);
+
+  if (sessionUpdateError) return { error: sessionUpdateError.message };
+
+  if (!skipSideEffects) {
+    revalidateStudentResultPaths(examId);
+
+    if (nextStatus === "graded" || nextStatus === "timed_out") {
+      enqueueStudentTopicMasteryRefresh(userId, null).catch(() => {});
+    }
+  }
+
+  return {
+    success: true as const,
+    finalStatus: nextStatus,
+    totalScore,
+    maxScore: questionContext.maxScore,
+    percentage: getPercentage(totalScore, questionContext.maxScore),
+    gradingPending: false,
+  };
+}
+
+async function materializePendingReleasedSessionsForUser(
+  supabase: SupabaseActionClient,
+  userId: string,
+  examId?: string,
+) {
+  let query = supabase
+    .from("exam_sessions")
+    .select(
+      "id, exam_id, user_id, status, total_score, max_score, attempt_number, started_at",
+    )
+    .eq("user_id", userId)
+    .in("status", ["submitted", "timed_out"])
+    .or("total_score.is.null,max_score.is.null");
+
+  if (examId) {
+    query = query.eq("exam_id", examId);
+  }
+
+  const { data: sessions, error } = await query.order("attempt_number", {
+    ascending: false,
+  });
+
+  if (error) return { error: error.message };
+
+  let processed = 0;
+
+  for (const session of sessions ?? []) {
+    const effectiveExam = await getEffectiveExamAccessForStudent(
+      supabase,
+      userId,
+      String(session.exam_id),
+      toStudentAttemptSummary(session),
+    );
+
+    if (!effectiveExam?.is_result_released) {
+      continue;
+    }
+
+    const result = await materializeSessionScoresIfNeeded(supabase, {
+      sessionId: String(session.id),
+      examId: String(session.exam_id),
+      userId,
+    });
+
+    if (!("error" in result)) {
+      processed += 1;
+    }
+  }
+
+  return { success: true as const, processed };
+}
+
+export async function processPendingReleasedExamResults(batchSize = 10) {
+  const admin = createAdminClient();
+  const safeBatchSize = Math.max(1, Math.min(Number(batchSize || 0), 25));
+  const candidateLimit = Math.max(safeBatchSize * 5, safeBatchSize);
+  const { data: sessions, error } = await admin
+    .from("exam_sessions")
+    .select(
+      "id, exam_id, user_id, status, total_score, max_score, attempt_number, started_at, submitted_at",
+    )
+    .in("status", ["submitted", "timed_out"])
+    .or("total_score.is.null,max_score.is.null")
+    .order("submitted_at", { ascending: true })
+    .limit(candidateLimit);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  let processed = 0;
+  let succeeded = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  for (const session of sessions ?? []) {
+    if (processed >= safeBatchSize) {
+      break;
+    }
+
+    const effectiveExam = await getEffectiveExamAccessForStudent(
+      admin,
+      String(session.user_id),
+      String(session.exam_id),
+      toStudentAttemptSummary(session),
+    );
+
+    if (!effectiveExam?.is_result_released) {
+      skipped += 1;
+      continue;
+    }
+
+    processed += 1;
+    const result = await materializeSessionScoresIfNeeded(admin, {
+      sessionId: String(session.id),
+      examId: String(session.exam_id),
+      userId: String(session.user_id),
+    });
+
+    if ("error" in result) {
+      failed += 1;
+      continue;
+    }
+
+    succeeded += 1;
+  }
+
+  return {
+    claimed: (sessions ?? []).length,
+    processed,
+    succeeded,
+    failed,
+    skipped,
+  };
 }
 
 async function finalizeSessionAttempt(
@@ -1235,10 +1401,8 @@ async function finalizeSessionAttempt(
     skipPostFinalizeSideEffects?: boolean;
   }
 ) {
-  // 1. Redis-аас хариултуудыг pipeline-аар авах
   const redisKey = getSessionAnswersCacheKey(sessionId, userId);
   const analyticsKey = getSessionAnswerMetaCacheKey(sessionId, userId);
-
   const fetchPipe = redis.pipeline();
   fetchPipe.hgetall(redisKey);
   fetchPipe.hgetall(analyticsKey);
@@ -1246,92 +1410,128 @@ async function finalizeSessionAttempt(
     Record<string, string> | null,
     Record<string, string> | null,
   ];
+  const answersPayload = buildFinalizeAnswerPayload(
+    redisAnswers,
+    redisAnswerMeta,
+  );
+  const lockKey = getSubmitSessionLockKey(sessionId, userId);
+  const lockAcquired = await redis.set(lockKey, "1", {
+    ex: 30,
+    nx: true,
+  });
 
-  // 2. Хариултуудыг JSONB array болгох (RPC-д дамжуулахад бэлэн)
-  const answersPayload: FinalizeAnswerPayload[] = [];
+  if (!lockAcquired) {
+    const { data: lockedSession } = await supabase
+      .from("exam_sessions")
+      .select("status, total_score, max_score")
+      .eq("id", sessionId)
+      .eq("user_id", userId)
+      .maybeSingle();
 
-  if (redisAnswers && Object.keys(redisAnswers).length > 0) {
-    for (const [questionId, answer] of Object.entries(redisAnswers)) {
-      let firstAnsweredAt: string | null = null;
-      let lastChangedAt: string | null = null;
-      let changeCount = 0;
-
-      const rawAnalytics = redisAnswerMeta?.[questionId];
-      if (typeof rawAnalytics === "string") {
-        try {
-          const parsed = JSON.parse(rawAnalytics) as AnswerChangeAnalytics;
-          firstAnsweredAt =
-            typeof parsed.firstAnsweredAt === "string"
-              ? parsed.firstAnsweredAt
-              : null;
-          lastChangedAt =
-            typeof parsed.lastChangedAt === "string"
-              ? parsed.lastChangedAt
-              : null;
-          changeCount = Number(parsed.changeCount ?? 0);
-        } catch {
-          // ignore parse errors
-        }
-      }
-
-      answersPayload.push({
-        question_id: questionId,
-        answer: String(answer),
-        first_answered_at: firstAnsweredAt,
-        last_changed_at: lastChangedAt,
-        change_count: changeCount,
-      });
+    if (lockedSession && lockedSession.status !== "in_progress") {
+      return {
+        success: true as const,
+        finalStatus: String(lockedSession.status),
+        totalScore:
+          lockedSession.total_score == null
+            ? null
+            : Number(lockedSession.total_score),
+        maxScore:
+          lockedSession.max_score == null
+            ? null
+            : Number(lockedSession.max_score),
+        percentage:
+          lockedSession.total_score == null || lockedSession.max_score == null
+            ? null
+            : getPercentage(
+                Number(lockedSession.total_score),
+                Number(lockedSession.max_score),
+              ),
+        gradingPending: isSessionScorePending(lockedSession),
+      };
     }
+
+    return { error: "Шалгалтыг илгээж байна. Дахин оролдоно уу." };
   }
 
-  // 3. Нэг RPC дуудлагаар бүх зүйлийг хийх (lock + flush + grade + update)
-  const { data: rpcResult, error: rpcError } = await supabase.rpc(
-    "finalize_exam_session_atomic",
-    {
-      p_session_id: sessionId,
-      p_user_id: userId,
-      p_answers: answersPayload,
-      p_reason: reason === "timeout" ? "timed_out" : "submitted",
+  try {
+    const { data: session, error: sessionError } = await supabase
+      .from("exam_sessions")
+      .select("id, status, total_score, max_score")
+      .eq("id", sessionId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (sessionError) return { error: sessionError.message };
+    if (!session) return { error: "Session олдсонгүй" };
+
+    if (session.status !== "in_progress") {
+      return {
+        success: true as const,
+        finalStatus: String(session.status),
+        totalScore:
+          session.total_score == null ? null : Number(session.total_score),
+        maxScore: session.max_score == null ? null : Number(session.max_score),
+        percentage:
+          session.total_score == null || session.max_score == null
+            ? null
+            : getPercentage(
+                Number(session.total_score),
+                Number(session.max_score),
+              ),
+        gradingPending: isSessionScorePending(session),
+      };
     }
-  );
 
-  if (rpcError) {
-    if (isFinalizeExamSessionAtomicMissing(rpcError)) {
-      const fallbackResult = await finalizeSessionAttemptFallback(supabase, {
-        sessionId,
-        examId,
-        userId,
-        reason,
-        answersPayload,
-      });
+    const questionContext = await loadFinalizeQuestionContext(supabase, examId);
+    if ("error" in questionContext) return { error: questionContext.error };
 
-      if ("error" in fallbackResult) return fallbackResult;
-
-      const cleanupPipe = redis.pipeline();
-      cleanupPipe.del(redisKey);
-      cleanupPipe.del(analyticsKey);
-      cleanupPipe.set(
-        getSessionMetaCacheKey(sessionId, userId),
-        JSON.stringify({ id: sessionId, status: fallbackResult.finalStatus }),
-        { ex: 600 }
+    if (answersPayload.length > 0) {
+      const { error: answerUpsertError } = await supabase.from("answers").upsert(
+        answersPayload.map((answer) => ({
+          session_id: sessionId,
+          question_id: answer.question_id,
+          user_id: userId,
+          answer: answer.answer,
+          first_answered_at: answer.first_answered_at,
+          last_changed_at: answer.last_changed_at,
+          change_count: answer.change_count,
+        })),
+        { onConflict: "session_id,question_id" },
       );
-      await cleanupPipe.exec();
 
-      if (skipPostFinalizeSideEffects) {
-        return fallbackResult;
-      }
+      if (answerUpsertError) return { error: answerUpsertError.message };
+    }
 
-      revalidatePath("/student");
-      revalidatePath("/student/exams");
-      revalidatePath("/student/results");
-      revalidatePath("/student/schedule");
-      revalidatePath("/student/learning");
-      revalidatePath(`/student/exams/${examId}/result`);
+    const finalStatus = getClosedSessionStatus(reason, questionContext.hasEssay);
+    const { error: updateError } = await supabase
+      .from("exam_sessions")
+      .update({
+        status: finalStatus,
+        submitted_at: new Date().toISOString(),
+        total_score: null,
+        max_score: null,
+      })
+      .eq("id", sessionId)
+      .eq("user_id", userId)
+      .eq("status", "in_progress");
 
-      if (
-        fallbackResult.finalStatus === "submitted" ||
-        fallbackResult.finalStatus === "graded"
-      ) {
+    if (updateError) return { error: updateError.message };
+
+    const cleanupPipe = redis.pipeline();
+    cleanupPipe.del(redisKey);
+    cleanupPipe.del(analyticsKey);
+    cleanupPipe.set(
+      getSessionMetaCacheKey(sessionId, userId),
+      JSON.stringify({ id: sessionId, status: finalStatus }),
+      { ex: 600 },
+    );
+    await cleanupPipe.exec();
+
+    if (!skipPostFinalizeSideEffects) {
+      revalidateStudentResultPaths(examId);
+
+      if (finalStatus === "submitted") {
         const [{ data: examRow }, { data: profileRow }] = await Promise.all([
           supabase.from("exams").select("title").eq("id", examId).maybeSingle(),
           supabase
@@ -1340,99 +1540,29 @@ async function finalizeSessionAttempt(
             .eq("id", userId)
             .maybeSingle(),
         ]);
+
         if (examRow) {
           notifyTeacherOfSubmission(
             examId,
             examRow.title,
             profileRow?.full_name || "Сурагч",
-            sessionId
+            sessionId,
           ).catch(() => {});
         }
       }
-
-      if (
-        fallbackResult.finalStatus === "graded" ||
-        fallbackResult.finalStatus === "timed_out"
-      ) {
-        enqueueStudentTopicMasteryRefresh(userId, null).catch(() => {});
-      }
-
-      return fallbackResult;
     }
 
-    return { error: rpcError.message };
-  }
-
-  const result = rpcResult as {
-    success: boolean;
-    already_finalized?: boolean;
-    error?: string;
-    final_status: string;
-    total_score: number;
-    max_score: number;
-  };
-
-  if (!result.success) return { error: result.error ?? "Finalize амжилтгүй" };
-
-  const totalScore = Number(result.total_score ?? 0);
-  const maxScore = Number(result.max_score ?? 0);
-  const finalStatus = result.final_status;
-
-  // 4. Redis cleanup (pipeline)
-  const cleanupPipe = redis.pipeline();
-  cleanupPipe.del(redisKey);
-  cleanupPipe.del(analyticsKey);
-  cleanupPipe.set(
-    getSessionMetaCacheKey(sessionId, userId),
-    JSON.stringify({ id: sessionId, status: finalStatus }),
-    { ex: 600 }
-  );
-  await cleanupPipe.exec();
-
-  if (skipPostFinalizeSideEffects) {
     return {
       success: true as const,
       finalStatus,
-      totalScore,
-      maxScore,
-      percentage: getPercentage(totalScore, maxScore),
+      totalScore: null,
+      maxScore: null,
+      percentage: null,
+      gradingPending: true,
     };
+  } finally {
+    await redis.del(lockKey);
   }
-
-  // 5. Side effects (fire-and-forget)
-  revalidatePath("/student");
-  revalidatePath("/student/exams");
-  revalidatePath("/student/results");
-  revalidatePath("/student/schedule");
-  revalidatePath("/student/learning");
-  revalidatePath(`/student/exams/${examId}/result`);
-
-  if (finalStatus === "submitted" || finalStatus === "graded") {
-    const [{ data: examRow }, { data: profileRow }] = await Promise.all([
-      supabase.from("exams").select("title").eq("id", examId).maybeSingle(),
-      supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle(),
-    ]);
-    if (examRow) {
-      notifyTeacherOfSubmission(
-        examId,
-        examRow.title,
-        profileRow?.full_name || "Сурагч",
-        sessionId
-      ).catch(() => {});
-    }
-  }
-
-  if (finalStatus === "graded" || finalStatus === "timed_out") {
-    enqueueStudentTopicMasteryRefresh(userId, null).catch(() => {});
-  }
-
-  return {
-    success: true as const,
-    finalStatus,
-    totalScore,
-    maxScore,
-    percentage: getPercentage(totalScore, maxScore),
-  };
 }
 
 async function startExamSessionForUser(
@@ -2289,7 +2419,7 @@ export async function saveAnswersBatchForUserClient(
 }
 
 /**
- * Шалгалт дуусгах — Auto-grade + submit
+ * Шалгалт дуусгах — close session immediately, grade later
  */
 export async function submitExam(
   sessionId: string,
@@ -2644,7 +2774,12 @@ export async function getExamResult(examId: string) {
   if (!latestSession) return null;
 
   if (latestSession.status === "in_progress") {
-    const exam = await getEffectiveExamAccessForStudent(supabase, user.id, examId);
+    const exam = await getEffectiveExamAccessForStudent(
+      supabase,
+      user.id,
+      examId,
+      toStudentAttemptSummary(latestSession),
+    );
     if (!exam) return null;
 
     if (!isSessionExpiredForExam(latestSession.started_at ?? null, exam)) {
@@ -2684,6 +2819,52 @@ export async function getExamResult(examId: string) {
     if (!latestSession) return null;
   }
 
+  const effectiveExam = await getEffectiveExamAccessForStudent(
+    supabase,
+    user.id,
+    examId,
+    toStudentAttemptSummary(latestSession),
+  );
+  if (!effectiveExam) {
+    return null;
+  }
+
+  if (effectiveExam.is_result_released) {
+    const materialized = await materializePendingReleasedSessionsForUser(
+      supabase,
+      user.id,
+      examId,
+    );
+
+    if ("error" in materialized) {
+      console.error(
+        "[getExamResult] materialize released sessions error:",
+        materialized.error,
+      );
+    } else if (materialized.processed > 0) {
+      const { data: refreshedSessions, error: refreshedSessionError } =
+        await supabase
+          .from("exam_sessions")
+          .select(sessionSelect)
+          .eq("exam_id", examId)
+          .eq("user_id", user.id)
+          .in("status", ["in_progress", "submitted", "graded", "timed_out"])
+          .order("attempt_number", { ascending: false });
+
+      if (refreshedSessionError) {
+        console.error(
+          "[getExamResult] refreshed session query error:",
+          refreshedSessionError.message,
+        );
+        return null;
+      }
+
+      sessions = refreshedSessions ?? [];
+      latestSession = pickLatestAttempt(sessions);
+      if (!latestSession) return null;
+    }
+  }
+
   const finalizedSessions = sessions.filter((session) =>
     isFinalizedAttemptStatus(String(session.status ?? ""))
   );
@@ -2692,20 +2873,7 @@ export async function getExamResult(examId: string) {
     return null;
   }
 
-  const assignedExam = await getAssignedPublishedExamRecord(
-    supabase,
-    user.id,
-    examId
-  );
-  const effectiveExam = assignedExam?.row
-    ? mergeAssignedExamAccess(
-        assignedExam.row,
-        toStudentAttemptSummary(latestSession)
-      )
-    : null;
-  const canViewDetailedFeedback = !canAttemptExamAgain(
-    effectiveExam?.myLifecycleStatus ?? null
-  );
+  const canViewDetailedFeedback = Boolean(effectiveExam.can_view_results);
 
   if (!canViewDetailedFeedback) {
     return {
@@ -2714,7 +2882,11 @@ export async function getExamResult(examId: string) {
       best_attempt_number: Number(bestSession.attempt_number ?? 0),
       latest_attempt_number: Number(latestSession.attempt_number ?? 0),
       can_view_detailed_feedback: false,
-      can_attempt_again: true,
+      can_attempt_again: canAttemptExamAgain(effectiveExam.myLifecycleStatus),
+      can_view_results: false,
+      result_release_at: effectiveExam.result_release_at,
+      grading_pending: isSessionScorePending(bestSession),
+      result_locked_reason: effectiveExam.result_locked_reason,
     };
   }
 
@@ -2844,6 +3016,10 @@ export async function getExamResult(examId: string) {
     latest_attempt_number: Number(latestSession.attempt_number ?? 0),
     can_view_detailed_feedback: true,
     can_attempt_again: false,
+    can_view_results: true,
+    result_release_at: effectiveExam.result_release_at,
+    grading_pending: isSessionScorePending(bestSession),
+    result_locked_reason: null,
   };
 }
 
@@ -2856,6 +3032,17 @@ export async function getStudentResults() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return [];
+
+  const materialized = await materializePendingReleasedSessionsForUser(
+    supabase,
+    user.id,
+  );
+  if ("error" in materialized) {
+    console.error(
+      "[getStudentResults] materialize released sessions error:",
+      materialized.error,
+    );
+  }
 
   const { data } = await supabase
     .from("exam_sessions")
@@ -2874,8 +3061,44 @@ export async function getStudentResults() {
     sessionsByExam.set(String(session.exam_id), examSessions);
   }
 
-  return Array.from(sessionsByExam.values())
-    .map((examSessions) => pickBestAttempt(examSessions))
+  const assignedRows = await getAssignedPublishedExamRows(supabase, user.id);
+  const assignedRowMap = new Map(
+    assignedRows.map((row) => [String(row.exam_id), row]),
+  );
+
+  const results = await Promise.all(
+    Array.from(sessionsByExam.values()).map(async (examSessions) => {
+      const bestSession = pickBestAttempt(examSessions);
+      if (!bestSession) return null;
+      const latestSessionSummary = toStudentAttemptSummary(
+        pickLatestAttempt(examSessions),
+      );
+
+      const assignedRow = assignedRowMap.get(String(bestSession.exam_id));
+      const effectiveExam =
+        assignedRow
+        ? mergeAssignedExamAccess(
+            assignedRow,
+            latestSessionSummary,
+          )
+        : await getEffectiveExamAccessForStudent(
+            supabase,
+            user.id,
+            String(bestSession.exam_id),
+            latestSessionSummary,
+          );
+
+      return {
+        ...bestSession,
+        can_view_results: Boolean(effectiveExam?.can_view_results),
+        result_release_at: effectiveExam?.result_release_at ?? null,
+        grading_pending: isSessionScorePending(bestSession),
+        result_locked_reason: effectiveExam?.result_locked_reason ?? null,
+      };
+    }),
+  );
+
+  return results
     .filter((session): session is NonNullable<typeof session> => Boolean(session))
     .sort((left, right) => {
       const leftTime = new Date(

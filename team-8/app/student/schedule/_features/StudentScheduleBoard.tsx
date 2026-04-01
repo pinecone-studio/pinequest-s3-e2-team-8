@@ -24,6 +24,7 @@ type StudentExamRow = {
   mySessionStatus: string | null;
   myLifecycleStatus?: string | null;
   myLifecycleLabel?: string | null;
+  can_view_results?: boolean;
 };
 
 function groupByDate(exams: StudentExamRow[]) {
@@ -55,10 +56,16 @@ function getExamState(exam: StudentExamRow) {
 
   if (lifecycle === "submitted" || lifecycle === "graded") {
     return {
-      label: lifecycle === "graded" ? "Дүн гарсан" : "Шалгагдаж байна",
+      label: exam.can_view_results
+        ? lifecycle === "graded"
+          ? "Дүн гарсан"
+          : "Шалгагдаж байна"
+        : "Дүн түгжээтэй",
       badge: "outline" as const,
-      actionLabel: "Үр дүн",
-      actionHref: `/student/exams/${exam.id}/result`,
+      actionLabel: exam.can_view_results ? "Үр дүн" : null,
+      actionHref: exam.can_view_results
+        ? `/student/exams/${exam.id}/result`
+        : null,
     };
   }
 
@@ -76,11 +83,15 @@ function getExamState(exam: StudentExamRow) {
       label: lifecycle === "timed_out" ? "Хугацаа дууссан" : "Өгөөгүй",
       badge: "outline" as const,
       actionLabel:
-        lifecycle === "timed_out" && persistedSessionStatus === "timed_out"
+        lifecycle === "timed_out" &&
+        persistedSessionStatus === "timed_out" &&
+        exam.can_view_results
           ? "Үр дүн"
           : null,
       actionHref:
-        lifecycle === "timed_out" && persistedSessionStatus === "timed_out"
+        lifecycle === "timed_out" &&
+        persistedSessionStatus === "timed_out" &&
+        exam.can_view_results
           ? `/student/exams/${exam.id}/result`
           : null,
     };
