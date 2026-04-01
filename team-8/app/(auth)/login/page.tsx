@@ -20,6 +20,24 @@ import { AlertCircle } from "lucide-react";
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  function fillDemo(role: "admin" | "teacher" | "student") {
+    setError(null);
+    if (role === "admin") {
+      setEmail("admin@pineexam.test");
+      setPassword("PineExam123!");
+      return;
+    }
+    if (role === "teacher") {
+      setEmail("teacher01@pineexam.test");
+      setPassword("PineExam123!");
+      return;
+    }
+    setEmail("student16@pineexam.test");
+    setPassword("PineExam123!");
+  }
 
   async function handleSubmit(formData: FormData) {
     setLoading(true);
@@ -65,6 +83,8 @@ export default function LoginPage() {
                 name="email"
                 type="email"
                 placeholder="example@pinecone.mn"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
                 required
               />
             </div>
@@ -75,8 +95,41 @@ export default function LoginPage() {
                 name="password"
                 type="password"
                 placeholder="••••••••"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
                 required
               />
+            </div>
+            <div className="rounded-lg border border-border/60 bg-muted/40 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Demo Login
+              </p>
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => fillDemo("admin")}
+                >
+                  Admin
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => fillDemo("teacher")}
+                >
+                  Teacher
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => fillDemo("student")}
+                >
+                  Student
+                </Button>
+              </div>
             </div>
           </CardContent>
           <CardFooter className="flex flex-col gap-3">
