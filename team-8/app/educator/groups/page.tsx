@@ -1,19 +1,17 @@
 import Link from "next/link";
 import { getGroups } from "@/lib/group/actions";
 import { createClient } from "@/lib/supabase/server";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+
 import {
   Users,
   BookOpen,
   TrendingUp,
   Search,
   Plus,
-  Book,
   Clock,
   Eye,
 } from "lucide-react"; // Added icons
-import CreateGroupForm from "./_features/CreateGroupForm";
 import { Input } from "@/components/ui/input"; // Assuming you have an Input component
 import { Button } from "@/components/ui/button";
 

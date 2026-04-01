@@ -34,6 +34,7 @@ export default function Header({ profile }: { profile: Profile }) {
   const initials = getInitials(profile);
   const pathname = usePathname();
   const hideGreeting = pathname === "/educator/groups";
+  const showGroupsBackLink = pathname?.startsWith("/educator/groups/");
 
   return (
     <header
@@ -41,7 +42,14 @@ export default function Header({ profile }: { profile: Profile }) {
         hideGreeting ? "sm:justify-end" : "sm:justify-between"
       }`}
     >
-      {!hideGreeting && (
+      {showGroupsBackLink ? (
+        <Link
+          href="/educator/groups"
+          className="text-[15px] font-medium text-[#111111] hover:text-[#1f2937]"
+        >
+          Ангиуд руу буцах
+        </Link>
+      ) : !hideGreeting ? (
         <div className="h-[49px] w-[344px] min-w-0">
           <h1 className="text-[22px] font-medium leading-tight tracking-[-0.03em] text-[#111111]">
             Сайн байна уу, {displayName}
@@ -50,7 +58,7 @@ export default function Header({ profile }: { profile: Profile }) {
             Ухаалаг шалгалтын системд тавтай морил!
           </p>
         </div>
-      )}
+      ) : null}
 
       <div className="flex h-[40px] w-[100px] items-center justify-end gap-[20px] self-end sm:self-auto">
         <NotificationBell />
