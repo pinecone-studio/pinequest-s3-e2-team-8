@@ -4,6 +4,7 @@ import DashboardImage from "../_icons/DashboardImage";
 import { getEducatorStats } from "@/lib/dashboard/actions";
 import { getExamSchedules } from "@/lib/schedule/actions";
 import ExamScheduleClient from "./_components/ExamScheduleClient";
+import Image from "next/image";
 
 const TIMEZONE = "Asia/Ulaanbaatar";
 
@@ -359,7 +360,12 @@ export default async function EducatorDashboard() {
           </p>
         </div>
         <div className="pointer-events-none absolute bottom-0 right-0 hidden h-full w-auto scale-125 origin-bottom-right md:block">
-          <DashboardImage />
+          <Image
+            src="/educator-dash.png"
+            alt="Dashboard Image"
+            width={290}
+            height={270}
+          />
         </div>
       </div>
 
