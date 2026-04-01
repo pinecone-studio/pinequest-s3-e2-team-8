@@ -1,6 +1,5 @@
 "use server";
 
-import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -51,7 +50,6 @@ import {
   type ProctoringMode,
   type StudentDeviceType,
   shouldAutoFlag,
-  isStrictProctoredExam,
 } from "@/lib/proctoring";
 import type { AiQuestionVariantMode, QuestionType } from "@/types";
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -411,19 +409,43 @@ async function getAssignedPublishedExamRows(
   userId: string,
   examId?: string
 ) {
-  let recipientQuery = supabase
-    .from("exam_recipients")
-    .select(
-      "exam_id, access_start_time, access_end_time, max_attempts_override, excused_at, status_note"
-    )
-    .eq("student_id", userId);
+  const buildRecipientQuery = (selectClause: string) => {
+    let query = supabase
+      .from("exam_recipients")
+      .select(selectClause)
+      .eq("student_id", userId);
 
-  if (examId) {
-    recipientQuery = recipientQuery.eq("exam_id", examId);
+    if (examId) {
+      query = query.eq("exam_id", examId);
+    }
+
+    return query;
+  };
+
+  let recipientRows: unknown[] | null = null;
+  const recipientRes = await buildRecipientQuery(
+    "exam_id, access_start_time, access_end_time, max_attempts_override, excused_at, status_note"
+  );
+
+  if (recipientRes.error) {
+    const fallbackRes = await buildRecipientQuery("exam_id");
+    if (fallbackRes.error) {
+      throw new Error(fallbackRes.error.message);
+    }
+
+    recipientRows = (fallbackRes.data ?? []).map((row) => ({
+      exam_id: String((row as unknown as { exam_id: string }).exam_id),
+      access_start_time: null,
+      access_end_time: null,
+      max_attempts_override: null,
+      excused_at: null,
+      status_note: null,
+    }));
+  } else {
+    recipientRows = recipientRes.data ?? [];
   }
 
-  const { data: recipientRows } = await recipientQuery;
-  const baseRows = ((recipientRows ?? []) as unknown) as AssignedExamAccessRow[];
+  const baseRows = (recipientRows ?? []) as AssignedExamAccessRow[];
   if (baseRows.length === 0) return [];
 
   const examIds = [...new Set(baseRows.map((row) => row.exam_id))];
@@ -2006,14 +2028,6 @@ async function buildPreparedSessionState(
   };
 }
 
-function getSebRequestHash(headerStore: Awaited<ReturnType<typeof headers>>) {
-  return (
-    headerStore.get("x-safeexambrowser-requesthash") ??
-    headerStore.get("x-safeexambrowser-browserexamkeyhash") ??
-    headerStore.get("x-safeexambrowser-configkeyhash")
-  );
-}
-
 async function validateExamReadiness(
   exam: StudentAssignedExam,
   readiness: StartExamReadinessPayload
@@ -2043,15 +2057,6 @@ async function validateExamReadiness(
 
   if (exam.identity_verification && !readiness.identityVerified) {
     return "Identity verification амжилтгүй болсон тул шалгалтыг эхлүүлэх боломжгүй.";
-  }
-
-  if (isStrictProctoredExam(exam)) {
-    const headerStore = await headers();
-    const sebRequestHash = getSebRequestHash(headerStore);
-    const userAgent = headerStore.get("user-agent") ?? "";
-    if (!sebRequestHash && !userAgent.includes("SEB")) {
-      return "Strict proctoring шалгалтыг зөвхөн Safe Exam Browser-оор эхлүүлнэ.";
-    }
   }
 
   return null;

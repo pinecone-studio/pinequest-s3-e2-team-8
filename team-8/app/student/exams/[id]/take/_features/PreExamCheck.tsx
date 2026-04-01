@@ -128,7 +128,6 @@ export default function PreExamCheck({
     internetStatus !== "error" &&
     (!requiresDesktop || isDesktop) &&
     (!requireCamera || cameraStatus === "ok" || cameraStatus === "warning") &&
-    (!shouldEnforceFullscreen || fullscreenStatus === "ok") &&
     (!identityVerification || identityStatus === "ok");
 
   useEffect(() => {

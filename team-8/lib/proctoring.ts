@@ -33,7 +33,9 @@ export type ProctorEventType =
   | "challenge_required"
   | "challenge_passed"
   | "challenge_failed"
-  | "identity_verified";
+  | "identity_verified"
+  | "multi_monitor"
+  | "keyboard_shortcut";
 
 export interface ProctoringSettings {
   proctoring_mode: ProctoringMode;
@@ -99,6 +101,8 @@ export const PROCTOR_EVENT_POLICIES: Record<ProctorEventType, ProctorEventPolicy
   challenge_passed: { severity: "low", riskDelta: 0 },
   challenge_failed: { severity: "critical", riskDelta: 36 },
   identity_verified: { severity: "low", riskDelta: 0 },
+  multi_monitor: { severity: "high", riskDelta: 20 },
+  keyboard_shortcut: { severity: "low", riskDelta: 6 },
 };
 
 export function getEffectiveDevicePolicy(
@@ -226,6 +230,10 @@ export function getProctorEventLabel(eventType: ProctorEventType) {
       return "Challenge амжилтгүй";
     case "identity_verified":
       return "Identity баталгаажсан";
+    case "multi_monitor":
+      return "Олон дэлгэц илэрсэн";
+    case "keyboard_shortcut":
+      return "Хориотой товчлол дарсан";
     default:
       return eventType;
   }
