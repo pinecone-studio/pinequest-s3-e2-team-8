@@ -8,7 +8,7 @@ import {
 } from "@/lib/question/actions";
 import AddQuestionForm from "./_features/AddQuestionForm";
 import PublishExamButton from "./_features/PublishExamButton";
-import QuestionList from "./_features/QuestionList";
+import QuestionListPanel from "./_features/QuestionListPanel";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -70,8 +70,8 @@ export default async function ExamQuestionsPage({ params }: Props) {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.95fr)] lg:items-start">
-        <div>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.95fr)] lg:items-stretch">
+        <div id="question-editor-panel">
           {exam.is_published ? (
             <div className="rounded-[28px] border border-dashed border-zinc-200 bg-white p-8 text-sm text-zinc-500 shadow-[0_12px_40px_-18px_rgba(15,23,42,0.16)]">
               Энэ шалгалт нийтлэгдсэн тул шинээр асуулт нэмэх боломжгүй.
@@ -81,19 +81,13 @@ export default async function ExamQuestionsPage({ params }: Props) {
           )}
         </div>
 
-        <div className="lg:sticky lg:top-6">
-          <div className="mb-4">
-            <h2 className="text-2xl font-semibold tracking-tight text-zinc-950">
-              Нэмсэн асуултууд
-            </h2>
-          </div>
-          <QuestionList
-            questions={questions}
-            examId={id}
-            passages={passages}
-            isLocked={Boolean(exam.is_published)}
-          />
-        </div>
+        <QuestionListPanel
+          questions={questions}
+          examId={id}
+          passages={passages}
+          syncTargetId="question-editor-panel"
+          isLocked={Boolean(exam.is_published)}
+        />
       </div>
     </div>
   );

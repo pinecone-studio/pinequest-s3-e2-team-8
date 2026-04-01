@@ -4,10 +4,10 @@ import { useState, type ClipboardEvent } from "react";
 import {
   Check,
   ChevronDown,
-  Plus,
   PlusCircle,
   Sparkles,
   Trash2,
+  X,
 } from "lucide-react";
 import { addQuestion } from "@/lib/question/actions";
 import { parsePastedQuestionText } from "@/lib/question/paste";
@@ -60,12 +60,12 @@ const aiVariantModes: Array<{
   {
     value: "two_fixed",
     label: "2 хувилбар",
-    description: "AI энэ асуултад тогтмол 2 хувилбар бэлдэнэ.",
+    description: "AI 2 тогтмол хувилбар бэлдэнэ.",
   },
   {
     value: "per_student",
     label: "Сурагч бүрт өөр",
-    description: "Session эхлэхэд сурагч бүр өөр өгөгдөлтэй хувилбар авна.",
+    description: "Сурагч бүр өөр хувилбар авна.",
   },
 ];
 
@@ -371,8 +371,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
           onFormulaToolOpenChange={setIsFormulaToolOpen}
         />
 
-        <div className="flex items-center gap-3 text-zinc-950">
-          <Plus className="h-5 w-5" />
+        <div className="text-zinc-950">
           <h2 className="text-2xl font-semibold tracking-tight">Шинэ асуулт</h2>
         </div>
 
@@ -388,7 +387,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
           </div>
         ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_120px]">
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_84px]">
           <div className="space-y-2.5">
             <Label className="text-sm font-medium text-zinc-700">Төрөл</Label>
             <Select
@@ -424,28 +423,35 @@ export default function AddQuestionForm({ examId, passages }: Props) {
               onChange={(event) =>
                 setPoints(Math.max(1, Number(event.target.value) || 1))
               }
-              className="h-12 rounded-2xl border-zinc-200 bg-white px-4 text-center text-sm shadow-none focus-visible:ring-zinc-200"
+              className="h-10 rounded-xl border-zinc-200 bg-white px-2.5 text-center text-sm tabular-nums shadow-none focus-visible:ring-zinc-200"
             />
           </div>
         </div>
 
         {aiVariantEnabled ? (
-          <div className="space-y-3 rounded-[24px] border border-amber-200 bg-amber-50 p-4">
-            <div className="flex items-start gap-3">
-              <div className="rounded-full bg-amber-100 p-2 text-amber-700">
-                <Sparkles className="h-4 w-4" />
+          <div className="space-y-2.5 rounded-2xl border border-amber-200 bg-amber-50/80 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="rounded-full bg-amber-100 p-1.5 text-amber-700">
+                  <Sparkles className="h-3.5 w-3.5" />
+                </div>
+                <p className="text-sm font-semibold text-zinc-950">AI хувилбар</p>
+                <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                  Идэвхтэй
+                </span>
               </div>
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-zinc-950">
-                  AI хувилбар идэвхтэй
-                </p>
-                <p className="text-sm text-zinc-600">
-                  Идэвхжүүлсэн үед сурагч бүр энэ асуултын ижил түвшний өөр
-                  өгөгдөлтэй хувилбарыг авна.
-                </p>
-              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="text-amber-700 hover:bg-white/80 hover:text-amber-950"
+                onClick={() => setAiVariantEnabled(false)}
+                aria-label="AI хувилбарыг хаах"
+              >
+                <X className="h-4 w-4" />
+              </Button>
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-2 md:grid-cols-2">
               {aiVariantModes.map((mode) => {
                 const isActive = aiVariantMode === mode.value;
 
@@ -455,7 +461,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
                     type="button"
                     onClick={() => setAiVariantMode(mode.value)}
                     className={cn(
-                      "rounded-[20px] border px-4 py-3 text-left transition-colors",
+                      "rounded-2xl border px-3.5 py-2.5 text-left transition-colors",
                       isActive
                         ? "border-amber-300 bg-white text-zinc-950 shadow-sm"
                         : "border-amber-100 bg-amber-50/60 text-zinc-600 hover:border-amber-200 hover:bg-white/80"
@@ -467,20 +473,13 @@ export default function AddQuestionForm({ examId, passages }: Props) {
                         <Check className="h-4 w-4 text-amber-700" />
                       ) : null}
                     </div>
-                    <p className="mt-1 text-sm leading-6">{mode.description}</p>
+                    <p className="mt-0.5 text-xs leading-5 text-zinc-600">
+                      {mode.description}
+                    </p>
                   </button>
                 );
               })}
             </div>
-            <p className="rounded-2xl border border-amber-200/70 bg-amber-100/70 px-3 py-2 text-sm text-amber-950">
-              {aiVariantMode === "two_fixed"
-                ? "2 хувилбарын mode сонговол AI тогтмол хоёр хувилбар бэлдэж, сурагч бүр тэр хоёроос нэгийг нь авна."
-                : "Сурагч бүрт өөр mode сонговол session эхлэх бүрт сурагчид шинэ өгөгдөлтэй AI хувилбар үүсгэнэ."}
-            </p>
-            <p className="rounded-2xl bg-white/80 px-3 py-2 text-sm text-amber-900">
-              Асуултын логик, түвшин, төрөл өөрчлөгдөхгүй. Зөвхөн тоо, нэр,
-              өгөгдөл, сонголтын текст шинэчлэгдэнэ.
-            </p>
           </div>
         ) : null}
 
@@ -581,11 +580,23 @@ export default function AddQuestionForm({ examId, passages }: Props) {
         ) : null}
 
         {isFormulaToolOpen ? (
-          <LatexShortcutPanel
-            targetId={activeFormulaTarget.id}
-            targetLabel={activeFormulaTarget.label}
-            minimal
-          />
+          <div className="relative">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="absolute top-3 right-3 z-10 bg-white/90 text-zinc-500 hover:bg-white hover:text-zinc-950"
+              onClick={() => setIsFormulaToolOpen(false)}
+              aria-label="Томьёоны хэсгийг хаах"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+            <LatexShortcutPanel
+              targetId={activeFormulaTarget.id}
+              targetLabel={activeFormulaTarget.label}
+              minimal
+            />
+          </div>
         ) : null}
 
         <div className="space-y-2.5">

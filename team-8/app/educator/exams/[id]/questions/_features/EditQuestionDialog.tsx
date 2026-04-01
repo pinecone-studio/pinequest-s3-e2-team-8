@@ -49,12 +49,12 @@ const aiVariantModes: Array<{
   {
     value: "two_fixed",
     label: "2 хувилбар",
-    description: "AI тогтмол 2 хувилбар бэлдэж, сурагчид тэр хоёроос авна.",
+    description: "AI 2 тогтмол хувилбар бэлдэнэ.",
   },
   {
     value: "per_student",
     label: "Сурагч бүрт өөр",
-    description: "Session эхлэхэд сурагч бүр өөр өгөгдөлтэй хувилбар авна.",
+    description: "Сурагч бүр өөр хувилбар авна.",
   },
 ];
 
@@ -454,27 +454,24 @@ export default function EditQuestionDialog({
 
           <div
             className={cn(
-              "space-y-3 rounded-xl border p-4 transition-colors",
+              "space-y-2.5 rounded-xl border p-3 transition-colors",
               aiVariantEnabled
                 ? "border-amber-200 bg-amber-50"
                 : "border-border bg-muted/20"
             )}
           >
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-foreground">
-                  AI-аар хувилбар үүсгэх
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Идэвхтэй үед сурагч бүр ижил түвшний өөр өгөгдөлтэй
-                  хувилбараар энэ асуултыг харна.
-                </p>
+              <div className="flex items-center gap-2">
+                <div className="rounded-full bg-amber-100 p-1.5 text-amber-700">
+                  <Sparkles className="h-3.5 w-3.5" />
+                </div>
+                <p className="text-sm font-semibold text-foreground">AI хувилбар</p>
               </div>
               <Button
                 type="button"
                 variant="outline"
                 className={cn(
-                  "h-10 rounded-full px-4 text-sm",
+                  "h-9 rounded-full px-3.5 text-sm",
                   aiVariantEnabled
                     ? "border-amber-300 bg-amber-100 text-amber-950 hover:bg-amber-100"
                     : ""
@@ -483,8 +480,8 @@ export default function EditQuestionDialog({
               >
                 <Sparkles className="mr-2 h-4 w-4" />
                 {aiVariantEnabled
-                  ? "AI хувилбар идэвхтэй"
-                  : "AI-аар хувилбар үүсгэх"}
+                  ? "Идэвхтэй"
+                  : "Идэвхжүүлэх"}
               </Button>
             </div>
             <input
@@ -494,7 +491,7 @@ export default function EditQuestionDialog({
             />
             <input type="hidden" name="ai_variant_mode" value={aiVariantMode} />
             {aiVariantEnabled ? (
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-2 md:grid-cols-2">
                 {aiVariantModes.map((mode) => {
                   const isActive = aiVariantMode === mode.value;
 
@@ -504,7 +501,7 @@ export default function EditQuestionDialog({
                       type="button"
                       onClick={() => setAiVariantMode(mode.value)}
                       className={cn(
-                        "rounded-[20px] border px-4 py-3 text-left transition-colors",
+                        "rounded-2xl border px-3.5 py-2.5 text-left transition-colors",
                         isActive
                           ? "border-amber-300 bg-white text-zinc-950 shadow-sm"
                           : "border-amber-100 bg-amber-50/60 text-zinc-600 hover:border-amber-200 hover:bg-white/80"
@@ -516,24 +513,13 @@ export default function EditQuestionDialog({
                           <Check className="h-4 w-4 text-amber-700" />
                         ) : null}
                       </div>
-                      <p className="mt-1 text-sm leading-6">{mode.description}</p>
+                      <p className="mt-0.5 text-xs leading-5 text-zinc-600">
+                        {mode.description}
+                      </p>
                     </button>
                   );
                 })}
               </div>
-            ) : null}
-            {aiVariantEnabled ? (
-              <p className="rounded-2xl border border-amber-200/70 bg-amber-100/70 px-3 py-2 text-sm text-amber-950">
-                {aiVariantMode === "two_fixed"
-                  ? "2 хувилбарын mode сонговол AI тогтмол хоёр хувилбар бэлдэж, сурагч бүр тэр хоёроос нэгийг нь авна."
-                  : "Сурагч бүрт өөр mode сонговол session эхлэх бүрт сурагчид шинэ өгөгдөлтэй AI хувилбар үүсгэнэ."}
-              </p>
-            ) : null}
-            {aiVariantEnabled ? (
-              <p className="rounded-2xl bg-white/80 px-3 py-2 text-sm text-amber-900">
-                Асуултын логик, түвшин, төрөл өөрчлөгдөхгүй. Зөвхөн тоо,
-                нэр, өгөгдөл, сонголтын текст шинэчлэгдэнэ.
-              </p>
             ) : null}
           </div>
 

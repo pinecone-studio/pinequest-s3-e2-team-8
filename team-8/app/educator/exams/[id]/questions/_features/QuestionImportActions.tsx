@@ -564,12 +564,9 @@ export default function QuestionImportActions({
     <>
       <div className="space-y-3 rounded-[24px] border border-dashed border-zinc-200 bg-zinc-50/80 p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="space-y-1">
+          <div>
             <p className="text-sm font-semibold text-zinc-950">
               Хурдан үйлдлүүд
-            </p>
-            <p className="text-sm text-zinc-500">
-              Асуултаа хаанаас оруулах болон ямар хэрэгсэл ашиглахаа эндээс сонгоно.
             </p>
           </div>
 
