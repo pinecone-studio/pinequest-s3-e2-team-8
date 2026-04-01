@@ -1,7 +1,11 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import NotificationBell from "@/components/NotificationBell";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import type { Profile } from "@/types";
+import { ArrowLeft } from "lucide-react";
 
 function getDisplayName(profile: Profile) {
   const fullName = profile.full_name.trim();
@@ -29,19 +33,38 @@ function getInitials(profile: Profile) {
 export default function Header({ profile }: { profile: Profile }) {
   const displayName = getDisplayName(profile);
   const initials = getInitials(profile);
+  const pathname = usePathname();
+  const hideGreeting = pathname === "/educator/groups";
+  const showGroupsBackLink = pathname?.startsWith("/educator/groups/");
 
   return (
-    <header className="flex flex-col gap-5 py-2 sm:flex-row sm:items-center sm:justify-between">
-      <div className="h-[49px] w-[344px] min-w-0">
-        <h1 className="text-[22px] font-medium leading-tight tracking-[-0.03em] text-[#111111]">
-          Сайн байна уу, {displayName}
-        </h1>
-        <p className="mt-[6px] text-[15px] text-[#6f7782]">
-          Ухаалаг шалгалтын системд тавтай морил!
-        </p>
-      </div>
+    <header
+      className={`flex flex-col gap-5 py-2 sm:flex-row sm:items-center ${
+        hideGreeting ? "sm:justify-end" : "sm:justify-between"
+      }`}
+    >
+      {showGroupsBackLink ? (
+        <Link
+          href="/educator/groups"
+          className="text-[15px] font-medium text-[#111111] hover:text-[#1f2937]"
+        >
+          <div className="flex items-center gap-1 text-[#030217]">
+            <ArrowLeft size={16} />
+            Ангиуд руу буцах
+          </div>
+        </Link>
+      ) : !hideGreeting ? (
+        <div className="h-[49px] w-[344px] min-w-0">
+          <h1 className="text-[22px] font-medium leading-tight tracking-[-0.03em] text-[#111111]">
+            Сайн байна уу, {displayName}
+          </h1>
+          <p className="mt-[6px] text-[15px] text-[#6f7782]">
+            Ухаалаг шалгалтын системд тавтай морил!
+          </p>
+        </div>
+      ) : null}
 
-      <div className="flex h-[40px] w-[100px] items-center gap-[20px] self-end sm:self-auto">
+      <div className="flex h-[40px] w-[100px] items-center justify-end gap-[20px] self-end sm:self-auto">
         <NotificationBell />
 
         <Link
