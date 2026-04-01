@@ -2,42 +2,87 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, type CSSProperties, type SVGProps } from "react";
 import { logout } from "@/lib/auth/actions";
-import {
-  Book,
-  CheckSquare,
-  ChevronLeft,
-  FileSpreadsheet,
-  HomeIcon,
-  LogOut,
-  type LucideIcon,
-  Users,
-} from "lucide-react";
+import { ChevronLeft, LogOut } from "lucide-react";
 import Logo from "@/app/_icons/Logo";
 import SideBarImage from "@/app/_icons/SideBarImage";
-import NotificationBell from "@/components/NotificationBell";
 
 interface NavItem {
   href: string;
   label: string;
-  icon: LucideIcon;
+  iconPath: string;
+  iconClassName: string;
+}
+
+function getIconMaskStyle(iconPath: string): CSSProperties {
+  return {
+    WebkitMaskImage: `url(${iconPath})`,
+    maskImage: `url(${iconPath})`,
+    WebkitMaskRepeat: "no-repeat",
+    maskRepeat: "no-repeat",
+    WebkitMaskPosition: "center",
+    maskPosition: "center",
+    WebkitMaskSize: "contain",
+    maskSize: "contain",
+    backgroundColor: "currentColor",
+  };
+}
+
+function SidebarItemIcon({
+  iconPath,
+  className,
+}: {
+  iconPath: string;
+  className: string;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={className}
+      style={getIconMaskStyle(iconPath)}
+    />
+  );
+}
+
+function CloseNavIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 18 18" fill="none" aria-hidden="true" {...props}>
+      <path
+        d="M2 2l14 14M16 2 2 16"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="square"
+      />
+    </svg>
+  );
 }
 
 const allNavItems: NavItem[] = [
-  { href: "/educator", label: "Нүүр хуудас", icon: HomeIcon },
+  {
+    href: "/educator",
+    label: "Нүүр хуудас",
+    iconPath: "/educator-icons/home.png",
+    iconClassName: "h-5 w-5",
+  },
   {
     href: "/educator/question-bank",
     label: "Асуултын сан",
-    icon: Book,
+    iconPath: "/educator-icons/import_contacts.png",
+    iconClassName: "h-5 w-5",
   },
   {
     href: "/educator/exams",
     label: "Шалгалтууд",
-    icon: FileSpreadsheet,
+    iconPath: "/educator-icons/exams.png",
+    iconClassName: "h-5 w-4",
   },
-  { href: "/educator/groups", label: "Бүлгүүд", icon: Users },
-  { href: "/educator/grading", label: "Дүн шалгах", icon: CheckSquare },
+  {
+    href: "/educator/groups",
+    label: "Ангиуд",
+    iconPath: "/educator-icons/classes.png",
+    iconClassName: "h-5 w-5",
+  },
 ];
 
 export default function Sidebar() {
@@ -62,18 +107,16 @@ export default function Sidebar() {
               onClick={() => setIsCollapsed((prev) => !prev)}
               className="rounded-lg p-1 text-gray-600 transition-colors hover:text-brand"
             >
-              <ChevronLeft
-                size={28}
-                className={`transition-transform duration-200 ${
-                  isCollapsed ? "rotate-180" : ""
-                }`}
-              />
+              {isCollapsed ? (
+                <ChevronLeft size={28} className="rotate-180" />
+              ) : (
+                <CloseNavIcon className="h-[18px] w-[18px] text-[#3f3f3f]" />
+              )}
             </button>
           </div>
 
-          <nav className="flex flex-col gap-1.5">
+          <nav className="flex flex-col gap-2">
             {allNavItems.map((item) => {
-              const Icon = item.icon;
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/educator" && pathname.startsWith(item.href));
@@ -82,26 +125,24 @@ export default function Sidebar() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`group flex items-center rounded-[12px] px-4 py-2 text-[15px] font-semibold transition-all duration-200 ${
+                  className={`group flex min-h-[48px] items-center rounded-[12px] px-[16px] py-[11px] text-[15px] font-medium transition-all duration-200 ${
                     isActive
-                      ? "border-2 border-brand bg-brand-soft text-brand shadow-sm"
-                      : "text-[#7F7F7F] hover:bg-[#F4F6FA] hover:text-brand"
-                  } ${isCollapsed ? "justify-center gap-0 px-3" : "gap-4"}`}
+                      ? "border-2 border-[#4A80D8] bg-[#EDF4FF] text-[#4A80D8]"
+                      : "text-[#757575] hover:bg-[#F7F9FC] hover:text-[#4A80D8]"
+                  } ${isCollapsed ? "justify-center gap-0 px-3" : "gap-[14px]"}`}
                 >
-                  <Icon
-                    size={20}
-                    strokeWidth={isActive ? 2.5 : 2}
-                    className={
+                  <SidebarItemIcon
+                    iconPath={item.iconPath}
+                    className={`${item.iconClassName} shrink-0 ${
                       isActive
-                        ? "text-brand"
-                        : "text-[#575555] group-hover:text-brand"
-                    }
+                        ? "text-[#4A80D8]"
+                        : "text-[#666666] group-hover:text-[#4A80D8]"
+                    }`}
                   />
                   {!isCollapsed && <span>{item.label}</span>}
                 </Link>
               );
             })}
-            <NotificationBell variant="sidebar" isCollapsed={isCollapsed} />
           </nav>
         </div>
 

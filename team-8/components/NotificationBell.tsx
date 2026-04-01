@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -156,8 +157,19 @@ export default function NotificationBell({
   return (
     <Popover open={open} onOpenChange={handleOpen}>
       <PopoverTrigger asChild>
-        <button className="relative flex h-10 w-10 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm hover:bg-gray-50">
-          <Bell className="h-5 w-5 text-gray-600" />
+        <button
+          type="button"
+          aria-label="Мэдэгдэл"
+          className="relative flex h-10 w-10 items-center justify-center rounded-full border border-[#d7cec5] bg-[#faf7f3] transition-colors hover:bg-[#f5efe8]"
+        >
+          <Image
+            src="/educator-icons/notifications.png"
+            alt=""
+            width={12}
+            height={16}
+            className="h-4 w-3"
+            aria-hidden="true"
+          />
           {unreadCount > 0 && (
             <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
               {unreadCount > 99 ? "99+" : unreadCount}
