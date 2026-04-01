@@ -16,12 +16,15 @@ export default async function QuestionBankPage({
   searchParams,
 }: QuestionBankPageProps) {
   const { examId } = await searchParams;
-  const [{ certifiedQuestions, privateQuestions, sampleExams }, subjects, targetExam] =
-    await Promise.all([
-      getQuestionBankCatalogData(),
-      getTeacherSubjects(),
-      examId ? getExamById(examId) : Promise.resolve(null),
-    ]);
+  const [
+    { certifiedQuestions, privateQuestions, sampleExams },
+    subjects,
+    targetExam,
+  ] = await Promise.all([
+    getQuestionBankCatalogData(),
+    getTeacherSubjects(),
+    examId ? getExamById(examId) : Promise.resolve(null),
+  ]);
 
   const mergedSubjects = Array.from(
     new Map(
@@ -38,7 +41,7 @@ export default async function QuestionBankPage({
                   created_at: question.created_at,
                 } satisfies Subject,
               ]
-            : []
+            : [],
         ),
         ...privateQuestions.flatMap((question) =>
           question.subject_id && question.subjects?.name
@@ -51,10 +54,10 @@ export default async function QuestionBankPage({
                   created_at: question.created_at,
                 } satisfies Subject,
               ]
-            : []
+            : [],
         ),
-      ].map((subject) => [subject.id, subject])
-    ).values()
+      ].map((subject) => [subject.id, subject]),
+    ).values(),
   ).sort((left, right) => left.name.localeCompare(right.name, "mn"));
 
   const importUnavailableMessage = examId
@@ -73,10 +76,6 @@ export default async function QuestionBankPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Асуултын сан</h2>
-      </div>
-
       <QuestionBankBrowser
         certifiedQuestions={certifiedQuestions}
         privateQuestions={privateQuestions}
@@ -85,7 +84,9 @@ export default async function QuestionBankPage({
         examId={!importUnavailableMessage ? targetExam?.id : undefined}
         examTitle={!importUnavailableMessage ? targetExam?.title : undefined}
         targetExamSubjectId={
-          !importUnavailableMessage ? targetExam?.subject_id ?? undefined : undefined
+          !importUnavailableMessage
+            ? (targetExam?.subject_id ?? undefined)
+            : undefined
         }
         importUnavailableMessage={importUnavailableMessage}
         viewerIsAdmin={viewerIsAdmin}

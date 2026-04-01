@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { Eye, Search } from "lucide-react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { ArrowRight, Eye } from "lucide-react";
 import {
   bulkDeleteQuestionBankItems,
   importQuestionFromBank,
@@ -16,7 +16,6 @@ import MathContent from "@/components/math/MathContent";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -91,6 +90,8 @@ export default function QuestionBankBrowser({
   viewerIsAdmin = false,
 }: QuestionBankBrowserProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
   const [tab, setTab] = useState<TabKey>(defaultTab);
   const [query, setQuery] = useState("");
@@ -108,16 +109,34 @@ export default function QuestionBankBrowser({
   const [messageTone, setMessageTone] = useState<MessageTone>(
     importUnavailableMessage ? "error" : "neutral",
   );
-  const [lastImportedQuestionId, setLastImportedQuestionId] = useState<string | null>(null);
-  const [lastImportedSampleId, setLastImportedSampleId] = useState<string | null>(null);
+  const [lastImportedQuestionId, setLastImportedQuestionId] = useState<
+    string | null
+  >(null);
+  const [lastImportedSampleId, setLastImportedSampleId] = useState<
+    string | null
+  >(null);
   const [pendingAction, setPendingAction] = useState<
     "import-sample" | "import-single" | "import-bulk" | "delete-bulk" | null
   >(null);
-  const [pendingQuestionId, setPendingQuestionId] = useState<string | null>(null);
+  const [pendingQuestionId, setPendingQuestionId] = useState<string | null>(
+    null,
+  );
   const [pendingSampleId, setPendingSampleId] = useState<string | null>(null);
 
   const normalizedQuery = query.trim().toLowerCase();
   const isBusy = pendingAction !== null;
+  const isSubjectFocused = subjectFilter !== "all";
+
+  useEffect(() => {
+    const nextSubjectId = searchParams.get("subjectId");
+    if (nextSubjectId && nextSubjectId !== subjectFilter) {
+      setSubjectFilter(nextSubjectId);
+      return;
+    }
+    if (!nextSubjectId && subjectFilter !== "all") {
+      setSubjectFilter("all");
+    }
+  }, [searchParams, subjectFilter]);
 
   const teacherSubjectIds = useMemo(
     () => subjects.map((s) => s.id),
@@ -140,6 +159,21 @@ export default function QuestionBankBrowser({
       suggestedPrivateSubjectId
     ) {
       setSubjectFilter(suggestedPrivateSubjectId);
+    }
+  }
+
+  function pushSubjectFilter(nextSubjectId: string | null) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextSubjectId) {
+      params.set("subjectId", nextSubjectId);
+      params.set("tab", "sample");
+    } else {
+      params.delete("subjectId");
+    }
+    const query = params.toString();
+    const targetPath = query ? `${pathname}?${query}` : (pathname ?? "");
+    if (targetPath) {
+      router.push(targetPath);
     }
   }
 
@@ -168,16 +202,6 @@ export default function QuestionBankBrowser({
     );
     return { hasNone, items };
   }, [privateQuestions]);
-
-  const subjectOptions = useMemo(
-    () =>
-      Array.from(
-        new Map(
-          subjects.map((subject) => [subject.id, subject.name]),
-        ).entries(),
-      ).sort((left, right) => stableStringCompare(left[1], right[1])),
-    [subjects],
-  );
 
   const gradeOptions = useMemo(
     () =>
@@ -242,6 +266,42 @@ export default function QuestionBankBrowser({
     subjectFilter,
     subtopicFilter,
   ]);
+
+  const groupedSampleExams = useMemo(() => {
+    const subjectNameById = new Map(
+      subjects.map((subject) => [subject.id, subject.name]),
+    );
+    const groups = new Map<
+      string,
+      { subjectId: string | null; subjectName: string; exams: SampleExam[] }
+    >();
+
+    for (const sampleExam of filteredSampleExams) {
+      const subjectId = sampleExam.subject_id ?? null;
+      const subjectName =
+        sampleExam.subjects?.name ||
+        (subjectId ? subjectNameById.get(subjectId) : null) ||
+        "Хичээл сонгоогүй";
+      const key = subjectId ?? `unknown:${subjectName}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.exams.push(sampleExam);
+      } else {
+        groups.set(key, { subjectId, subjectName, exams: [sampleExam] });
+      }
+    }
+
+    return Array.from(groups.values()).sort((left, right) =>
+      stableStringCompare(left.subjectName, right.subjectName),
+    );
+  }, [filteredSampleExams, subjects]);
+
+  function getDifficultyBadgeClass(level: number | null | undefined) {
+    if (level === 3) return "bg-red-500";
+    if (level === 2) return "bg-orange-400";
+    if (level === 1) return "bg-green-500";
+    return "bg-gray-400";
+  }
 
   const filteredCertifiedQuestions = useMemo(() => {
     return certifiedQuestions.filter((question) => {
@@ -375,7 +435,9 @@ export default function QuestionBankBrowser({
   }, [examId, selectableQuestionIds, tab, visiblePrivateQuestionIds]);
   const allVisibleSelected = useMemo(() => {
     if (visibleSelectableQuestionIds.length === 0) return false;
-    return visibleSelectableQuestionIds.every((id) => selectedQuestionIds.includes(id));
+    return visibleSelectableQuestionIds.every((id) =>
+      selectedQuestionIds.includes(id),
+    );
   }, [selectedQuestionIds, visibleSelectableQuestionIds]);
 
   function setStatusMessage(tone: MessageTone, nextMessage: string | null) {
@@ -404,7 +466,9 @@ export default function QuestionBankBrowser({
       if (visibleSelectableQuestionIds.length === 0) return prev;
 
       const visibleSet = new Set(visibleSelectableQuestionIds);
-      const areAllSelected = visibleSelectableQuestionIds.every((id) => prev.includes(id));
+      const areAllSelected = visibleSelectableQuestionIds.every((id) =>
+        prev.includes(id),
+      );
 
       if (areAllSelected) {
         return prev.filter((id) => !visibleSet.has(id));
@@ -487,7 +551,8 @@ export default function QuestionBankBrowser({
   }
 
   function handleDeleteSelectedPrivateQuestions() {
-    if (tab !== "private" || selectedQuestionIds.length === 0 || pendingAction) return;
+    if (tab !== "private" || selectedQuestionIds.length === 0 || pendingAction)
+      return;
 
     const pendingIds = [...selectedQuestionIds];
     setStatusMessage("neutral", null);
@@ -547,7 +612,7 @@ export default function QuestionBankBrowser({
   }
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-5">
       {examId && examTitle ? (
         <Card>
           <CardContent className="flex flex-col gap-3 pt-4 md:flex-row md:items-center md:justify-between">
@@ -564,139 +629,99 @@ export default function QuestionBankBrowser({
         </Card>
       ) : null}
 
-      <div className="flex min-w-0 w-full flex-nowrap items-center gap-3">
-        <div
-          className="flex min-h-10 min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          role="tablist"
-          aria-label="Асуултын сангийн орон"
-        >
-          <Button
-            type="button"
-            variant={tab === "sample" ? "default" : "outline"}
-            className="shrink-0"
-            onClick={() => changeTab("sample")}
+      <div className="flex items-center bg-[#F0EEEE] w-fit rounded-full p-1 gap-1">
+        {!isSubjectFocused ? (
+          <div
+            className="flex h-9 items-center cursor-pointer overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            role="tablist"
+            aria-label="Асуултын сангийн орон"
           >
-            Жишиг шалгалт
-          </Button>
-          <Button
-            type="button"
-            variant={tab === "bank" ? "default" : "outline"}
-            className="shrink-0"
-            onClick={() => changeTab("bank")}
-          >
-            Баталгаажсан сан
-          </Button>
-          <Button
-            type="button"
-            variant={tab === "private" ? "default" : "outline"}
-            className="shrink-0"
-            onClick={() => changeTab("private")}
-          >
-            Хувийн сан
-          </Button>
-        </div>
-        {tab === "private" ? (
+            <Button
+              type="button"
+              // Change variant to "ghost" or "link" for inactive to remove the outline
+              variant={tab === "sample" ? "default" : "ghost"}
+              className={`shrink-0 rounded-full h-8 px-4 text-sm font-medium transition-all ${
+                tab === "sample"
+                  ? "bg-white text-black shadow-sm" // For the white active state
+                  : "text-black hover:bg-transparent"
+              }`}
+              onClick={() => changeTab("sample")}
+            >
+              Жишиг шалгалт
+            </Button>
+
+            <Button
+              type="button"
+              variant={tab === "bank" ? "default" : "ghost"}
+              className={`shrink-0 rounded-full h-8 px-4 text-sm font-medium transition-all ${
+                tab === "bank"
+                  ? "bg-white text-black shadow-sm" // For the white active state
+                  : "text-gray-600 hover:bg-transparent"
+              }`}
+              onClick={() => changeTab("bank")}
+            >
+              Баталгаажсан сан
+            </Button>
+
+            <Button
+              type="button"
+              variant={tab === "private" ? "default" : "ghost"}
+              className={`shrink-0 rounded-full h-8 px-4 text-sm font-medium transition-all ${
+                tab === "private"
+                  ? "bg-white text-black shadow-sm"
+                  : "text-gray-600 hover:bg-transparent"
+              }`}
+              onClick={() => changeTab("private")}
+            >
+              Хувийн сан
+            </Button>
+          </div>
+        ) : null}
+
+        {tab === "private" && (
           <PrivateBankAddMaterial
             subjects={subjects}
             viewerIsAdmin={viewerIsAdmin}
           />
-        ) : null}
+        )}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <label className="relative block xl:col-span-2">
-          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Хайх"
-            className="pl-10"
-          />
-        </label>
+      {!isSubjectFocused ? (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {tab === "private" ? (
+            <select
+              value={batchFilter}
+              onChange={(event) => setBatchFilter(event.target.value)}
+              className="h-10 rounded-md border bg-background px-3 text-sm"
+            >
+              <option value="all">Бүх багц</option>
+              {batchOptions.hasNone ? (
+                <option value="__none">Багцгүй</option>
+              ) : null}
+              {batchOptions.items.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          ) : null}
 
-        <select
-          value={subjectFilter}
-          onChange={(event) => setSubjectFilter(event.target.value)}
-          className="h-10 rounded-md border bg-background px-3 text-sm"
-        >
-          <option value="all">Бүх хичээл</option>
-          {subjectOptions.map(([id, name]) => (
-            <option key={id} value={id}>
-              {name}
-            </option>
-          ))}
-        </select>
-
-        {tab === "private" ? (
-          <select
-            value={batchFilter}
-            onChange={(event) => setBatchFilter(event.target.value)}
-            className="h-10 rounded-md border bg-background px-3 text-sm"
-          >
-            <option value="all">Бүх багц</option>
-            {batchOptions.hasNone ? (
-              <option value="__none">Багцгүй</option>
-            ) : null}
-            {batchOptions.items.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        ) : null}
-
-        <select
-          value={gradeFilter}
-          onChange={(event) => setGradeFilter(event.target.value)}
-          className="h-10 rounded-md border bg-background px-3 text-sm"
-        >
-          <option value="all">Бүх анги</option>
-          {gradeOptions.map((grade) => (
-            <option key={grade} value={String(grade)}>
-              {grade}-р анги
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={subtopicFilter}
-          onChange={(event) => setSubtopicFilter(event.target.value)}
-          className="h-10 rounded-md border bg-background px-3 text-sm"
-        >
-          <option value="all">Бүх дэд сэдэв</option>
-          {subtopicOptions.map((subtopic) => (
-            <option key={subtopic} value={subtopic}>
-              {subtopic}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={difficultyFilter}
-          onChange={(event) => setDifficultyFilter(event.target.value)}
-          className="h-10 rounded-md border bg-background px-3 text-sm"
-        >
-          <option value="all">Бүх түвшин</option>
-          <option value="1">1 · Хөнгөн</option>
-          <option value="2">2 · Дунд</option>
-          <option value="3">3 · Хүнд</option>
-        </select>
-
-        {tab === "bank" || tab === "private" ? (
-          <select
-            value={typeFilter}
-            onChange={(event) => setTypeFilter(event.target.value)}
-            className="h-10 rounded-md border bg-background px-3 text-sm"
-          >
-            <option value="all">Бүх төрөл</option>
-            <option value="multiple_choice">Сонголттой</option>
-            <option value="multiple_response">Олон зөв</option>
-            <option value="essay">Нээлттэй</option>
-            <option value="fill_blank">Нөхөх</option>
-            <option value="matching">Холбох</option>
-          </select>
-        ) : null}
-      </div>
+          {tab === "bank" || tab === "private" ? (
+            <select
+              value={typeFilter}
+              onChange={(event) => setTypeFilter(event.target.value)}
+              className="h-10 rounded-md border bg-background px-3 text-sm"
+            >
+              <option value="all">Бүх төрөл</option>
+              <option value="multiple_choice">Сонголттой</option>
+              <option value="multiple_response">Олон зөв</option>
+              <option value="essay">Нээлттэй</option>
+              <option value="fill_blank">Нөхөх</option>
+              <option value="matching">Холбох</option>
+            </select>
+          ) : null}
+        </div>
+      ) : null}
 
       {message ? (
         <div
@@ -715,139 +740,203 @@ export default function QuestionBankBrowser({
       ) : null}
 
       {tab === "sample" ? (
-        filteredSampleExams.length === 0 ? (
-          <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
+        groupedSampleExams.length === 0 ? (
+          <div className="rounded-lg border border-dashed text-center text-sm text-muted-foreground">
             Жишиг шалгалт олдсонгүй.
           </div>
         ) : (
-          <div className="flex flex-wrap items-start gap-4">
-            {filteredSampleExams.map((sampleExam) => {
-              const hasSubjectMismatch = Boolean(
-                targetExamSubjectId &&
-                sampleExam.subject_id &&
-                sampleExam.subject_id !== targetExamSubjectId,
-              );
-              const subtitle = [
-                sampleExam.subtopic,
-                `${sampleExam.grade_level}-р анги`,
-              ]
-                .filter(Boolean)
-                .join(" · ");
+          <div className="space-y-10">
+            {groupedSampleExams.map((group) => (
+              <section
+                key={group.subjectId ?? `unknown:${group.subjectName}`}
+                className="space-y-4"
+              >
+                <div className="flex items-center justify-between ">
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {group.subjectName}
+                  </h2>
+                  {group.subjectId && !isSubjectFocused ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!group.subjectId) return;
+                        setSubjectFilter(group.subjectId);
+                        pushSubjectFilter(group.subjectId);
+                      }}
+                      className="text-sm font-medium text-[#030217] hover:underline cursor-pointer"
+                    >
+                      <div className="flex gap-1 items-center">
+                        <p> Бүгд</p>
+                        <ArrowRight size={16} />
+                      </div>
+                    </button>
+                  ) : null}
+                </div>
 
-              return (
-                <Card
-                  key={sampleExam.id}
-                  className="flex min-h-[320px] w-full self-start sm:w-[360px] shadow-sm"
-                >
-                  <CardContent className="flex h-full flex-col gap-4 pt-4">
-                    <div className="flex flex-1 flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                      <div>
-                        <div className="flex items-start gap-3">
-                          <div className="h-11 w-11 shrink-0 rounded-lg bg-muted/60 ring-1 ring-foreground/10" />
-                          <div className="min-w-0">
-                            <h3 className="line-clamp-2 text-base font-semibold leading-snug">
-                              {sampleExam.title}
-                            </h3>
-                            {subtitle ? (
-                              <p className="mt-1 text-sm text-muted-foreground">
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+                  {group.exams.map((sampleExam) => {
+                    const hasSubjectMismatch = Boolean(
+                      targetExamSubjectId &&
+                      sampleExam.subject_id &&
+                      sampleExam.subject_id !== targetExamSubjectId,
+                    );
+
+                    const subtitle = [
+                      sampleExam.subtopic,
+                      `${sampleExam.grade_level}-р анги`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
+
+                    return (
+                      <Card
+                        key={sampleExam.id}
+                        className="flex h-full flex-col overflow-hidden border-gray-200 transition-shadow hover:shadow-md"
+                      >
+                        <CardContent className="flex flex-1 flex-col gap-4 p-5">
+                          <div className="flex items-start gap-3">
+                            <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-slate-100 ring-1 ring-black/5">
+                              <div className="flex h-full w-full items-center justify-center bg-muted text-xs text-muted-foreground">
+                                IMG
+                              </div>
+                            </div>
+                            <div className="min-w-0">
+                              <p> {group.subjectName}</p>
+                              <h3 className="line-clamp-1 text-base font-bold leading-tight">
+                                {sampleExam.title}
+                              </h3>
+                              <p className="mt-1 text-xs font-medium text-muted-foreground">
                                 {subtitle}
                               </p>
-                            ) : null}
+                            </div>
                           </div>
-                        </div>
-                        {sampleExam.description ? (
-                          <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
-                            {sampleExam.description}
+
+                          <p className="line-clamp-2 text-sm leading-relaxed text-gray-500">
+                            {sampleExam.description || "Тайлбар байхгүй..."}
                           </p>
-                        ) : null}
-                        <div className="mt-3 space-y-2">
-                          <div className="flex flex-wrap gap-2">
-                            <Badge variant="outline">
-                              {sampleExam.question_count} асуулт
-                            </Badge>
-                            <Badge variant="secondary">
-                              {difficultyLabels[sampleExam.difficulty_level]}
-                            </Badge>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {sampleExam.subjects?.name ? (
-                              <Badge variant="outline">
-                                {sampleExam.subjects.name}
+
+                          <div className="mt-auto space-y-3">
+                            <div className="flex flex-wrap gap-2">
+                              <Badge
+                                variant="outline"
+                                className="bg-white px-2 py-0.5 text-xs font-normal"
+                              >
+                                {sampleExam.question_count} асуулт
                               </Badge>
-                            ) : null}
-                            <Badge variant="outline">
-                              {sampleExam.duration_minutes} минут
-                            </Badge>
-                          </div>
-                        </div>
-                      </div>
+                              <Badge
+                                className={`border-none px-2 py-0.5 text-xs text-white ${getDifficultyBadgeClass(
+                                  sampleExam.difficulty_level,
+                                )}`}
+                              >
+                                {
+                                  difficultyLabels[
+                                    sampleExam.difficulty_level ?? 1
+                                  ]
+                                }
+                              </Badge>
+                            </div>
 
-                      {examId ? (
-                        <Button
-                          type="button"
-                          onClick={() => handleImportSampleExam(sampleExam.id)}
-                          disabled={isBusy || hasSubjectMismatch}
-                          variant={hasSubjectMismatch ? "outline" : "default"}
-                        >
-                          {lastImportedSampleId === sampleExam.id
-                            ? "Оруулсан"
-                            : hasSubjectMismatch
-                              ? "Хичээл таарахгүй"
-                              : pendingAction === "import-sample" &&
-                                  pendingSampleId === sampleExam.id
-                                ? "Оруулж байна..."
-                                : "Шалгалтад оруулах"}
-                        </Button>
-                      ) : null}
-                    </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[
+                                "Олон сонголттой",
+                                "Эссэ",
+                                "Богино хариулт",
+                              ].map((tag) => (
+                                <span
+                                  key={tag}
+                                  className="rounded-full border border-gray-200 px-3 py-1 text-[11px] text-gray-600"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
 
-                    {sampleExam.sample_exam_items &&
-                    sampleExam.sample_exam_items.length > 0 ? (
-                      <details className="mt-auto">
-                        <summary className="mx-auto flex h-[40px] w-[306px] cursor-pointer list-none items-center justify-center gap-[10px] rounded-xl border border-gray-300 bg-gray-50 px-[10px] py-[8px] text-sm font-semibold text-gray-900 transition hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
-                          <Eye className="h-4 w-4" />
-                          Үзэх
-                        </summary>
-                        <div className="mt-3 space-y-3 rounded-lg bg-muted/10 p-3">
-                          {sampleExam.sample_exam_items
-                            .sort(
-                              (left, right) =>
-                                left.order_index - right.order_index,
-                            )
-                            .map((item, index) => (
-                              <div key={item.id} className="space-y-1">
-                                <div className="flex flex-wrap items-center gap-2 text-sm">
-                                  <span className="font-medium">
-                                    {index + 1}.
-                                  </span>
-                                  {item.question_bank?.type ? (
-                                    <Badge variant="outline">
-                                      {typeLabels[item.question_bank.type] ??
-                                        item.question_bank.type}
-                                    </Badge>
-                                  ) : null}
-                                  {item.question_bank?.points ? (
-                                    <Badge variant="outline">
-                                      {item.question_bank.points} оноо
-                                    </Badge>
-                                  ) : null}
+                            {sampleExam.sample_exam_items &&
+                            sampleExam.sample_exam_items.length > 0 ? (
+                              <details className="mt-2">
+                                <summary className="flex w-full cursor-pointer list-none items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 py-3 text-sm font-semibold text-gray-900 transition hover:bg-gray-100 [&::-webkit-details-marker]:hidden">
+                                  <Eye className="h-4 w-4" />
+                                  Үзэх
+                                </summary>
+                                <div className="mt-3 space-y-3 rounded-lg bg-muted/10 p-3">
+                                  {sampleExam.sample_exam_items
+                                    .sort(
+                                      (left, right) =>
+                                        left.order_index - right.order_index,
+                                    )
+                                    .map((item, index) => (
+                                      <div key={item.id} className="space-y-1">
+                                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                                          <span className="font-medium">
+                                            {index + 1}.
+                                          </span>
+                                          {item.question_bank?.type ? (
+                                            <Badge variant="outline">
+                                              {typeLabels[
+                                                item.question_bank.type
+                                              ] ?? item.question_bank.type}
+                                            </Badge>
+                                          ) : null}
+                                          {item.question_bank?.points ? (
+                                            <Badge variant="outline">
+                                              {item.question_bank.points} оноо
+                                            </Badge>
+                                          ) : null}
+                                        </div>
+                                        {item.question_bank ? (
+                                          <MathContent
+                                            html={
+                                              item.question_bank.content_html
+                                            }
+                                            text={item.question_bank.content}
+                                            className="prose prose-sm max-w-none text-foreground"
+                                          />
+                                        ) : null}
+                                      </div>
+                                    ))}
                                 </div>
-                                {item.question_bank ? (
-                                  <MathContent
-                                    html={item.question_bank.content_html}
-                                    text={item.question_bank.content}
-                                    className="prose prose-sm max-w-none text-foreground"
-                                  />
-                                ) : null}
-                              </div>
-                            ))}
-                        </div>
-                      </details>
-                    ) : null}
-                  </CardContent>
-                </Card>
-              );
-            })}
+                              </details>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="flex w-full items-center justify-center gap-2 rounded-xl border-gray-200 bg-gray-50 py-3 text-sm font-semibold text-gray-900 hover:bg-gray-100"
+                                disabled
+                              >
+                                <Eye className="h-4 w-4" />
+                                Үзэх
+                              </Button>
+                            )}
+
+                            {examId ? (
+                              <Button
+                                type="button"
+                                onClick={() =>
+                                  handleImportSampleExam(sampleExam.id)
+                                }
+                                disabled={isBusy || hasSubjectMismatch}
+                                variant={
+                                  hasSubjectMismatch ? "outline" : "default"
+                                }
+                              >
+                                {lastImportedSampleId === sampleExam.id
+                                  ? "Оруулсан"
+                                  : hasSubjectMismatch
+                                    ? "Хичээл таарахгүй"
+                                    : pendingAction === "import-sample" &&
+                                        pendingSampleId === sampleExam.id
+                                      ? "Оруулж байна..."
+                                      : "Шалгалтад оруулах"}
+                              </Button>
+                            ) : null}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </div>
         )
       ) : activeFilteredBankQuestions.length === 0 ? (
@@ -895,7 +984,9 @@ export default function QuestionBankBrowser({
                     type="button"
                     variant="outline"
                     onClick={toggleSelectAllVisibleQuestions}
-                    disabled={isBusy || visibleSelectableQuestionIds.length === 0}
+                    disabled={
+                      isBusy || visibleSelectableQuestionIds.length === 0
+                    }
                     aria-pressed={allVisibleSelected}
                     className={
                       tab === "private"
@@ -908,7 +999,9 @@ export default function QuestionBankBrowser({
                         : undefined
                     }
                   >
-                    {allVisibleSelected ? "Сонголтыг цуцлах" : "Харагдаж буйг сонгох"}
+                    {allVisibleSelected
+                      ? "Сонголтыг цуцлах"
+                      : "Харагдаж буйг сонгох"}
                   </Button>
                   <Button
                     type="button"
@@ -1070,9 +1163,15 @@ export default function QuestionBankBrowser({
                           <label className="inline-flex items-center gap-2 rounded-full border border-muted-foreground/30 bg-background/80 px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-muted-foreground/50 hover:bg-muted/60">
                             <input
                               type="checkbox"
-                              checked={selectedQuestionIds.includes(question.id)}
-                              onChange={() => toggleQuestionSelection(question.id)}
-                              disabled={isBusy || (examId ? hasSubjectMismatch : false)}
+                              checked={selectedQuestionIds.includes(
+                                question.id,
+                              )}
+                              onChange={() =>
+                                toggleQuestionSelection(question.id)
+                              }
+                              disabled={
+                                isBusy || (examId ? hasSubjectMismatch : false)
+                              }
                               className="peer h-4 w-4 rounded border-muted-foreground/40 text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
                             />
                             <span className="transition-colors peer-checked:text-primary">
