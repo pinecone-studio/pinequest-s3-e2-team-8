@@ -759,6 +759,7 @@ export default function QuestionBankBrowser({
                     <button
                       type="button"
                       onClick={() => {
+                        if (!group.subjectId) return;
                         setSubjectFilter(group.subjectId);
                         pushSubjectFilter(group.subjectId);
                       }}
