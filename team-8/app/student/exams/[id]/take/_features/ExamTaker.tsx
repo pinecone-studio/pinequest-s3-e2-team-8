@@ -389,9 +389,7 @@ export default function ExamTaker({
     "Камераа нээгээд нүүрээ төвд барьж, богино spot-check хийнэ үү."
   );
   const [spotCheckBusy, setSpotCheckBusy] = useState(false);
-  const [isOnline, setIsOnline] = useState(
-    typeof navigator === "undefined" ? true : navigator.onLine
-  );
+  const [isOnline, setIsOnline] = useState(true);
   const [orientation, setOrientation] = useState<"portrait" | "landscape">(
     runtimeReadiness?.orientation ?? "portrait"
   );
@@ -952,6 +950,11 @@ export default function ExamTaker({
 
   useEffect(() => {
     let offlineStartedAt = 0;
+    const initialOnline =
+      typeof navigator !== "undefined" && typeof navigator.onLine === "boolean"
+        ? navigator.onLine
+        : true;
+    setIsOnline(initialOnline);
 
     const handleOffline = () => {
       offlineStartedAt = Date.now();

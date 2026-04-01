@@ -50,23 +50,7 @@ function formatInlineChoicesAsList(text: string) {
   const normalized = String(text ?? "").replace(/\r\n/g, "\n");
   if (!normalized.trim()) return normalized;
 
-  // If content already has line breaks for options, don't touch.
-  if (/\n\s*[a-e]\./i.test(normalized) || /\n\s*\d+\)/.test(normalized)) {
-    return normalized;
-  }
-
-  // Put options (a. b. c. d. e.) on separate lines.
-  // Example: "... ол. a. √14 b. √19 c. √11 d. 2√3 e. 3"
-  let next = normalized
-    // start options block on a new line
-    .replace(/([?։:])\s*([a-e]\.)\s+/gi, "$1\n$2 ")
-    // each next option to new line
-    .replace(/\s+([b-e]\.)\s+/gi, "\n$1 ");
-
-  // As fallback, if no punctuation before options, split at first " a. "
-  next = next.replace(/\s+([a-e]\.)\s+/i, "\n$1 ");
-
-  return next;
+  return normalized;
 }
 
 interface QuestionBankBrowserProps {
@@ -107,7 +91,7 @@ export default function QuestionBankBrowser({
   viewerIsAdmin = false,
 }: QuestionBankBrowserProps) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [tab, setTab] = useState<TabKey>(defaultTab);
   const [query, setQuery] = useState("");
   const [subjectFilter, setSubjectFilter] = useState("all");
@@ -126,8 +110,14 @@ export default function QuestionBankBrowser({
   );
   const [lastImportedQuestionId, setLastImportedQuestionId] = useState<string | null>(null);
   const [lastImportedSampleId, setLastImportedSampleId] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<
+    "import-sample" | "import-single" | "import-bulk" | "delete-bulk" | null
+  >(null);
+  const [pendingQuestionId, setPendingQuestionId] = useState<string | null>(null);
+  const [pendingSampleId, setPendingSampleId] = useState<string | null>(null);
 
   const normalizedQuery = query.trim().toLowerCase();
+  const isBusy = pendingAction !== null;
 
   const teacherSubjectIds = useMemo(() => subjects.map((s) => s.id), [subjects]);
   const suggestedPrivateSubjectId = useMemo(
@@ -362,6 +352,10 @@ export default function QuestionBankBrowser({
     if (tab === "private") return visiblePrivateQuestionIds;
     return [];
   }, [examId, selectableQuestionIds, tab, visiblePrivateQuestionIds]);
+  const allVisibleSelected = useMemo(() => {
+    if (visibleSelectableQuestionIds.length === 0) return false;
+    return visibleSelectableQuestionIds.every((id) => selectedQuestionIds.includes(id));
+  }, [selectedQuestionIds, visibleSelectableQuestionIds]);
 
   function setStatusMessage(tone: MessageTone, nextMessage: string | null) {
     setMessageTone(tone);
@@ -384,8 +378,23 @@ export default function QuestionBankBrowser({
     );
   }
 
-  function selectAllVisibleQuestions() {
-    setSelectedQuestionIds(visibleSelectableQuestionIds);
+  function toggleSelectAllVisibleQuestions() {
+    setSelectedQuestionIds((prev) => {
+      if (visibleSelectableQuestionIds.length === 0) return prev;
+
+      const visibleSet = new Set(visibleSelectableQuestionIds);
+      const areAllSelected = visibleSelectableQuestionIds.every((id) => prev.includes(id));
+
+      if (areAllSelected) {
+        return prev.filter((id) => !visibleSet.has(id));
+      }
+
+      const next = new Set(prev);
+      for (const id of visibleSelectableQuestionIds) {
+        next.add(id);
+      }
+      return Array.from(next);
+    });
   }
 
   function clearSelectedQuestions() {
@@ -393,95 +402,125 @@ export default function QuestionBankBrowser({
   }
 
   function handleImportQuestion(questionId: string) {
-    if (!examId) return;
+    if (!examId || pendingAction) return;
 
     setStatusMessage("neutral", null);
+    setPendingAction("import-single");
+    setPendingQuestionId(questionId);
+    setPendingSampleId(null);
     startTransition(() => {
       void (async () => {
-        const result = await importQuestionFromBank(examId, questionId);
-        if (result?.error) {
-          setStatusMessage("error", result.error);
-          return;
-        }
+        try {
+          const result = await importQuestionFromBank(examId, questionId);
+          if (result?.error) {
+            setStatusMessage("error", result.error);
+            return;
+          }
 
-        setLastImportedQuestionId(questionId);
-        setLastImportedSampleId(null);
-        setStatusMessage(
-          result?.warning ? "warning" : "success",
-          result?.warning ?? "Асуулт шалгалтад амжилттай нэмэгдлээ."
-        );
-        router.refresh();
+          setLastImportedQuestionId(questionId);
+          setLastImportedSampleId(null);
+          setStatusMessage(
+            result?.warning ? "warning" : "success",
+            result?.warning ?? "Асуулт шалгалтад амжилттай нэмэгдлээ."
+          );
+          router.refresh();
+        } finally {
+          setPendingAction(null);
+          setPendingQuestionId(null);
+        }
       })();
     });
   }
 
   function handleImportSelectedQuestions() {
-    if (!examId || selectedQuestionIds.length === 0) return;
+    if (!examId || selectedQuestionIds.length === 0 || pendingAction) return;
 
     const pendingIds = [...selectedQuestionIds];
     setStatusMessage("neutral", null);
+    setPendingAction("import-bulk");
+    setPendingQuestionId(null);
+    setPendingSampleId(null);
     startTransition(() => {
       void (async () => {
-        const result = await importQuestionsFromBank(examId, pendingIds);
-        if (result?.error) {
-          setStatusMessage("error", result.error);
-          return;
-        }
+        try {
+          const result = await importQuestionsFromBank(examId, pendingIds);
+          if (result?.error) {
+            setStatusMessage("error", result.error);
+            return;
+          }
 
-        setSelectedQuestionIds([]);
-        setLastImportedQuestionId(null);
-        setLastImportedSampleId(null);
-        setStatusMessage(
-          result?.warning ? "warning" : "success",
-          result?.warning ??
-            `${result.count ?? pendingIds.length} асуулт шалгалтад амжилттай нэмэгдлээ.`
-        );
-        router.refresh();
+          setSelectedQuestionIds([]);
+          setLastImportedQuestionId(null);
+          setLastImportedSampleId(null);
+          setStatusMessage(
+            result?.warning ? "warning" : "success",
+            result?.warning ??
+              `${result.count ?? pendingIds.length} асуулт шалгалтад амжилттай нэмэгдлээ.`
+          );
+          router.refresh();
+        } finally {
+          setPendingAction(null);
+        }
       })();
     });
   }
 
   function handleDeleteSelectedPrivateQuestions() {
-    if (tab !== "private" || selectedQuestionIds.length === 0) return;
+    if (tab !== "private" || selectedQuestionIds.length === 0 || pendingAction) return;
 
     const pendingIds = [...selectedQuestionIds];
     setStatusMessage("neutral", null);
+    setPendingAction("delete-bulk");
+    setPendingQuestionId(null);
+    setPendingSampleId(null);
     startTransition(() => {
       void (async () => {
-        const result = await bulkDeleteQuestionBankItems(pendingIds);
-        if (result?.error) {
-          setStatusMessage("error", result.error);
-          return;
-        }
+        try {
+          const result = await bulkDeleteQuestionBankItems(pendingIds);
+          if (result?.error) {
+            setStatusMessage("error", result.error);
+            return;
+          }
 
-        setSelectedQuestionIds([]);
-        setLastImportedQuestionId(null);
-        setLastImportedSampleId(null);
-        setStatusMessage(
-          "success",
-          `${result.deletedCount ?? pendingIds.length} материал устгагдлаа.`
-        );
-        router.refresh();
+          setSelectedQuestionIds([]);
+          setLastImportedQuestionId(null);
+          setLastImportedSampleId(null);
+          setStatusMessage(
+            "success",
+            `${result.deletedCount ?? pendingIds.length} материал устгагдлаа.`
+          );
+          router.refresh();
+        } finally {
+          setPendingAction(null);
+        }
       })();
     });
   }
 
   function handleImportSampleExam(sampleExamId: string) {
-    if (!examId) return;
+    if (!examId || pendingAction) return;
 
     setStatusMessage("neutral", null);
+    setPendingAction("import-sample");
+    setPendingSampleId(sampleExamId);
+    setPendingQuestionId(null);
     startTransition(() => {
       void (async () => {
-        const result = await importSampleExamToExam(examId, sampleExamId);
-        if (result?.error) {
-          setStatusMessage("error", result.error);
-          return;
-        }
+        try {
+          const result = await importSampleExamToExam(examId, sampleExamId);
+          if (result?.error) {
+            setStatusMessage("error", result.error);
+            return;
+          }
 
-        setLastImportedSampleId(sampleExamId);
-        setLastImportedQuestionId(null);
-        setStatusMessage("success", "Жишиг шалгалт амжилттай импортлогдлоо.");
-        router.refresh();
+          setLastImportedSampleId(sampleExamId);
+          setLastImportedQuestionId(null);
+          setStatusMessage("success", "Жишиг шалгалт амжилттай импортлогдлоо.");
+          router.refresh();
+        } finally {
+          setPendingAction(null);
+          setPendingSampleId(null);
+        }
       })();
     });
   }
@@ -700,14 +739,15 @@ export default function QuestionBankBrowser({
                         <Button
                           type="button"
                           onClick={() => handleImportSampleExam(sampleExam.id)}
-                          disabled={isPending || hasSubjectMismatch}
+                          disabled={isBusy || hasSubjectMismatch}
                           variant={hasSubjectMismatch ? "outline" : "default"}
                         >
                           {lastImportedSampleId === sampleExam.id
                             ? "Оруулсан"
                             : hasSubjectMismatch
                               ? "Хичээл таарахгүй"
-                              : isPending
+                              : pendingAction === "import-sample" &&
+                                  pendingSampleId === sampleExam.id
                                 ? "Оруулж байна..."
                                 : "Шалгалтад оруулах"}
                         </Button>
@@ -769,11 +809,17 @@ export default function QuestionBankBrowser({
             <Card
               className={
                 tab === "private"
-                  ? "sticky top-3 z-10 border-dashed bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60"
-                  : "border-dashed"
+                  ? "sticky top-3 z-10 border border-muted/60 bg-gradient-to-r from-muted/40 via-background/90 to-muted/20 shadow-sm ring-1 ring-primary/10 backdrop-blur supports-[backdrop-filter]:bg-background/70"
+                  : "border border-dashed"
               }
             >
-              <CardContent className="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between">
+              <CardContent
+                className={
+                  tab === "private"
+                    ? "flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between md:gap-4"
+                    : "flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between"
+                }
+              >
                 <div className="space-y-1">
                   <p className="text-sm font-medium">
                     {tab === "private" ? "Сонгосон материалууд" : "Сонгосон асуултууд"}
@@ -793,16 +839,32 @@ export default function QuestionBankBrowser({
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={selectAllVisibleQuestions}
-                    disabled={isPending || visibleSelectableQuestionIds.length === 0}
+                    onClick={toggleSelectAllVisibleQuestions}
+                    disabled={isBusy || visibleSelectableQuestionIds.length === 0}
+                    aria-pressed={allVisibleSelected}
+                    className={
+                      tab === "private"
+                        ? [
+                            "h-9 min-w-[190px] justify-center rounded-full border-muted-foreground/30 bg-background/70 px-4 text-sm font-medium shadow-sm transition hover:border-muted-foreground/50 hover:bg-muted/60",
+                            allVisibleSelected
+                              ? "border-primary/40 bg-primary/10 text-primary shadow-inner"
+                              : "",
+                          ].join(" ")
+                        : undefined
+                    }
                   >
-                    Харагдаж буйг сонгох
+                    {allVisibleSelected ? "Сонголтыг цуцлах" : "Харагдаж буйг сонгох"}
                   </Button>
                   <Button
                     type="button"
                     variant="outline"
                     onClick={clearSelectedQuestions}
-                    disabled={isPending || selectedQuestionIds.length === 0}
+                    disabled={isBusy || selectedQuestionIds.length === 0}
+                    className={
+                      tab === "private"
+                        ? "h-9 rounded-full border-muted-foreground/30 bg-background/70 px-4 text-sm font-medium shadow-sm transition hover:border-muted-foreground/50 hover:bg-muted/60"
+                        : undefined
+                    }
                   >
                     Цэвэрлэх
                   </Button>
@@ -812,9 +874,14 @@ export default function QuestionBankBrowser({
                         <Button
                           type="button"
                           variant="destructive"
-                          disabled={isPending || selectedQuestionIds.length === 0}
+                          disabled={isBusy || selectedQuestionIds.length === 0}
+                          className={
+                            tab === "private"
+                              ? "h-9 rounded-full px-4 text-sm font-semibold shadow-sm transition hover:shadow"
+                              : undefined
+                          }
                         >
-                          {isPending
+                          {pendingAction === "delete-bulk"
                             ? "Устгаж байна..."
                             : `Сонгосныг устгах (${selectedQuestionIds.length})`}
                         </Button>
@@ -832,7 +899,7 @@ export default function QuestionBankBrowser({
                           <AlertDialogAction
                             variant="destructive"
                             onClick={handleDeleteSelectedPrivateQuestions}
-                            disabled={isPending}
+                            disabled={pendingAction === "delete-bulk"}
                           >
                             Устгах
                           </AlertDialogAction>
@@ -844,9 +911,9 @@ export default function QuestionBankBrowser({
                     <Button
                       type="button"
                       onClick={handleImportSelectedQuestions}
-                      disabled={isPending || selectedQuestionIds.length === 0}
+                      disabled={isBusy || selectedQuestionIds.length === 0}
                     >
-                      {isPending
+                      {pendingAction === "import-bulk"
                         ? "Нэмж байна..."
                         : `Сонгосныг шалгалтад нэмэх (${selectedQuestionIds.length})`}
                     </Button>
@@ -930,15 +997,17 @@ export default function QuestionBankBrowser({
                     <div className="flex flex-wrap items-center gap-2">
                       {examId || tab === "private" ? (
                         <>
-                          <label className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                          <label className="inline-flex items-center gap-2 rounded-full border border-muted-foreground/30 bg-background/80 px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-muted-foreground/50 hover:bg-muted/60">
                             <input
                               type="checkbox"
                               checked={selectedQuestionIds.includes(question.id)}
                               onChange={() => toggleQuestionSelection(question.id)}
-                              disabled={isPending || (examId ? hasSubjectMismatch : false)}
-                              className="h-4 w-4"
+                              disabled={isBusy || (examId ? hasSubjectMismatch : false)}
+                              className="peer h-4 w-4 rounded border-muted-foreground/40 text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50"
                             />
-                            Сонгох
+                            <span className="transition-colors peer-checked:text-primary">
+                              Сонгох
+                            </span>
                           </label>
                         </>
                       ) : null}
@@ -946,14 +1015,15 @@ export default function QuestionBankBrowser({
                         <Button
                           type="button"
                           onClick={() => handleImportQuestion(question.id)}
-                          disabled={isPending || hasSubjectMismatch}
+                          disabled={isBusy || hasSubjectMismatch}
                           variant={hasSubjectMismatch ? "outline" : "default"}
                         >
                           {lastImportedQuestionId === question.id
                             ? "Оруулсан"
                             : hasSubjectMismatch
                               ? "Хичээл таарахгүй"
-                              : isPending
+                              : pendingAction === "import-single" &&
+                                  pendingQuestionId === question.id
                                 ? "Оруулж байна..."
                                 : "Шалгалтад нэмэх"}
                         </Button>
