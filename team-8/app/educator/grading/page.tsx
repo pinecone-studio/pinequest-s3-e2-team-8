@@ -12,49 +12,50 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import StudentIdentity from "@/components/profile/StudentIdentity";
 
+function StatCard({
+  label,
+  value,
+  sub,
+  color,
+}: {
+  label: string;
+  value: number;
+  sub: string;
+  color: "blue" | "orange" | "yellow";
+}) {
+  // These hex codes match the colored glow/shadow at the bottom of the cards
+  const shadowColor: Record<typeof color, string> = {
+    blue: "rgba(59, 130, 246, 0.5)", // Blue glow
+    orange: "rgba(249, 115, 22, 0.5)", // Orange glow
+    yellow: "rgba(234, 179, 8, 0.5)", // Yellow glow
+  };
+
+  return (
+    <div
+      className="relative flex h-[119px] w-auto flex-col justify-between rounded-[32px] bg-white px-5 py-4 transition-transform hover:scale-[1.02]"
+      style={{
+        // This creates the specific "bottom-only" colored shadow effect
+        boxShadow: `0px 10px 20px -5px ${shadowColor[color]}`,
+        border: "1px solid rgba(0,0,0,0.05)",
+      }}
+    >
+      <div className="flex flex-col gap-2">
+        <p className="text-[16px] font-medium leading-tight text-gray-800">
+          {label}
+        </p>
+        <p className="text-[24px] font-bold tracking-tight text-gray-900">
+          {value}
+        </p>
+      </div>
+
+      <p className="text-sm font-medium text-[#4CAF50]">{sub}</p>
+    </div>
+  );
+}
+
 export default async function GradingPage() {
   const submissions = await getPendingSubmissions();
   const gradingStats = await getGradingStats();
-  function StatCard({
-    label,
-    value,
-    sub,
-    color,
-  }: {
-    label: string;
-    value: number;
-    sub: string;
-    color: "blue" | "orange" | "yellow";
-  }) {
-    // These hex codes match the colored glow/shadow at the bottom of the cards
-    const shadowColor: Record<typeof color, string> = {
-      blue: "rgba(59, 130, 246, 0.5)", // Blue glow
-      orange: "rgba(249, 115, 22, 0.5)", // Orange glow
-      yellow: "rgba(234, 179, 8, 0.5)", // Yellow glow
-    };
-
-    return (
-      <div
-        className="relative flex h-[119px] w-auto flex-col justify-between rounded-[32px] bg-white py-4 px-5 transition-transform hover:scale-[1.02]"
-        style={{
-          // This creates the specific "bottom-only" colored shadow effect
-          boxShadow: `0px 10px 20px -5px ${shadowColor[color]}`,
-          border: "1px solid rgba(0,0,0,0.05)",
-        }}
-      >
-        <div className="flex flex-col gap-2">
-          <p className="text-[16px] font-medium text-gray-800 leading-tight">
-            {label}
-          </p>
-          <p className="text-[24px] font-bold text-gray-900 tracking-tight">
-            {value}
-          </p>
-        </div>
-
-        <p className="text-sm font-medium text-[#4CAF50]">{sub}</p>
-      </div>
-    );
-  }
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-3">
