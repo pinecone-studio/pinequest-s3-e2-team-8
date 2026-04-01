@@ -23,8 +23,8 @@ export default function StudentShell({
     (pathname.endsWith("/result") || pathname.endsWith("/take") || pathname.includes("/take/run"));
 
   const mainClassName = hideChrome
-    ? "flex-1 p-0"
-    : "flex-1 px-4 pb-[calc(96px+env(safe-area-inset-bottom))] pt-4 md:pb-8 md:pl-19 md:pr-30 md:pt-0";
+    ? "flex-1 p-0 bg-gradient-to-b from-[#f5eef9] to-[#fbfbfb]"
+    : "flex-1 bg-gradient-to-b from-[#f5eef9] to-[#fbfbfb] px-4 pb-[calc(96px+env(safe-area-inset-bottom))] pt-4 md:pb-8 md:pl-19 md:pr-30 md:pt-0";
 
   return (
     <div className="flex min-h-[100dvh] bg-zinc-50 text-zinc-900">

@@ -41,7 +41,7 @@ async function loadSnapshotQuestions(
 ) {
   const baseSelect =
     "id, exam_id, passage_id, type, content, content_html, image_url, options, correct_answer, points, order_index, explanation, created_at";
-  const selectWithVariant = `${baseSelect}, ai_variant_enabled`;
+  const selectWithVariant = `${baseSelect}, ai_variant_enabled, ai_variant_mode`;
 
   const initial = await supabase
     .from("questions")
@@ -70,6 +70,7 @@ async function loadSnapshotQuestions(
   return (fallback.data ?? []).map((question) => ({
     ...question,
     ai_variant_enabled: false,
+    ai_variant_mode: "per_student",
   })) as Question[];
 }
 

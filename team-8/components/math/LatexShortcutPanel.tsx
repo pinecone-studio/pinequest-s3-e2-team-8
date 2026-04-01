@@ -6,20 +6,20 @@ import MathContent from "@/components/math/MathContent";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-type FormulaItem = {
+export type FormulaItem = {
   id: string;
   label: string;
   latex: string;
 };
 
-type FormulaGroup = {
+export type FormulaGroup = {
   id: string;
   label: string;
   description: string;
   items: FormulaItem[];
 };
 
-const formulaGroups: FormulaGroup[] = [
+export const formulaGroups: FormulaGroup[] = [
   {
     id: "basic",
     label: "Суурь",

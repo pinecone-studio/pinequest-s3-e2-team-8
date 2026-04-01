@@ -8,7 +8,6 @@ export const metadata: Metadata = {
   description: "Online Exam & Learning Management System",
   applicationName: "PineExam",
   manifest: "/manifest.json",
-  themeColor: "#4078C1",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
@@ -38,7 +37,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">
+      <body suppressHydrationWarning className="min-h-full flex flex-col">
         <RegisterServiceWorker />
         <Script id="mathjax-config" strategy="beforeInteractive">
           {`

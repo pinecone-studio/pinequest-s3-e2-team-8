@@ -95,7 +95,7 @@ export default function MathContent({
         return;
       }
 
-      if (attempts < 20) {
+      if (attempts < 60) {
         attempts += 1;
         window.setTimeout(runTypeset, 250);
       }

@@ -1,13 +1,13 @@
-import type React from "react";
+import type { ReactNode } from "react";
+import Image from "next/image";
 import Link from "next/link";
-import DashboardImage from "../_icons/DashboardImage";
+import { ArrowUpRight, Pencil, Sparkles } from "lucide-react";
 import { getEducatorStats } from "@/lib/dashboard/actions";
 import { getExamSchedules } from "@/lib/schedule/actions";
 import ExamScheduleClient from "./_components/ExamScheduleClient";
 
 const TIMEZONE = "Asia/Ulaanbaatar";
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
 function StatCard({
   label,
   value,
@@ -19,12 +19,12 @@ function StatCard({
   sub: string;
   color: "blue" | "orange" | "yellow";
 }) {
-  const bg: Record<string, string> = {
+  const bg: Record<typeof color, string> = {
     blue: "#4F9DF7",
     orange: "#FF993A",
     yellow: "#FFD143",
   };
-  const blob: Record<string, string> = {
+  const blob: Record<typeof color, string> = {
     blue: "#2F6BD7",
     orange: "#FF7E07",
     yellow: "#FFC000",
@@ -35,7 +35,6 @@ function StatCard({
       className="relative overflow-hidden rounded-2xl p-4 text-white shadow-lg"
       style={{ backgroundColor: bg[color], minHeight: 90 }}
     >
-      {/* decorative blobs */}
       <div
         className="absolute rounded-[50%] opacity-60"
         style={{
@@ -70,272 +69,130 @@ function StatCard({
   );
 }
 
-function MockPreviewCreate() {
+function PreviewBar({ className }: { className: string }) {
+  return <div className={`h-[14px] rounded-full bg-[#ece8e3] ${className}`} />;
+}
+
+function QuickActionButton({
+  href,
+  label,
+}: {
+  href: string;
+  label: string;
+}) {
   return (
-    <div
-      style={{
-        flex: 1,
-        background: "#EDF4FD",
-        borderRadius: 12,
-        padding: 14,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        marginBottom: 14,
-        minHeight: 180,
-      }}
+    <Link
+      href={href}
+      className="mt-4 flex h-[48px] w-full items-center justify-center gap-2 rounded-[14px] border border-[#d9d9d9] bg-white text-[15px] font-medium text-[#101010] shadow-[0_4px_10px_rgba(0,0,0,0.08)] transition-colors hover:bg-[#fafafa]"
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          background: "white",
-          border: "1.5px solid #93C5FD",
-          borderRadius: 999,
-          padding: "6px 16px",
-          fontSize: 12,
-          fontWeight: 500,
-          color: "#2563EB",
-        }}
-      >
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="#3B82F6"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
-        </svg>
-        Эхлэх - Үүсгэх
+      <span>{label}</span>
+      <ArrowUpRight className="h-[18px] w-[18px]" strokeWidth={2.4} />
+    </Link>
+  );
+}
+
+function CreateQuestionPreview() {
+  return (
+    <div className="relative mt-4 min-h-[220px] overflow-hidden rounded-[18px] bg-[#eaf3ff] px-5 pt-4">
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-[88px] bg-gradient-to-r from-white/55 to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-[70px] bg-gradient-to-l from-white/35 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[90px] bg-gradient-to-t from-white/50 to-transparent" />
+
+      <div className="relative z-10 mx-auto flex w-fit items-center gap-3 rounded-[18px] border border-[#8bb6fb] bg-white px-6 py-3 text-[17px] font-medium text-[#737373] shadow-[0_8px_18px_rgba(110,157,232,0.14)]">
+        <Sparkles className="h-[18px] w-[18px] text-[#5f98f2]" strokeWidth={2.25} />
+        <span>Эхлэх - Үүсгэх</span>
       </div>
 
-      <div style={{ width: 1, height: 12, background: "#93C5FD" }} />
+      <div className="relative z-10 mx-auto h-[24px] w-px bg-[#90b9fd]" />
 
-      <div
-        style={{
-          width: "100%",
-          background: "white",
-          border: "1px solid #BFDBFE",
-          borderRadius: 10,
-          padding: 10,
-        }}
-      >
-        <div style={{ display: "flex", gap: 8 }}>
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              background: "#E5E7EB",
-              borderRadius: 6,
-              flexShrink: 0,
-            }}
-          />
-          <div
-            style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              gap: 5,
-              paddingTop: 2,
-            }}
-          >
-            <div
-              style={{
-                height: 8,
-                background: "#E5E7EB",
-                borderRadius: 4,
-                width: "100%",
-              }}
-            />
-            <div
-              style={{
-                height: 8,
-                background: "#E5E7EB",
-                borderRadius: 4,
-                width: "80%",
-              }}
-            />
-            <div
-              style={{
-                height: 8,
-                background: "#E5E7EB",
-                borderRadius: 4,
-                width: "60%",
-              }}
-            />
+      <div className="relative z-10 mx-auto h-[126px] w-full max-w-[324px] overflow-hidden rounded-t-[10px] border border-[#79a9f6] bg-white">
+        <div className="h-[24px] border-b border-[#ede5db] bg-[#faf6f1]" />
+        <div className="grid grid-cols-[108px_1fr] gap-3 px-3 pb-4 pt-3">
+          <div className="h-[68px] rounded-[8px] bg-gradient-to-r from-[#f0ebe5] to-[#fafafa]" />
+          <div className="space-y-[12px] pt-1">
+            <PreviewBar className="w-full" />
+            <PreviewBar className="w-[84%]" />
+            <PreviewBar className="w-[64%]" />
+          </div>
+
+          <div className="col-span-2 grid grid-cols-2 gap-x-4 gap-y-3">
+            <PreviewBar className="w-[72%]" />
+            <PreviewBar className="w-[66%]" />
+            <PreviewBar className="w-[62%]" />
+            <PreviewBar className="w-[56%]" />
           </div>
         </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-          <div
-            style={{
-              height: 8,
-              background: "#E5E7EB",
-              borderRadius: 4,
-              width: "35%",
-            }}
-          />
-          <div
-            style={{
-              height: 8,
-              background: "#E5E7EB",
-              borderRadius: 4,
-              width: "25%",
-            }}
-          />
-        </div>
       </div>
     </div>
   );
 }
 
-function MockPreviewGrade() {
+function GradeAnswerPreview() {
   return (
-    <div
-      style={{
-        flex: 1,
-        background: "#EDF4FD",
-        borderRadius: 12,
-        padding: 14,
-        marginBottom: 14,
-        minHeight: 180,
-        position: "relative",
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          top: 10,
-          right: 10,
-          width: 28,
-          height: 28,
-          background: "white",
-          border: "0.5px solid #D1D5DB",
-          borderRadius: "50%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="#6B7280"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-        </svg>
+    <div className="relative mt-4 min-h-[220px] overflow-hidden rounded-[18px] bg-[#eaf3ff] px-[18px] pt-[16px]">
+      <div className="absolute right-8 top-4 z-10 flex h-[36px] w-[48px] items-center justify-center rounded-[16px] border border-[#b7d1fb] bg-white shadow-[0_8px_18px_rgba(110,157,232,0.14)]">
+        <Pencil className="h-[16px] w-[16px] text-[#777777]" strokeWidth={2.5} />
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 10,
-          paddingTop: 4,
-        }}
-      >
-        <div
-          style={{
-            background: "white",
-            border: "1.5px solid #93C5FD",
-            borderRadius: 10,
-            padding: 10,
-          }}
-        >
-          <div
-            style={{
-              height: 8,
-              background: "#E5E7EB",
-              borderRadius: 4,
-              width: "100%",
-              marginBottom: 6,
-            }}
-          />
-          <div
-            style={{
-              height: 8,
-              background: "#E5E7EB",
-              borderRadius: 4,
-              width: "85%",
-              marginBottom: 6,
-            }}
-          />
-          <div
-            style={{
-              height: 8,
-              background: "#E5E7EB",
-              borderRadius: 4,
-              width: "70%",
-            }}
-          />
+      <div className="mt-[50px] space-y-3">
+        <div className="rounded-[10px] border border-[#79a9f6] bg-white px-4 py-4">
+          <div className="space-y-[14px]">
+            <PreviewBar className="w-[98%]" />
+            <PreviewBar className="w-[95%]" />
+          </div>
         </div>
-        <div
-          style={{
-            background: "white",
-            border: "1.5px solid #93C5FD",
-            borderRadius: 10,
-            padding: 10,
-          }}
-        >
-          <div
-            style={{
-              height: 8,
-              background: "#E5E7EB",
-              borderRadius: 4,
-              width: "100%",
-              marginBottom: 6,
-            }}
-          />
-          <div
-            style={{
-              height: 8,
-              background: "#E5E7EB",
-              borderRadius: 4,
-              width: "60%",
-            }}
-          />
+
+        <div className="rounded-[10px] border border-[#79a9f6] bg-white px-4 py-4">
+          <div className="space-y-[14px]">
+            <PreviewBar className="w-[98%]" />
+            <PreviewBar className="w-[93%]" />
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-const cardStyle: React.CSSProperties = {
-  background: "white",
-  border: "1px solid #E5E7EB",
-  borderRadius: 16,
-  padding: 20,
-  display: "flex",
-  flexDirection: "column",
-};
+function QuickActionCard({
+  title,
+  description,
+  preview,
+  href,
+  ctaLabel,
+  badgeLabel,
+}: {
+  title: string;
+  description: string;
+  preview: ReactNode;
+  href: string;
+  ctaLabel: string;
+  badgeLabel?: string;
+}) {
+  return (
+    <article className="flex min-h-[376px] flex-col rounded-[18px] border border-[#dedede] bg-white p-4 shadow-[0_10px_28px_rgba(124,144,171,0.08)]">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-[18px] font-medium leading-[1.25] text-[#111111]">
+            {title}
+          </h3>
+          <p className="mt-2 text-[15px] leading-[1.25] text-[#6f6f6f]">
+            {description}
+          </p>
+        </div>
 
-const btnStyle: React.CSSProperties = {
-  width: "100%",
-  background: "white",
-  border: "1px solid #E5E7EB",
-  borderRadius: 10,
-  padding: "10px 0",
-  fontSize: 12,
-  fontWeight: 500,
-  color: "#111827",
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 4,
-};
+        {badgeLabel ? (
+          <div className="shrink-0 rounded-[10px] border border-[#6ea6fb] bg-white px-4 py-[8px] text-[14px] font-medium text-[#4c87ef] shadow-[0_4px_12px_rgba(110,157,232,0.22)]">
+            {badgeLabel}
+          </div>
+        ) : null}
+      </div>
 
-// ─── Main component ───────────────────────────────────────────────────────────
+      <div className="flex-1">{preview}</div>
+      <QuickActionButton href={href} label={ctaLabel} />
+    </article>
+  );
+}
+
 export default async function EducatorDashboard() {
   const stats = await getEducatorStats();
   const scheduleRows = await getExamSchedules();
@@ -348,7 +205,6 @@ export default async function EducatorDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* ── Hero ── */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#f9f9f9] via-[#cedbed] to-[#5787c8] px-8 py-6">
         <div className="relative z-10 max-w-2xl space-y-2">
           <h2 className="text-2xl font-bold tracking-tight md:text-3xl">
@@ -359,11 +215,15 @@ export default async function EducatorDashboard() {
           </p>
         </div>
         <div className="pointer-events-none absolute bottom-0 right-0 hidden h-full w-auto scale-125 origin-bottom-right md:block">
-          <DashboardImage />
+          <Image
+            src="/educator-dash.png"
+            alt="Dashboard Image"
+            width={290}
+            height={270}
+          />
         </div>
       </div>
 
-      {/* ── Stats ── */}
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard
           label="Нийт жишиг даалгаврууд"
@@ -384,63 +244,38 @@ export default async function EducatorDashboard() {
           color="yellow"
         />
       </div>
-      <div className="w-[701px] h-[52px] flex flex-col justify-between">
-        <p className="text-[22px] font-medium text-black leading-none">
-          Эдгээр хэрэгтэй хэрэгслүүдийг ашиглаж эхэлцгээе
-        </p>
-        <p className="text-[14px] text-gray-400 leading-none">
-          Шалгалт үүсгэх, шалгалтын хариултад засахад ашиглаж болох манай
-          хэрэгслүүдийг судлаарай
-        </p>
-      </div>
-      {/* ── Quick actions ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <div style={{ ...cardStyle, width: 472, height: 372 }}>
-          <p
-            style={{
-              margin: "0 0 4px",
-              fontSize: 14,
-              fontWeight: 600,
-              color: "#111827",
-            }}
-          >
-            Шинэ шалгалт үүсгэх
+
+      <section className="space-y-5">
+        <div className="max-w-[760px]">
+          <h2 className="text-[22px] font-medium leading-none text-black">
+            Эдгээр хэрэгтэй хэрэгслүүдийг ашиглаж эхэлцгээе
+          </h2>
+          <p className="mt-[6px] text-[15px] leading-none text-[#6f6f6f]">
+            Шалгалт үүсгэх, шалгалтын хариултад засахад ашиглаж болох манай
+            хэрэгслүүдийг судлаарай
           </p>
-          <p style={{ margin: "0 0 14px", fontSize: 12, color: "#6B7280" }}>
-            AI ашиглан шалгалтыг маш амархан үүсгэ!
-          </p>
-          <MockPreviewCreate />
-          <Link href="/educator/create-exam">
-            <button style={btnStyle}>
-              Шинэ шалгалт үүсгэх <span>↗</span>
-            </button>
-          </Link>
         </div>
 
-        <div style={{ ...cardStyle, width: 593, height: 372 }}>
-          <p
-            style={{
-              margin: "0 0 4px",
-              fontSize: 14,
-              fontWeight: 600,
-              color: "#111827",
-            }}
-          >
-            Шалгалтын хариулт засах
-          </p>
-          <p style={{ margin: "0 0 14px", fontSize: 12, color: "#6B7280" }}>
-            Тексттэй шалгалтыг хянаж засах.
-          </p>
-          <MockPreviewGrade />
-          <Link href="/educator/grading">
-            <button style={btnStyle}>
-              Шалгалт засах <span>↗</span>
-            </button>
-          </Link>
-        </div>
-      </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <QuickActionCard
+            title="Шинэ асуулт үүсгэх"
+            description="AI-ний тусламжтай шалгалтын асуултаа хялбархан үүсгэ."
+            badgeLabel="Шинэ Онцлог"
+            preview={<CreateQuestionPreview />}
+            href="/educator/question-bank/private"
+            ctaLabel="Асуулт үүсгэж эхлэх"
+          />
 
-      {/* ── Schedule ── */}
+          <QuickActionCard
+            title="Шалгалтын хариулт засах"
+            description="Тексттэй шалгалтыг хянаж засах."
+            preview={<GradeAnswerPreview />}
+            href="/educator/grading"
+            ctaLabel="Шалгалт засаж эхлэх"
+          />
+        </div>
+      </section>
+
       <ExamScheduleClient
         scheduleRows={scheduleRows}
         dateLabel={dateLabel}

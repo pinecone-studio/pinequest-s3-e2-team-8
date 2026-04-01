@@ -6,7 +6,11 @@ import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 import { extractQuestionTextFromImageBytes } from "@/lib/ai/extract-image-text";
 import { createClient } from "@/lib/supabase/server";
-import { isQuestionVariantSchemaMissing } from "@/lib/question-variants";
+import {
+  deleteQuestionVariantPresets,
+  ensureQuestionVariantPresets,
+  isQuestionVariantSchemaMissing,
+} from "@/lib/question-variants";
 import { getAllowedSubjectIds } from "@/lib/teacher/permissions";
 import {
   buildQuestionImportDrafts,
@@ -19,12 +23,14 @@ import {
   getQuestionPassagesByExam as loadQuestionPassagesByExam,
 } from "@/lib/question-passages";
 import type {
+  AiQuestionVariantMode,
   Difficulty,
   DifficultyLevel,
   QuestionBank,
   QuestionImportDraft,
   QuestionBankSummary,
   QuestionBankVisibility,
+  QuestionType,
   SampleExam,
 } from "@/types";
 
@@ -48,7 +54,7 @@ const QUESTION_BANK_VISIBILITIES: QuestionBankVisibility[] = [
   "archived",
 ];
 const QUESTION_VARIANT_MIGRATION_ERROR =
-  "AI хувилбар feature ашиглахын өмнө `024_ai_question_variants.sql` migration-аа apply хийж, schema cache-аа refresh хийнэ үү.";
+  "AI хувилбар feature ашиглахын өмнө `024_ai_question_variants.sql` болон `035_ai_question_variant_modes.sql` migration-уудаа apply хийж, schema cache-аа refresh хийнэ үү.";
 const QUESTION_BANK_GOVERNANCE_ERROR =
   "Question bank governance feature ашиглахын өмнө хамгийн сүүлийн DB migration-аа apply хийнэ үү.";
 const QUESTION_BANK_USAGE_TRACKING_WARNING =
@@ -58,6 +64,14 @@ function isQuestionBankVisibility(
   value: string
 ): value is QuestionBankVisibility {
   return QUESTION_BANK_VISIBILITIES.includes(value as QuestionBankVisibility);
+}
+
+function normalizeAiVariantMode(
+  value: FormDataEntryValue | null
+): AiQuestionVariantMode {
+  return String(value ?? "").trim() === "two_fixed"
+    ? "two_fixed"
+    : "per_student";
 }
 
 async function getQuestionBankAccessContext(
@@ -462,7 +476,7 @@ export async function addQuestion(examId: string, formData: FormData) {
     return { error: "Нийтлэгдсэн шалгалтын асуултыг өөрчлөх боломжгүй" };
   }
 
-  const type = formData.get("type") as string;
+  const type = formData.get("type") as QuestionType;
   const content = formData.get("content") as string;
   const content_html =
     (formData.get("content_html") as string)?.trim() || null;
@@ -471,6 +485,7 @@ export async function addQuestion(examId: string, formData: FormData) {
   const explanation = (formData.get("explanation") as string) || null;
   const image_url = (formData.get("image_url") as string)?.trim() || null;
   const ai_variant_enabled = formData.get("ai_variant_enabled") === "on";
+  const ai_variant_mode = normalizeAiVariantMode(formData.get("ai_variant_mode"));
 
   const passageResolution = await resolvePassageId(
     supabase,
@@ -518,19 +533,68 @@ export async function addQuestion(examId: string, formData: FormData) {
 
   if (ai_variant_enabled) {
     insertPayload.ai_variant_enabled = true;
+    insertPayload.ai_variant_mode = ai_variant_mode;
   }
 
   if (passageResolution.passageId) {
     insertPayload.passage_id = passageResolution.passageId;
   }
 
-  const { error } = await supabase.from("questions").insert(insertPayload);
+  let insertedQuestion:
+    | {
+        id: string;
+        type: QuestionType;
+        content: string;
+        content_html: string | null;
+        image_url: string | null;
+        options: string[] | null;
+        correct_answer: string | null;
+        explanation: string | null;
+        ai_variant_enabled: boolean;
+        ai_variant_mode: AiQuestionVariantMode;
+      }
+    | null = null;
+  let error: { code?: string; message?: string } | null = null;
+
+  if (ai_variant_enabled && ai_variant_mode === "two_fixed") {
+    const result = await supabase
+      .from("questions")
+      .insert(insertPayload)
+      .select(
+        "id, type, content, content_html, image_url, options, correct_answer, explanation, ai_variant_enabled, ai_variant_mode"
+      )
+      .single();
+
+    insertedQuestion = result.data;
+    error = result.error;
+  } else {
+    const result = await supabase.from("questions").insert(insertPayload);
+    error = result.error;
+  }
 
   if (error) {
     if (isQuestionVariantSchemaMissing(error.code, error.message)) {
       return { error: QUESTION_VARIANT_MIGRATION_ERROR };
     }
-    return { error: getQuestionTypeMigrationHint(error) ?? error.message };
+    return {
+      error:
+        getQuestionTypeMigrationHint(error) ??
+        error.message ??
+        QUESTION_VARIANT_MIGRATION_ERROR,
+    };
+  }
+
+  if (ai_variant_enabled && ai_variant_mode === "two_fixed" && insertedQuestion) {
+    try {
+      await ensureQuestionVariantPresets(supabase, insertedQuestion);
+    } catch (presetError) {
+      return {
+        error:
+          presetError instanceof Error
+            ? presetError.message
+            : QUESTION_VARIANT_MIGRATION_ERROR,
+      };
+    }
   }
 
   revalidatePath(`/educator/exams/${examId}/questions`);
@@ -750,7 +814,7 @@ export async function updateQuestion(
 
   if (!existingQuestion) return { error: "Асуулт олдсонгүй" };
 
-  const type = formData.get("type") as string;
+  const type = formData.get("type") as QuestionType;
   const content = String(formData.get("content") || "").trim();
   const content_html =
     String(formData.get("content_html") || "").trim() || null;
@@ -760,6 +824,7 @@ export async function updateQuestion(
   const explanation = String(formData.get("explanation") || "").trim() || null;
   const image_url = String(formData.get("image_url") || "").trim() || null;
   const ai_variant_enabled = formData.get("ai_variant_enabled") === "on";
+  const ai_variant_mode = normalizeAiVariantMode(formData.get("ai_variant_mode"));
 
   if (!content && !content_html) {
     return { error: "Асуултын агуулгыг оруулна уу." };
@@ -795,6 +860,7 @@ export async function updateQuestion(
     points,
     explanation,
     ai_variant_enabled,
+    ai_variant_mode,
     subject_id: exam.subject_id ?? null,
   };
 
@@ -812,6 +878,7 @@ export async function updateQuestion(
 
     const fallbackPayload = { ...updatePayload };
     delete fallbackPayload.ai_variant_enabled;
+    delete fallbackPayload.ai_variant_mode;
     const fallbackResult = await supabase
       .from("questions")
       .update(fallbackPayload)
@@ -823,6 +890,32 @@ export async function updateQuestion(
 
   if (error) {
     return { error: getQuestionTypeMigrationHint(error) ?? error.message };
+  }
+
+  try {
+    if (ai_variant_enabled && ai_variant_mode === "two_fixed") {
+      await ensureQuestionVariantPresets(supabase, {
+        id: questionId,
+        type,
+        content,
+        content_html,
+        image_url,
+        options: questionPayload.options,
+        correct_answer: questionPayload.correctAnswer,
+        explanation,
+        ai_variant_enabled,
+        ai_variant_mode,
+      });
+    } else {
+      await deleteQuestionVariantPresets(supabase, questionId);
+    }
+  } catch (presetError) {
+    return {
+      error:
+        presetError instanceof Error
+          ? presetError.message
+          : QUESTION_VARIANT_MIGRATION_ERROR,
+    };
   }
 
   revalidatePath(`/educator/exams/${examId}/questions`);
@@ -1493,12 +1586,85 @@ export async function deleteQuestionBankItem(bankQuestionId: string) {
   return { success: true };
 }
 
+export async function bulkDeleteQuestionBankItems(bankQuestionIds: string[]) {
+  const ids = Array.from(
+    new Set(bankQuestionIds.map((id) => id.trim()).filter(Boolean))
+  );
+  if (ids.length === 0) {
+    return { error: "Устгах материалуудаа сонгоно уу." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const context = await getQuestionBankAccessContext(supabase, user.id);
+  const { data: rows, error: rowsError } = await supabase
+    .from("question_bank")
+    .select("id, created_by, subject_id, visibility")
+    .in("id", ids);
+
+  if (rowsError?.code === "42703") {
+    return { error: QUESTION_BANK_GOVERNANCE_ERROR };
+  }
+
+  const manageableRows = (rows ?? []).filter((row) =>
+    canManageQuestionBankItem(row, context)
+  );
+  if (manageableRows.length === 0) {
+    return { error: "Сонгосон материалуудаа устгах эрх байхгүй байна." };
+  }
+
+  const manageableIds = manageableRows.map((row) => row.id);
+  const { error } = await supabase.from("question_bank").delete().in("id", manageableIds);
+  if (error) return { error: error.message };
+
+  revalidatePath("/educator/question-bank");
+  revalidatePath("/educator/question-bank/private");
+  return { success: true, deletedCount: manageableIds.length };
+}
+
 const PRIVATE_BANK_IMAGE_MIME = [
   "image/jpeg",
   "image/png",
   "image/webp",
   "image/gif",
 ] as const;
+
+function splitNumberedMaterialItems(rawText: string) {
+  const normalized = rawText.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return [];
+
+  const lines = normalized.split("\n");
+  const items: string[] = [];
+  let current: string[] = [];
+
+  const startPattern = /^\s*(\d{1,3})\s*([).]|-)\s+/;
+
+  for (const line of lines) {
+    const isStart = startPattern.test(line);
+    if (isStart && current.length > 0) {
+      const chunk = current.join("\n").trim();
+      if (chunk) items.push(chunk);
+      current = [line];
+      continue;
+    }
+
+    current.push(line);
+  }
+
+  const last = current.join("\n").trim();
+  if (last) items.push(last);
+
+  // Heuristic: only split when it really looks like multiple problems.
+  const trimmed = items.map((item) => item.trim()).filter(Boolean);
+  if (trimmed.length < 2) return [];
+
+  // Avoid exploding in case OCR is noisy.
+  return trimmed.slice(0, 60);
+}
 
 export async function createPrivateBankEntryFromImage(formData: FormData) {
   const supabase = await createClient();
@@ -1509,6 +1675,7 @@ export async function createPrivateBankEntryFromImage(formData: FormData) {
 
   const subjectId = String(formData.get("subject_id") ?? "").trim();
   const subtopic = String(formData.get("subtopic") ?? "").trim() || null;
+  const batchLabelRaw = String(formData.get("batch_label") ?? "").trim();
   const gradeRaw = String(formData.get("grade_level") ?? "").trim();
   const gradeLevelParsed = parseInt(gradeRaw, 10);
   const grade_level =
@@ -1542,6 +1709,53 @@ export async function createPrivateBankEntryFromImage(formData: FormData) {
   }
 
   const buffer = Buffer.from(await uploaded.arrayBuffer());
+
+  let content = "";
+  if (useAi) {
+    const extracted = await extractQuestionTextFromImageBytes(
+      new Uint8Array(buffer),
+      mime
+    );
+    if (extracted) {
+      content = extracted;
+    }
+  }
+
+  const batchId = randomUUID();
+  const tags = [
+    `batch:${batchId}`,
+    ...(batchLabelRaw ? [`batchName:${batchLabelRaw}`] : []),
+  ];
+
+  const splitItems = useAi ? splitNumberedMaterialItems(content) : [];
+  if (splitItems.length > 0) {
+    const rows = splitItems.map((itemText) => ({
+      subject_id: subjectId || null,
+      created_by: user.id,
+      visibility: "private" as const,
+      type: "essay" as const,
+      content: itemText,
+      content_html: null,
+      image_url: null,
+      options: null,
+      correct_answer: null,
+      points: 1,
+      difficulty: "medium" as const,
+      difficulty_level: 2 as const,
+      tags,
+      subtopic,
+      grade_level,
+      explanation: null,
+    }));
+
+    const { error: insertError } = await supabase.from("question_bank").insert(rows);
+    if (insertError) return { error: insertError.message };
+
+    revalidatePath("/educator/question-bank");
+    revalidatePath("/educator/question-bank/private");
+    return { success: true, count: rows.length };
+  }
+
   const ext =
     mime === "image/png"
       ? "png"
@@ -1565,16 +1779,6 @@ export async function createPrivateBankEntryFromImage(formData: FormData) {
   const { data: pub } = supabase.storage.from("question-media").getPublicUrl(path);
   const imageUrl = pub.publicUrl;
 
-  let content = "";
-  if (useAi) {
-    const extracted = await extractQuestionTextFromImageBytes(
-      new Uint8Array(buffer),
-      mime
-    );
-    if (extracted) {
-      content = extracted;
-    }
-  }
   if (!content.trim()) {
     content =
       "Энэ материал голлон зураг дээр байрлана. Дээрх «Засах» товчоор асуултын төрөл, текст, сонголт, зөв хариултаа бүрэн тохируулна уу.";
@@ -1593,7 +1797,7 @@ export async function createPrivateBankEntryFromImage(formData: FormData) {
     points: 1,
     difficulty: "medium",
     difficulty_level: 2,
-    tags: [],
+    tags,
     subtopic,
     grade_level,
     explanation: null,
@@ -1615,6 +1819,7 @@ export async function createPrivateBankEntryFromText(formData: FormData) {
 
   const subjectId = String(formData.get("subject_id") ?? "").trim();
   const subtopic = String(formData.get("subtopic") ?? "").trim() || null;
+  const batchLabelRaw = String(formData.get("batch_label") ?? "").trim();
   const gradeRaw = String(formData.get("grade_level") ?? "").trim();
   const gradeLevelParsed = parseInt(gradeRaw, 10);
   const grade_level =
@@ -1638,6 +1843,12 @@ export async function createPrivateBankEntryFromText(formData: FormData) {
     }
   }
 
+  const batchId = randomUUID();
+  const tags = [
+    `batch:${batchId}`,
+    ...(batchLabelRaw ? [`batchName:${batchLabelRaw}`] : []),
+  ];
+
   const { error: insertError } = await supabase.from("question_bank").insert({
     subject_id: subjectId || null,
     created_by: user.id,
@@ -1651,7 +1862,7 @@ export async function createPrivateBankEntryFromText(formData: FormData) {
     points: 1,
     difficulty: "medium",
     difficulty_level: 2,
-    tags: [],
+    tags,
     subtopic,
     grade_level,
     explanation: null,

@@ -22,6 +22,7 @@ type StoredExamStartContext = {
 
 const STORAGE_PREFIX = "exam-start-context:";
 const MAX_CONTEXT_AGE_MS = 6 * 60 * 60 * 1000;
+const cachedContextByKey = new Map<string, { raw: string; parsed: StoredExamStartContext }>();
 
 function getStorageKey(examId: string) {
   return `${STORAGE_PREFIX}${examId}`;
@@ -34,18 +35,29 @@ export function readStoredExamStartContext(
   if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.sessionStorage.getItem(getStorageKey(examId));
+    const storageKey = getStorageKey(examId);
+    const raw = window.sessionStorage.getItem(storageKey);
     if (!raw) return null;
 
-    const parsed = JSON.parse(raw) as StoredExamStartContext;
+    const cached = cachedContextByKey.get(storageKey);
+    const parsed =
+      cached && cached.raw === raw
+        ? cached.parsed
+        : (JSON.parse(raw) as StoredExamStartContext);
+
+    if (!cached || cached.raw !== raw) {
+      cachedContextByKey.set(storageKey, { raw, parsed });
+    }
     if (!parsed || parsed.sessionId !== sessionId) return null;
     if (Date.now() - Number(parsed.savedAt ?? 0) > MAX_CONTEXT_AGE_MS) {
-      window.sessionStorage.removeItem(getStorageKey(examId));
+      window.sessionStorage.removeItem(storageKey);
+      cachedContextByKey.delete(storageKey);
       return null;
     }
 
     return parsed;
   } catch {
+    cachedContextByKey.delete(getStorageKey(examId));
     return null;
   }
 }

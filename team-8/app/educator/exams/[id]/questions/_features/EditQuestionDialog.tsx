@@ -3,7 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { updateQuestion } from "@/lib/question/actions";
-import type { Question, QuestionPassage, QuestionType } from "@/types";
+import type {
+  AiQuestionVariantMode,
+  Question,
+  QuestionPassage,
+  QuestionType,
+} from "@/types";
 import MathContent from "@/components/math/MathContent";
 import LatexShortcutPanel from "@/components/math/LatexShortcutPanel";
 import { Button } from "@/components/ui/button";
@@ -25,7 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Sparkles } from "lucide-react";
+import { Check, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const questionTypes: { value: QuestionType; label: string }[] = [
@@ -34,6 +39,23 @@ const questionTypes: { value: QuestionType; label: string }[] = [
   { value: "fill_blank", label: "Нөхөх" },
   { value: "essay", label: "Задгай / Эссэ" },
   { value: "matching", label: "Холбох" },
+];
+
+const aiVariantModes: Array<{
+  value: AiQuestionVariantMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "two_fixed",
+    label: "2 хувилбар",
+    description: "AI тогтмол 2 хувилбар бэлдэж, сурагчид тэр хоёроос авна.",
+  },
+  {
+    value: "per_student",
+    label: "Сурагч бүрт өөр",
+    description: "Session эхлэхэд сурагч бүр өөр өгөгдөлтэй хувилбар авна.",
+  },
 ];
 
 interface EditQuestionDialogProps {
@@ -134,6 +156,9 @@ export default function EditQuestionDialog({
   const [aiVariantEnabled, setAiVariantEnabled] = useState(
     Boolean(question.ai_variant_enabled)
   );
+  const [aiVariantMode, setAiVariantMode] = useState<AiQuestionVariantMode>(
+    question.ai_variant_mode ?? "per_student"
+  );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -153,6 +178,7 @@ export default function EditQuestionDialog({
     setMultipleCorrectAnswers(getMultipleCorrectAnswers(question));
     setMatchingPairs(getMatchingPairs(question));
     setAiVariantEnabled(Boolean(question.ai_variant_enabled));
+    setAiVariantMode(question.ai_variant_mode ?? "per_student");
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -272,6 +298,7 @@ export default function EditQuestionDialog({
       selectedPassageId === "__none" ? "" : selectedPassageId
     );
     formData.set("ai_variant_enabled", aiVariantEnabled ? "on" : "off");
+    formData.set("ai_variant_mode", aiVariantMode);
 
     if (type === "multiple_choice") {
       const validOptions = options.map((option) => option.trim()).filter(Boolean);
@@ -436,11 +463,11 @@ export default function EditQuestionDialog({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1">
                 <p className="text-sm font-semibold text-foreground">
-                  AI-аар өгөгдөл солих
+                  AI-аар хувилбар үүсгэх
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Идэвхтэй үед сурагч бүр энэ асуултыг өөр өгөгдөлтэй
-                  хувилбараар харна.
+                  Идэвхтэй үед сурагч бүр ижил түвшний өөр өгөгдөлтэй
+                  хувилбараар энэ асуултыг харна.
                 </p>
               </div>
               <Button
@@ -455,7 +482,9 @@ export default function EditQuestionDialog({
                 onClick={() => setAiVariantEnabled((prev) => !prev)}
               >
                 <Sparkles className="mr-2 h-4 w-4" />
-                {aiVariantEnabled ? "AI хувилбар идэвхтэй" : "Идэвхжүүлэх"}
+                {aiVariantEnabled
+                  ? "AI хувилбар идэвхтэй"
+                  : "AI-аар хувилбар үүсгэх"}
               </Button>
             </div>
             <input
@@ -463,6 +492,49 @@ export default function EditQuestionDialog({
               name="ai_variant_enabled"
               value={aiVariantEnabled ? "on" : "off"}
             />
+            <input type="hidden" name="ai_variant_mode" value={aiVariantMode} />
+            {aiVariantEnabled ? (
+              <div className="grid gap-3 md:grid-cols-2">
+                {aiVariantModes.map((mode) => {
+                  const isActive = aiVariantMode === mode.value;
+
+                  return (
+                    <button
+                      key={mode.value}
+                      type="button"
+                      onClick={() => setAiVariantMode(mode.value)}
+                      className={cn(
+                        "rounded-[20px] border px-4 py-3 text-left transition-colors",
+                        isActive
+                          ? "border-amber-300 bg-white text-zinc-950 shadow-sm"
+                          : "border-amber-100 bg-amber-50/60 text-zinc-600 hover:border-amber-200 hover:bg-white/80"
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold">{mode.label}</p>
+                        {isActive ? (
+                          <Check className="h-4 w-4 text-amber-700" />
+                        ) : null}
+                      </div>
+                      <p className="mt-1 text-sm leading-6">{mode.description}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+            {aiVariantEnabled ? (
+              <p className="rounded-2xl border border-amber-200/70 bg-amber-100/70 px-3 py-2 text-sm text-amber-950">
+                {aiVariantMode === "two_fixed"
+                  ? "2 хувилбарын mode сонговол AI тогтмол хоёр хувилбар бэлдэж, сурагч бүр тэр хоёроос нэгийг нь авна."
+                  : "Сурагч бүрт өөр mode сонговол session эхлэх бүрт сурагчид шинэ өгөгдөлтэй AI хувилбар үүсгэнэ."}
+              </p>
+            ) : null}
+            {aiVariantEnabled ? (
+              <p className="rounded-2xl bg-white/80 px-3 py-2 text-sm text-amber-900">
+                Асуултын логик, түвшин, төрөл өөрчлөгдөхгүй. Зөвхөн тоо,
+                нэр, өгөгдөл, сонголтын текст шинэчлэгдэнэ.
+              </p>
+            ) : null}
           </div>
 
           {selectedPassage && (
