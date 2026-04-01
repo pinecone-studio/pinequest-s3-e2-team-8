@@ -1,6 +1,6 @@
-import { getPromptModel } from "@/lib/ai/config";
+﻿import { getPromptModel } from "@/lib/ai/config";
 import { createClient } from "@/lib/supabase/server";
-import type { QuestionType } from "@/types";
+import type { AiQuestionVariantMode, QuestionType } from "@/types";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -21,6 +21,7 @@ type VariantQuestionBase = {
   correct_answer: string | null;
   explanation: string | null;
   ai_variant_enabled?: boolean | null;
+  ai_variant_mode?: AiQuestionVariantMode | null;
 };
 
 type GeneratedVariantCandidate = {
@@ -48,6 +49,21 @@ export type StoredQuestionVariant = {
   updated_at?: string;
 };
 
+export type StoredQuestionVariantPreset = {
+  id?: string;
+  question_id: string;
+  slot: number;
+  type: QuestionType;
+  content: string;
+  content_html: string | null;
+  image_url: string | null;
+  options: string[] | null;
+  correct_answer: string | null;
+  explanation: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export function isQuestionVariantSchemaMissing(
   errorCode?: string | null,
   message?: string | null
@@ -61,16 +77,24 @@ export function isQuestionVariantSchemaMissing(
 
   return (
     normalizedMessage.includes("ai_variant_enabled") ||
+    normalizedMessage.includes("ai_variant_mode") ||
     normalizedMessage.includes("exam_session_question_variants") ||
+    normalizedMessage.includes("question_ai_variant_presets") ||
     (normalizedMessage.includes("schema cache") &&
       normalizedMessage.includes("questions"))
   );
 }
 
+function getResolvedVariantMode(
+  question: Pick<VariantQuestionBase, "ai_variant_mode">
+): AiQuestionVariantMode {
+  return question.ai_variant_mode === "two_fixed" ? "two_fixed" : "per_student";
+}
+
 function extractJsonArray(text: string) {
   const match = text.match(/\[[\s\S]*\]/);
   if (!match) {
-    throw new Error("AI хувилбарын JSON хариултыг уншиж чадсангүй.");
+    throw new Error("AI Ñ…ÑƒÐ²Ð¸Ð»Ð±Ð°Ñ€Ñ‹Ð½ JSON Ñ…Ð°Ñ€Ð¸ÑƒÐ»Ñ‚Ñ‹Ð³ ÑƒÐ½ÑˆÐ¸Ð¶ Ñ‡Ð°Ð´ÑÐ°Ð½Ð³Ò¯Ð¹.");
   }
 
   return JSON.parse(match[0]) as unknown;
@@ -286,14 +310,29 @@ function normalizeGeneratedVariant(
   };
 }
 
+function buildFallbackVariant(
+  baseQuestion: VariantQuestionBase
+): StoredQuestionVariant {
+  return {
+    question_id: baseQuestion.id,
+    type: baseQuestion.type,
+    content: baseQuestion.content,
+    content_html: baseQuestion.content_html ?? null,
+    image_url: baseQuestion.image_url ?? null,
+    options: baseQuestion.options ?? null,
+    correct_answer: baseQuestion.correct_answer ?? null,
+    explanation: baseQuestion.explanation ?? null,
+  };
+}
+
 async function callGeminiForQuestionVariants(
-  sessionId: string,
+  seedNamespace: string,
   questions: VariantQuestionBase[]
 ) {
   const model = getPromptModel();
   const promptPayload = questions.map((question) => ({
     question_id: question.id,
-    seed_hint: `${sessionId}:${question.id}`,
+    seed_hint: `${seedNamespace}:${question.id}`,
     type: question.type,
     content: question.content,
     options: question.options,
@@ -301,32 +340,34 @@ async function callGeminiForQuestionVariants(
     explanation: question.explanation,
   }));
 
-  const prompt = `Чи шалгалтын асуултын нэг хувилбарыг сурагч бүрт өөр өгөгдөл, нэр, тоо, нөхцөлөөр хувиргадаг туслах AI юм.
+  const prompt = `You generate one alternate version of each exam question for a student session.
 
-Гол дүрэм:
-1. question_id-г яг хэвээр нь буцаа.
-2. type-г огт өөрчлөхгүй.
-3. Асуултын сэдэв, чадвар, хүндрэлийн түвшин, зөв/буруу логикийг хадгал.
-4. Зөвхөн гаднах өгөгдөл, тоо, нэр, объект, хүснэгтийн утга, хувьсагч, сонголтын текстийг шинэчил.
-5. Шинэ correct_answer нь шинэ options-той 100% таарч байх ёстой.
-6. matching төрөл дээр options-ыг [{"left":"...","right":"..."}] хэлбэрээр өг.
-7. multiple_response төрөл дээр correct_answer-ыг string array эсвэл JSON array string хэлбэрээр өгч болно.
-8. essay төрөл дээр correct_answer-г null өг.
-9. JSON array-аас өөр тайлбар, markdown, code block битгий нэм.
-10. seed_hint бүрийн дагуу хувилбарууд хоорондоо ялгаатай байг.
+Hard requirements:
+1. Keep question_id exactly the same.
+2. Keep type exactly the same.
+3. Do not make the question easier or harder.
+4. Preserve the same concept, logic, reasoning path, and difficulty level.
+5. Only change surface details such as numbers, names, labels, short scenario data, variable values, or option wording.
+6. If the question has options, keep the same number of options.
+7. The new correct_answer must match the new content and options exactly.
+8. For matching questions, return options as [{"left":"...","right":"..."}].
+9. For multiple_response questions, return correct_answer as either a string array or a JSON array string.
+10. For essay questions, set correct_answer to null.
+11. Return JSON array only. Do not include markdown, explanations outside JSON, or code fences.
+12. Use seed_hint so different sessions can get different surface data while the logic and difficulty stay unchanged.
 
-Оролт:
+Input:
 ${JSON.stringify(promptPayload, null, 2)}
 
-Гаралт:
+Output:
 [
   {
     "question_id": "uuid",
     "type": "multiple_choice",
-    "content": "хувиргасан асуулт",
+    "content": "rewritten question with different names or numbers",
     "options": ["A", "B", "C", "D"],
     "correct_answer": "B",
-    "explanation": "товч тайлбар эсвэл null"
+    "explanation": "short explanation or null"
   }
 ]`;
 
@@ -366,6 +407,220 @@ export async function getSessionQuestionVariantMap(
   );
 }
 
+async function upsertSessionVariantRows(
+  supabase: SupabaseServerClient,
+  existingMap: Map<string, StoredQuestionVariant>,
+  rows: Array<{
+    session_id: string;
+    question_id: string;
+    user_id: string;
+    type: QuestionType;
+    content: string;
+    content_html: string | null;
+    image_url: string | null;
+    options: string[] | null;
+    correct_answer: string | null;
+    explanation: string | null;
+  }>
+) {
+  if (rows.length === 0) {
+    return existingMap;
+  }
+
+  const { data, error } = await supabase
+    .from("exam_session_question_variants")
+    .upsert(rows, {
+      onConflict: "session_id,question_id",
+    })
+    .select(
+      "id, session_id, question_id, user_id, type, content, content_html, image_url, options, correct_answer, explanation, created_at, updated_at"
+    );
+
+  if (error) {
+    if (isQuestionVariantSchemaMissing(error.code, error.message)) {
+      return existingMap;
+    }
+
+    throw new Error(error.message);
+  }
+
+  const merged = new Map(existingMap);
+  for (const row of data ?? []) {
+    merged.set(String(row.question_id), row as StoredQuestionVariant);
+  }
+
+  return merged;
+}
+
+export async function getQuestionVariantPresetMap(
+  supabase: SupabaseServerClient,
+  questionIds: string[]
+) {
+  if (questionIds.length === 0) {
+    return new Map<string, StoredQuestionVariantPreset[]>();
+  }
+
+  const { data, error } = await supabase
+    .from("question_ai_variant_presets")
+    .select(
+      "id, question_id, slot, type, content, content_html, image_url, options, correct_answer, explanation, created_at, updated_at"
+    )
+    .in("question_id", questionIds)
+    .order("slot", { ascending: true });
+
+  if (error) {
+    if (isQuestionVariantSchemaMissing(error.code, error.message)) {
+      return new Map<string, StoredQuestionVariantPreset[]>();
+    }
+
+    throw new Error(error.message);
+  }
+
+  const presetMap = new Map<string, StoredQuestionVariantPreset[]>();
+
+  for (const preset of data ?? []) {
+    const questionId = String(preset.question_id);
+    const existing = presetMap.get(questionId) ?? [];
+    existing.push(preset as StoredQuestionVariantPreset);
+    presetMap.set(questionId, existing);
+  }
+
+  return presetMap;
+}
+
+export async function deleteQuestionVariantPresets(
+  supabase: SupabaseServerClient,
+  questionId: string
+) {
+  const { error } = await supabase
+    .from("question_ai_variant_presets")
+    .delete()
+    .eq("question_id", questionId);
+
+  if (error && !isQuestionVariantSchemaMissing(error.code, error.message)) {
+    throw new Error(error.message);
+  }
+}
+
+export async function ensureQuestionVariantPresets(
+  supabase: SupabaseServerClient,
+  question: VariantQuestionBase
+) {
+  if (getResolvedVariantMode(question) !== "two_fixed") {
+    await deleteQuestionVariantPresets(supabase, question.id);
+    return [];
+  }
+
+  const rows = await Promise.all(
+    Array.from({ length: 2 }, async (_, index) => {
+      const slot = index + 1;
+      let normalized: StoredQuestionVariant | null = null;
+
+      try {
+        const [candidate] = await callGeminiForQuestionVariants(
+          `fixed:${question.id}:slot:${slot}`,
+          [question]
+        );
+        normalized = normalizeGeneratedVariant(question, candidate);
+      } catch (error) {
+        console.error("[question-variants] preset generation failed", error);
+      }
+
+      const variant = normalized ?? buildFallbackVariant(question);
+
+      return {
+        question_id: question.id,
+        slot,
+        type: variant.type,
+        content: variant.content,
+        content_html: variant.content_html,
+        image_url: variant.image_url,
+        options: variant.options,
+        correct_answer: variant.correct_answer,
+        explanation: variant.explanation,
+      };
+    })
+  );
+
+  const { data, error } = await supabase
+    .from("question_ai_variant_presets")
+    .upsert(rows, {
+      onConflict: "question_id,slot",
+    })
+    .select(
+      "id, question_id, slot, type, content, content_html, image_url, options, correct_answer, explanation, created_at, updated_at"
+    );
+
+  if (error) {
+    if (isQuestionVariantSchemaMissing(error.code, error.message)) {
+      throw new Error(error.message);
+    }
+
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as StoredQuestionVariantPreset[];
+}
+
+export async function ensureSessionFixedQuestionVariants(
+  supabase: SupabaseServerClient,
+  params: {
+    sessionId: string;
+    userId: string;
+    questions: VariantQuestionBase[];
+    variantSlot: number;
+  }
+) {
+  const enabledQuestions = params.questions.filter(
+    (question) =>
+      Boolean(question.ai_variant_enabled) &&
+      getResolvedVariantMode(question) === "two_fixed"
+  );
+
+  if (enabledQuestions.length === 0) {
+    return new Map<string, StoredQuestionVariant>();
+  }
+
+  const existingMap = await getSessionQuestionVariantMap(
+    supabase,
+    params.sessionId
+  );
+  const missingQuestions = enabledQuestions.filter(
+    (question) => !existingMap.has(question.id)
+  );
+
+  if (missingQuestions.length === 0) {
+    return existingMap;
+  }
+
+  const presetMap = await getQuestionVariantPresetMap(
+    supabase,
+    missingQuestions.map((question) => question.id)
+  );
+
+  const rows = missingQuestions.map((question) => {
+    const presets = presetMap.get(question.id) ?? [];
+    const matchedPreset =
+      presets.find((preset) => preset.slot === params.variantSlot) ?? presets[0];
+    const variant = matchedPreset ?? buildFallbackVariant(question);
+
+    return {
+      session_id: params.sessionId,
+      question_id: question.id,
+      user_id: params.userId,
+      type: variant.type,
+      content: variant.content,
+      content_html: variant.content_html,
+      image_url: variant.image_url,
+      options: variant.options,
+      correct_answer: variant.correct_answer,
+      explanation: variant.explanation,
+    };
+  });
+
+  return upsertSessionVariantRows(supabase, existingMap, rows);
+}
+
 export async function ensureSessionQuestionVariants(
   supabase: SupabaseServerClient,
   params: {
@@ -374,8 +629,10 @@ export async function ensureSessionQuestionVariants(
     questions: VariantQuestionBase[];
   }
 ) {
-  const enabledQuestions = params.questions.filter((question) =>
-    Boolean(question.ai_variant_enabled)
+  const enabledQuestions = params.questions.filter(
+    (question) =>
+      Boolean(question.ai_variant_enabled) &&
+      getResolvedVariantMode(question) === "per_student"
   );
 
   if (enabledQuestions.length === 0) {
@@ -414,16 +671,8 @@ export async function ensureSessionQuestionVariants(
 
   const rows = missingQuestions.map((question) => {
     const normalized =
-      normalizeGeneratedVariant(question, candidateMap.get(question.id)) ?? {
-        question_id: question.id,
-        type: question.type,
-        content: question.content,
-        content_html: question.content_html ?? null,
-        image_url: question.image_url ?? null,
-        options: question.options ?? null,
-        correct_answer: question.correct_answer ?? null,
-        explanation: question.explanation ?? null,
-      };
+      normalizeGeneratedVariant(question, candidateMap.get(question.id)) ??
+      buildFallbackVariant(question);
 
     return {
       session_id: params.sessionId,
@@ -439,33 +688,7 @@ export async function ensureSessionQuestionVariants(
     };
   });
 
-  if (rows.length === 0) {
-    return existingMap;
-  }
-
-  const { data, error } = await supabase
-    .from("exam_session_question_variants")
-    .upsert(rows, {
-      onConflict: "session_id,question_id",
-    })
-    .select(
-      "id, session_id, question_id, user_id, type, content, content_html, image_url, options, correct_answer, explanation, created_at, updated_at"
-    );
-
-  if (error) {
-    if (isQuestionVariantSchemaMissing(error.code, error.message)) {
-      return existingMap;
-    }
-
-    throw new Error(error.message);
-  }
-
-  const merged = new Map(existingMap);
-  for (const row of data ?? []) {
-    merged.set(String(row.question_id), row as StoredQuestionVariant);
-  }
-
-  return merged;
+  return upsertSessionVariantRows(supabase, existingMap, rows);
 }
 
 export function applyStoredVariantToQuestion<

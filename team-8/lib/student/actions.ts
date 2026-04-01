@@ -16,7 +16,10 @@ import {
 } from "@/lib/exam-snapshot";
 import {
   applyStoredVariantToQuestion,
+  ensureSessionFixedQuestionVariants,
+  ensureSessionQuestionVariants,
   getSessionQuestionVariantMap,
+  isQuestionVariantSchemaMissing,
   type StoredQuestionVariant,
 } from "@/lib/question-variants";
 import {
@@ -50,6 +53,7 @@ import {
   shouldAutoFlag,
   isStrictProctoredExam,
 } from "@/lib/proctoring";
+import type { AiQuestionVariantMode, QuestionType } from "@/types";
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 type SupabaseActionClient = Pick<SupabaseServerClient, "from" | "rpc">;
 type ProctorEventMetadata = Record<
@@ -140,6 +144,7 @@ export type StudentSafeQuestion = {
   matching_prompts?: string[];
   matching_choices?: string[];
   ai_variant_enabled?: boolean;
+  ai_variant_mode?: AiQuestionVariantMode;
   points: number;
   order_index: number;
   question_passages?: StudentQuestionPassage | null;
@@ -844,7 +849,7 @@ type FinalizeAnswerPayload = {
 
 type FinalizeQuestionRecord = {
   id: string;
-  type: string;
+  type: QuestionType;
   content: string;
   content_html: string | null;
   image_url: string | null;
@@ -853,6 +858,8 @@ type FinalizeQuestionRecord = {
   explanation: string | null;
   points: number;
   order_index: number;
+  ai_variant_enabled: boolean;
+  ai_variant_mode: AiQuestionVariantMode;
 };
 
 async function loadFinalizeQuestionContext(
@@ -875,19 +882,63 @@ async function loadFinalizeQuestionContext(
     };
   }
 
-  const { data: questions, error } = await supabase
+  const withMode = await supabase
     .from("questions")
     .select(
-      "id, type, content, content_html, image_url, options, correct_answer, explanation, points, order_index"
+      "id, type, content, content_html, image_url, options, correct_answer, explanation, points, order_index, ai_variant_enabled, ai_variant_mode"
     )
     .eq("exam_id", examId)
     .order("order_index", { ascending: true });
 
-  if (error) {
-    return { error: error.message };
-  }
+  let rows: FinalizeQuestionRecord[] = [];
 
-  const rows = (questions ?? []) as FinalizeQuestionRecord[];
+  if (!withMode.error) {
+    rows = (withMode.data ?? []) as FinalizeQuestionRecord[];
+  } else if (
+    isQuestionVariantSchemaMissing(withMode.error.code, withMode.error.message)
+  ) {
+    const withFlagOnly = await supabase
+      .from("questions")
+      .select(
+        "id, type, content, content_html, image_url, options, correct_answer, explanation, points, order_index, ai_variant_enabled"
+      )
+      .eq("exam_id", examId)
+      .order("order_index", { ascending: true });
+
+    if (!withFlagOnly.error) {
+      rows = (withFlagOnly.data ?? []).map((question) => ({
+        ...question,
+        ai_variant_mode: "per_student" as AiQuestionVariantMode,
+      })) as FinalizeQuestionRecord[];
+    } else if (
+      isQuestionVariantSchemaMissing(
+        withFlagOnly.error.code,
+        withFlagOnly.error.message
+      )
+    ) {
+      const fallback = await supabase
+        .from("questions")
+        .select(
+          "id, type, content, content_html, image_url, options, correct_answer, explanation, points, order_index"
+        )
+        .eq("exam_id", examId)
+        .order("order_index", { ascending: true });
+
+      if (fallback.error) {
+        return { error: fallback.error.message };
+      }
+
+      rows = (fallback.data ?? []).map((question) => ({
+        ...question,
+        ai_variant_enabled: false,
+        ai_variant_mode: "per_student" as AiQuestionVariantMode,
+      })) as FinalizeQuestionRecord[];
+    } else {
+      return { error: withFlagOnly.error.message };
+    }
+  } else {
+    return { error: withMode.error.message };
+  }
 
   return {
     questionMap: new Map(rows.map((question) => [question.id, question])),
@@ -897,6 +948,69 @@ async function loadFinalizeQuestionContext(
     ),
     hasEssay: rows.some((question) => question.type === "essay"),
   };
+}
+
+function getDeterministicVariantSlot(seed: string, slotCount: number) {
+  let hash = 0;
+
+  for (const char of seed) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+
+  return (hash % slotCount) + 1;
+}
+
+async function ensureSessionVariantsForExam(
+  supabase: SupabaseServerClient,
+  userId: string,
+  examId: string,
+  sessionId: string
+) {
+  const questionContext = await loadFinalizeQuestionContext(supabase, examId);
+
+  if ("error" in questionContext) {
+    console.error(
+      "[question-variants] unable to load question context",
+      questionContext.error
+    );
+    return;
+  }
+
+  try {
+    const questions = Array.from(questionContext.questionMap.values()).map(
+      (question) => ({
+        id: question.id,
+        type: question.type,
+        content: question.content,
+        content_html: question.content_html,
+        image_url: question.image_url,
+        options: question.options,
+        correct_answer: question.correct_answer,
+        explanation: question.explanation,
+        ai_variant_enabled: Boolean(question.ai_variant_enabled),
+        ai_variant_mode: question.ai_variant_mode ?? "per_student",
+      })
+    );
+    const fixedVariantSlot = getDeterministicVariantSlot(
+      `${sessionId}:${userId}`,
+      2
+    );
+
+    await ensureSessionFixedQuestionVariants(supabase, {
+      sessionId,
+      userId,
+      questions,
+      variantSlot: fixedVariantSlot,
+    });
+
+    await ensureSessionQuestionVariants(supabase, {
+      sessionId,
+      userId,
+      questions,
+    });
+  } catch (error) {
+    console.error("[question-variants] ensure failed", error);
+  }
 }
 
 function gradeAnswerForFinalize(
@@ -1851,19 +1965,33 @@ async function buildPreparedSessionState(
     } as const;
   }
 
+  if (session.status === "in_progress") {
+    await ensureSessionVariantsForExam(supabase, userId, examId, session.id);
+  }
+
+  const questionVariantMap = await getSessionQuestionVariantMap(
+    supabase,
+    session.id
+  );
+  const displayQuestions = examPayload.questions.map((question) =>
+    applyVariantToStudentSafeQuestion(
+      question,
+      questionVariantMap.get(question.id)
+    )
+  );
+
   if (options?.skipSavedStateReads) {
     return {
       sessionId: session.id,
       savedAnswers: {},
       answerAnalytics: {},
       initialTimeLeftSeconds,
-      displayQuestions: examPayload.questions,
+      displayQuestions,
       sessionAlreadyStarted: false,
     };
   }
 
-  const [questionVariantMap, savedAnswers, answerAnalytics] = await Promise.all([
-    getSessionQuestionVariantMap(supabase, session.id),
+  const [savedAnswers, answerAnalytics] = await Promise.all([
     getSessionAnswersForUser(supabase, session.id, userId),
     getSessionAnswerAnalyticsForUser(session.id, userId),
   ]);
@@ -1873,12 +2001,7 @@ async function buildPreparedSessionState(
     savedAnswers,
     answerAnalytics,
     initialTimeLeftSeconds,
-    displayQuestions: examPayload.questions.map((question) =>
-      applyVariantToStudentSafeQuestion(
-        question,
-        questionVariantMap.get(question.id)
-      )
-    ),
+    displayQuestions,
     sessionAlreadyStarted: true,
   };
 }

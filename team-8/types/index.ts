@@ -118,6 +118,7 @@ export type QuestionType =
   | "essay"
   | "fill_blank"
   | "matching";
+export type AiQuestionVariantMode = "per_student" | "two_fixed";
 export type Difficulty = "easy" | "medium" | "hard";
 export type DifficultyLevel = 1 | 2 | 3;
 export type QuestionBankVisibility =
@@ -145,6 +146,7 @@ export interface Question {
   topic_label_source?: string | null;
   topic_label_confidence?: number | null;
   ai_variant_enabled: boolean;
+  ai_variant_mode: AiQuestionVariantMode;
   created_at: string;
   question_passages?: QuestionPassage | null;
 }
