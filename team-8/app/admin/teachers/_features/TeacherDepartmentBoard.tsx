@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   BookMarked,
   ChevronRight,
@@ -181,21 +181,16 @@ export default function TeacherDepartmentBoard({
   allSubjects: Subject[];
 }) {
   const departments = useMemo(() => buildDepartmentGroups(teachers), [teachers]);
-  const [openDepartmentId, setOpenDepartmentId] = useState("");
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState("");
 
-  useEffect(() => {
-    if (departments.length === 0) {
-      setOpenDepartmentId("");
-      return;
-    }
-
-    if (!departments.some((department) => department.id === openDepartmentId)) {
-      setOpenDepartmentId(departments[0]?.id ?? "");
-    }
-  }, [departments, openDepartmentId]);
+  const activeDepartmentId =
+    selectedDepartmentId &&
+    departments.some((department) => department.id === selectedDepartmentId)
+      ? selectedDepartmentId
+      : departments[0]?.id ?? "";
 
   const activeDepartment =
-    departments.find((department) => department.id === openDepartmentId) ??
+    departments.find((department) => department.id === activeDepartmentId) ??
     departments[0] ??
     null;
 
@@ -218,7 +213,7 @@ export default function TeacherDepartmentBoard({
             <button
               key={department.id}
               type="button"
-              onClick={() => setOpenDepartmentId(department.id)}
+              onClick={() => setSelectedDepartmentId(department.id)}
               className={cn(
                 "rounded-[28px] border border-zinc-200 bg-gradient-to-br px-5 py-5 text-left transition-all",
                 department.surfaceClassName,
