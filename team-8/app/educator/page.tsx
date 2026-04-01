@@ -4,10 +4,8 @@ import Link from "next/link";
 import {
   ArrowUpRight,
   BookOpen,
-  CornerDownLeft,
   CornerDownRight,
   FileText,
-  Pencil,
   Plus,
 } from "lucide-react";
 import { getEducatorStats } from "@/lib/dashboard/actions";
@@ -193,7 +191,7 @@ export default async function EducatorDashboard() {
 
   return (
     <div className="flex flex-col gap-7.5">
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 py-2 md:grid-cols-3">
         <StatCard
           label="Нийт жишиг даалгаврууд"
           value={stats.totalQuestions}

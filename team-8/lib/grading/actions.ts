@@ -120,7 +120,9 @@ export async function getPendingSubmissions() {
     // Admin sees all pending submissions
       const { data } = await supabase
         .from("exam_sessions")
-        .select("*, exams(title), profiles(full_name, email, avatar_url)")
+        .select(
+          "*, exams!exam_sessions_exam_id_fkey(title), profiles!exam_sessions_user_id_fkey(full_name, email, avatar_url)"
+        )
         .eq("status", "submitted")
         .order("submitted_at", { ascending: true });
     return data ?? [];
@@ -176,7 +178,9 @@ export async function getPendingSubmissions() {
 
   const { data } = await supabase
     .from("exam_sessions")
-    .select("*, exams(title), profiles(full_name, email, avatar_url)")
+    .select(
+      "*, exams!exam_sessions_exam_id_fkey(title), profiles!exam_sessions_user_id_fkey(full_name, email, avatar_url)"
+    )
     .in("exam_id", examIds)
     .eq("status", "submitted")
     .order("submitted_at", { ascending: true });
@@ -224,6 +228,159 @@ export async function getPendingSubmissions() {
     if (!allowedGroups || !currentGroups) return false;
     return Array.from(currentGroups).some((groupId) => allowedGroups.has(groupId));
   });
+}
+
+export async function getGradingStats() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { toBeGraded: 0, ongoing: 0, graded: 0 };
+  }
+
+  const admin = await isAdminUser(supabase, user.id);
+  const statusScope = ["submitted", "in_progress", "graded"] as const;
+
+  if (admin) {
+    const { data } = await supabase
+      .from("exam_sessions")
+      .select("status")
+      .in("status", statusScope);
+
+    const counts = (data ?? []).reduce(
+      (acc, row) => {
+        if (row.status === "submitted") acc.toBeGraded += 1;
+        if (row.status === "in_progress") acc.ongoing += 1;
+        if (row.status === "graded") acc.graded += 1;
+        return acc;
+      },
+      { toBeGraded: 0, ongoing: 0, graded: 0 }
+    );
+
+    return counts;
+  }
+
+  // Collect exam IDs: owned + exams in teacher's subject scope
+  const examIdSet = new Set<string>();
+
+  // Teacher's own exams
+  const { data: ownExams } = await supabase
+    .from("exams")
+    .select("id")
+    .eq("created_by", user.id);
+
+  const ownExamIdSet = new Set((ownExams ?? []).map((exam) => exam.id));
+  for (const examId of ownExamIdSet) examIdSet.add(examId);
+
+  // Exams assigned to groups where teacher has an active teaching_assignment
+  // (subject must match — group-specific, not subject-wide)
+  const scopedExamGroups = new Map<string, Set<string>>();
+  const { data: teachingRows } = await supabase
+    .from("teaching_assignments")
+    .select("group_id, subject_id")
+    .eq("teacher_id", user.id)
+    .eq("is_active", true);
+
+  if (teachingRows && teachingRows.length > 0) {
+    const groupIds = [...new Set(teachingRows.map((r) => r.group_id))];
+
+    const { data: assignedExams } = await supabase
+      .from("exam_assignments")
+      .select("exam_id, group_id, exams(subject_id)")
+      .in("group_id", groupIds);
+
+    for (const ae of assignedExams ?? []) {
+      const examSubjectId = Array.isArray(ae.exams)
+        ? ae.exams[0]?.subject_id
+        : (ae.exams as { subject_id: string } | null)?.subject_id;
+
+      // Must match both subject AND the specific group (not just subject-wide)
+      const validTA = teachingRows.find(
+        (ta) => ta.subject_id === examSubjectId && ta.group_id === ae.group_id
+      );
+      if (!validTA) continue;
+      examIdSet.add(ae.exam_id);
+      if (!ownExamIdSet.has(ae.exam_id)) {
+        const groups = scopedExamGroups.get(ae.exam_id) ?? new Set<string>();
+        groups.add(ae.group_id);
+        scopedExamGroups.set(ae.exam_id, groups);
+      }
+    }
+  }
+
+  const examIds = [...examIdSet];
+  if (examIds.length === 0) {
+    return { toBeGraded: 0, ongoing: 0, graded: 0 };
+  }
+
+  const { data } = await supabase
+    .from("exam_sessions")
+    .select("user_id, exam_id, status")
+    .in("exam_id", examIds)
+    .in("status", statusScope);
+
+  let sessions = data ?? [];
+  if (sessions.length === 0 || scopedExamGroups.size === 0) {
+    return sessions.reduce(
+      (acc, row) => {
+        if (row.status === "submitted") acc.toBeGraded += 1;
+        if (row.status === "in_progress") acc.ongoing += 1;
+        if (row.status === "graded") acc.graded += 1;
+        return acc;
+      },
+      { toBeGraded: 0, ongoing: 0, graded: 0 }
+    );
+  }
+
+  const scopedStudentIds = Array.from(
+    new Set(
+      sessions
+        .filter((session) => !ownExamIdSet.has(session.exam_id))
+        .map((session) => session.user_id as string)
+    )
+  );
+  if (scopedStudentIds.length > 0) {
+    const scopedGroupIds = Array.from(
+      new Set(
+        Array.from(scopedExamGroups.values()).flatMap((groupIds) =>
+          Array.from(groupIds)
+        )
+      )
+    );
+    const { data: memberRows } = await supabase
+      .from("student_group_members")
+      .select("student_id, group_id")
+      .in("student_id", scopedStudentIds)
+      .in("group_id", scopedGroupIds);
+
+    const studentGroups = new Map<string, Set<string>>();
+    for (const row of memberRows ?? []) {
+      const groups = studentGroups.get(row.student_id) ?? new Set<string>();
+      groups.add(row.group_id);
+      studentGroups.set(row.student_id, groups);
+    }
+
+    sessions = sessions.filter((session) => {
+      if (ownExamIdSet.has(session.exam_id)) return true;
+      const allowedGroups = scopedExamGroups.get(session.exam_id);
+      const currentGroups = studentGroups.get(session.user_id as string);
+      if (!allowedGroups || !currentGroups) return false;
+      return Array.from(currentGroups).some((groupId) =>
+        allowedGroups.has(groupId)
+      );
+    });
+  }
+
+  return sessions.reduce(
+    (acc, row) => {
+      if (row.status === "submitted") acc.toBeGraded += 1;
+      if (row.status === "in_progress") acc.ongoing += 1;
+      if (row.status === "graded") acc.graded += 1;
+      return acc;
+    },
+    { toBeGraded: 0, ongoing: 0, graded: 0 }
+  );
 }
 
 export async function getSessionForGrading(sessionId: string) {
