@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Search } from "lucide-react";
+import { Eye, Search } from "lucide-react";
 import {
   bulkDeleteQuestionBankItems,
   importQuestionFromBank,
@@ -74,7 +74,7 @@ function stableStringCompare(left: string, right: string) {
 
 function uniqueValues(values: Array<string | null | undefined>) {
   return Array.from(
-    new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean))
+    new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean)),
   ).sort(stableStringCompare);
 }
 
@@ -103,10 +103,10 @@ export default function QuestionBankBrowser({
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
   const [expandedQuestionIds, setExpandedQuestionIds] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(
-    importUnavailableMessage ?? null
+    importUnavailableMessage ?? null,
   );
   const [messageTone, setMessageTone] = useState<MessageTone>(
-    importUnavailableMessage ? "error" : "neutral"
+    importUnavailableMessage ? "error" : "neutral",
   );
   const [lastImportedQuestionId, setLastImportedQuestionId] = useState<string | null>(null);
   const [lastImportedSampleId, setLastImportedSampleId] = useState<string | null>(null);
@@ -119,10 +119,13 @@ export default function QuestionBankBrowser({
   const normalizedQuery = query.trim().toLowerCase();
   const isBusy = pendingAction !== null;
 
-  const teacherSubjectIds = useMemo(() => subjects.map((s) => s.id), [subjects]);
+  const teacherSubjectIds = useMemo(
+    () => subjects.map((s) => s.id),
+    [subjects],
+  );
   const suggestedPrivateSubjectId = useMemo(
     () => suggestSubjectIdFromPrivateBank(teacherSubjectIds, privateQuestions),
-    [privateQuestions, teacherSubjectIds]
+    [privateQuestions, teacherSubjectIds],
   );
 
   function changeTab(next: TabKey) {
@@ -131,7 +134,11 @@ export default function QuestionBankBrowser({
     setBatchFilter("all");
     setTab(next);
 
-    if (next === "private" && subjectFilter === "all" && suggestedPrivateSubjectId) {
+    if (
+      next === "private" &&
+      subjectFilter === "all" &&
+      suggestedPrivateSubjectId
+    ) {
       setSubjectFilter(suggestedPrivateSubjectId);
     }
   }
@@ -156,16 +163,20 @@ export default function QuestionBankBrowser({
       });
     }
 
-    const items = Array.from(byId.values()).sort((a, b) => stableStringCompare(a.label, b.label));
+    const items = Array.from(byId.values()).sort((a, b) =>
+      stableStringCompare(a.label, b.label),
+    );
     return { hasNone, items };
   }, [privateQuestions]);
 
   const subjectOptions = useMemo(
     () =>
       Array.from(
-        new Map(subjects.map((subject) => [subject.id, subject.name])).entries()
+        new Map(
+          subjects.map((subject) => [subject.id, subject.name]),
+        ).entries(),
       ).sort((left, right) => stableStringCompare(left[1], right[1])),
-    [subjects]
+    [subjects],
   );
 
   const gradeOptions = useMemo(
@@ -176,10 +187,10 @@ export default function QuestionBankBrowser({
             ...certifiedQuestions.map((question) => question.grade_level),
             ...privateQuestions.map((question) => question.grade_level),
             ...sampleExams.map((sampleExam) => sampleExam.grade_level),
-          ].filter((grade): grade is number => Boolean(grade))
-        )
+          ].filter((grade): grade is number => Boolean(grade)),
+        ),
       ).sort((left, right) => left - right),
-    [certifiedQuestions, privateQuestions, sampleExams]
+    [certifiedQuestions, privateQuestions, sampleExams],
   );
 
   const subtopicOptions = useMemo(
@@ -189,7 +200,7 @@ export default function QuestionBankBrowser({
         ...privateQuestions.map((question) => question.subtopic),
         ...sampleExams.map((sampleExam) => sampleExam.subtopic),
       ]),
-    [certifiedQuestions, privateQuestions, sampleExams]
+    [certifiedQuestions, privateQuestions, sampleExams],
   );
 
   const filteredSampleExams = useMemo(() => {
@@ -197,9 +208,13 @@ export default function QuestionBankBrowser({
       const matchesQuery =
         normalizedQuery.length === 0 ||
         sampleExam.title.toLowerCase().includes(normalizedQuery) ||
-        (sampleExam.description ?? "").toLowerCase().includes(normalizedQuery) ||
+        (sampleExam.description ?? "")
+          .toLowerCase()
+          .includes(normalizedQuery) ||
         (sampleExam.subtopic ?? "").toLowerCase().includes(normalizedQuery) ||
-        (sampleExam.subjects?.name ?? "").toLowerCase().includes(normalizedQuery);
+        (sampleExam.subjects?.name ?? "")
+          .toLowerCase()
+          .includes(normalizedQuery);
 
       const matchesSubject =
         subjectFilter === "all" || sampleExam.subject_id === subjectFilter;
@@ -236,13 +251,16 @@ export default function QuestionBankBrowser({
         question.content.toLowerCase().includes(normalizedQuery) ||
         (question.explanation ?? "").toLowerCase().includes(normalizedQuery) ||
         (question.subtopic ?? "").toLowerCase().includes(normalizedQuery) ||
-        (question.subjects?.name ?? "").toLowerCase().includes(normalizedQuery) ||
+        (question.subjects?.name ?? "")
+          .toLowerCase()
+          .includes(normalizedQuery) ||
         tags.some((tag) => tag.toLowerCase().includes(normalizedQuery));
 
       const matchesSubject =
         subjectFilter === "all" || question.subject_id === subjectFilter;
       const matchesGrade =
-        gradeFilter === "all" || String(question.grade_level ?? "") === gradeFilter;
+        gradeFilter === "all" ||
+        String(question.grade_level ?? "") === gradeFilter;
       const matchesSubtopic =
         subtopicFilter === "all" || question.subtopic === subtopicFilter;
       const matchesDifficulty =
@@ -277,13 +295,16 @@ export default function QuestionBankBrowser({
         question.content.toLowerCase().includes(normalizedQuery) ||
         (question.explanation ?? "").toLowerCase().includes(normalizedQuery) ||
         (question.subtopic ?? "").toLowerCase().includes(normalizedQuery) ||
-        (question.subjects?.name ?? "").toLowerCase().includes(normalizedQuery) ||
+        (question.subjects?.name ?? "")
+          .toLowerCase()
+          .includes(normalizedQuery) ||
         tags.some((tag) => tag.toLowerCase().includes(normalizedQuery));
 
       const matchesSubject =
         subjectFilter === "all" || question.subject_id === subjectFilter;
       const matchesGrade =
-        gradeFilter === "all" || String(question.grade_level ?? "") === gradeFilter;
+        gradeFilter === "all" ||
+        String(question.grade_level ?? "") === gradeFilter;
       const matchesSubtopic =
         subtopicFilter === "all" || question.subtopic === subtopicFilter;
       const matchesDifficulty =
@@ -342,7 +363,7 @@ export default function QuestionBankBrowser({
             targetExamSubjectId &&
             question.subject_id &&
             question.subject_id !== targetExamSubjectId
-          )
+          ),
       )
       .map((question) => question.id);
   }, [activeFilteredBankQuestions, examId, tab, targetExamSubjectId]);
@@ -366,7 +387,7 @@ export default function QuestionBankBrowser({
     setSelectedQuestionIds((prev) =>
       prev.includes(questionId)
         ? prev.filter((item) => item !== questionId)
-        : [...prev, questionId]
+        : [...prev, questionId],
     );
   }
 
@@ -374,7 +395,7 @@ export default function QuestionBankBrowser({
     setExpandedQuestionIds((prev) =>
       prev.includes(questionId)
         ? prev.filter((item) => item !== questionId)
-        : [...prev, questionId]
+        : [...prev, questionId],
     );
   }
 
@@ -421,7 +442,7 @@ export default function QuestionBankBrowser({
           setLastImportedSampleId(null);
           setStatusMessage(
             result?.warning ? "warning" : "success",
-            result?.warning ?? "Асуулт шалгалтад амжилттай нэмэгдлээ."
+            result?.warning ?? "Асуулт шалгалтад амжилттай нэмэгдлээ.",
           );
           router.refresh();
         } finally {
@@ -455,7 +476,7 @@ export default function QuestionBankBrowser({
           setStatusMessage(
             result?.warning ? "warning" : "success",
             result?.warning ??
-              `${result.count ?? pendingIds.length} асуулт шалгалтад амжилттай нэмэгдлээ.`
+              `${result.count ?? pendingIds.length} асуулт шалгалтад амжилттай нэмэгдлээ.`,
           );
           router.refresh();
         } finally {
@@ -487,7 +508,7 @@ export default function QuestionBankBrowser({
           setLastImportedSampleId(null);
           setStatusMessage(
             "success",
-            `${result.deletedCount ?? pendingIds.length} материал устгагдлаа.`
+            `${result.deletedCount ?? pendingIds.length} материал устгагдлаа.`,
           );
           router.refresh();
         } finally {
@@ -575,7 +596,10 @@ export default function QuestionBankBrowser({
           </Button>
         </div>
         {tab === "private" ? (
-          <PrivateBankAddMaterial subjects={subjects} viewerIsAdmin={viewerIsAdmin} />
+          <PrivateBankAddMaterial
+            subjects={subjects}
+            viewerIsAdmin={viewerIsAdmin}
+          />
         ) : null}
       </div>
 
@@ -610,7 +634,9 @@ export default function QuestionBankBrowser({
             className="h-10 rounded-md border bg-background px-3 text-sm"
           >
             <option value="all">Бүх багц</option>
-            {batchOptions.hasNone ? <option value="__none">Багцгүй</option> : null}
+            {batchOptions.hasNone ? (
+              <option value="__none">Багцгүй</option>
+            ) : null}
             {batchOptions.items.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.label}
@@ -694,45 +720,66 @@ export default function QuestionBankBrowser({
             Жишиг шалгалт олдсонгүй.
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="flex flex-wrap items-start gap-4">
             {filteredSampleExams.map((sampleExam) => {
               const hasSubjectMismatch = Boolean(
                 targetExamSubjectId &&
-                  sampleExam.subject_id &&
-                  sampleExam.subject_id !== targetExamSubjectId
+                sampleExam.subject_id &&
+                sampleExam.subject_id !== targetExamSubjectId,
               );
+              const subtitle = [
+                sampleExam.subtopic,
+                `${sampleExam.grade_level}-р анги`,
+              ]
+                .filter(Boolean)
+                .join(" · ");
 
               return (
-                <Card key={sampleExam.id}>
-                  <CardContent className="space-y-4 pt-4">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                      <div className="space-y-2">
-                        <h3 className="font-semibold">{sampleExam.title}</h3>
-                        <div className="flex flex-wrap gap-2">
-                          {sampleExam.subjects?.name ? (
-                            <Badge variant="outline">{sampleExam.subjects.name}</Badge>
-                          ) : null}
-                          <Badge variant="outline">
-                            {sampleExam.grade_level}-р анги
-                          </Badge>
-                          {sampleExam.subtopic ? (
-                            <Badge variant="outline">{sampleExam.subtopic}</Badge>
-                          ) : null}
-                          <Badge variant="secondary">
-                            {difficultyLabels[sampleExam.difficulty_level]}
-                          </Badge>
-                          <Badge variant="outline">
-                            {sampleExam.duration_minutes} минут
-                          </Badge>
-                          <Badge variant="outline">
-                            {sampleExam.question_count} асуулт
-                          </Badge>
+                <Card
+                  key={sampleExam.id}
+                  className="flex min-h-[320px] w-full self-start sm:w-[360px] shadow-sm"
+                >
+                  <CardContent className="flex h-full flex-col gap-4 pt-4">
+                    <div className="flex flex-1 flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="flex items-start gap-3">
+                          <div className="h-11 w-11 shrink-0 rounded-lg bg-muted/60 ring-1 ring-foreground/10" />
+                          <div className="min-w-0">
+                            <h3 className="line-clamp-2 text-base font-semibold leading-snug">
+                              {sampleExam.title}
+                            </h3>
+                            {subtitle ? (
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                {subtitle}
+                              </p>
+                            ) : null}
+                          </div>
                         </div>
                         {sampleExam.description ? (
-                          <p className="text-sm text-muted-foreground">
+                          <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
                             {sampleExam.description}
                           </p>
                         ) : null}
+                        <div className="mt-3 space-y-2">
+                          <div className="flex flex-wrap gap-2">
+                            <Badge variant="outline">
+                              {sampleExam.question_count} асуулт
+                            </Badge>
+                            <Badge variant="secondary">
+                              {difficultyLabels[sampleExam.difficulty_level]}
+                            </Badge>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {sampleExam.subjects?.name ? (
+                              <Badge variant="outline">
+                                {sampleExam.subjects.name}
+                              </Badge>
+                            ) : null}
+                            <Badge variant="outline">
+                              {sampleExam.duration_minutes} минут
+                            </Badge>
+                          </div>
+                        </div>
                       </div>
 
                       {examId ? (
@@ -756,17 +803,23 @@ export default function QuestionBankBrowser({
 
                     {sampleExam.sample_exam_items &&
                     sampleExam.sample_exam_items.length > 0 ? (
-                      <details className="rounded-lg border bg-muted/10 p-3">
-                        <summary className="cursor-pointer text-sm font-medium">
-                          Агуулга харах
+                      <details className="mt-auto">
+                        <summary className="mx-auto flex h-[40px] w-[306px] cursor-pointer list-none items-center justify-center gap-[10px] rounded-xl border border-gray-300 bg-gray-50 px-[10px] py-[8px] text-sm font-semibold text-gray-900 transition hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+                          <Eye className="h-4 w-4" />
+                          Үзэх
                         </summary>
-                        <div className="mt-3 space-y-3">
+                        <div className="mt-3 space-y-3 rounded-lg bg-muted/10 p-3">
                           {sampleExam.sample_exam_items
-                            .sort((left, right) => left.order_index - right.order_index)
+                            .sort(
+                              (left, right) =>
+                                left.order_index - right.order_index,
+                            )
                             .map((item, index) => (
                               <div key={item.id} className="space-y-1">
                                 <div className="flex flex-wrap items-center gap-2 text-sm">
-                                  <span className="font-medium">{index + 1}.</span>
+                                  <span className="font-medium">
+                                    {index + 1}.
+                                  </span>
                                   {item.question_bank?.type ? (
                                     <Badge variant="outline">
                                       {typeLabels[item.question_bank.type] ??
@@ -805,7 +858,7 @@ export default function QuestionBankBrowser({
         </div>
       ) : (
         <div className="space-y-3">
-          {(examId || tab === "private") ? (
+          {examId || tab === "private" ? (
             <Card
               className={
                 tab === "private"
@@ -822,7 +875,9 @@ export default function QuestionBankBrowser({
               >
                 <div className="space-y-1">
                   <p className="text-sm font-medium">
-                    {tab === "private" ? "Сонгосон материалууд" : "Сонгосон асуултууд"}
+                    {tab === "private"
+                      ? "Сонгосон материалууд"
+                      : "Сонгосон асуултууд"}
                   </p>
                   <p className="text-sm text-muted-foreground">
                     {selectedQuestionIds.length > 0
@@ -888,10 +943,12 @@ export default function QuestionBankBrowser({
                       </AlertDialogTrigger>
                       <AlertDialogContent>
                         <AlertDialogHeader>
-                          <AlertDialogTitle>Сонгосон материалуудыг устгах уу?</AlertDialogTitle>
+                          <AlertDialogTitle>
+                            Сонгосон материалуудыг устгах уу?
+                          </AlertDialogTitle>
                           <AlertDialogDescription>
-                            Сонгосон {selectedQuestionIds.length} материалыг хувийн сангаас бүр мөсөн
-                            устгана.
+                            Сонгосон {selectedQuestionIds.length} материалыг
+                            хувийн сангаас бүр мөсөн устгана.
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
@@ -926,12 +983,13 @@ export default function QuestionBankBrowser({
           {activeFilteredBankQuestions.map((question) => {
             const hasSubjectMismatch = Boolean(
               targetExamSubjectId &&
-                question.subject_id &&
-                question.subject_id !== targetExamSubjectId
+              question.subject_id &&
+              question.subject_id !== targetExamSubjectId,
             );
             const isExpanded = expandedQuestionIds.includes(question.id);
             const isLong =
-              (question.content_html ?? "").length > 240 || question.content.length > 240;
+              (question.content_html ?? "").length > 240 ||
+              question.content.length > 240;
             const displayText =
               tab === "private" && !question.content_html
                 ? formatInlineChoicesAsList(question.content)
@@ -939,7 +997,11 @@ export default function QuestionBankBrowser({
 
             return (
               <Card key={question.id}>
-                <CardContent className={tab === "private" ? "space-y-2 py-3" : "space-y-3 pt-4"}>
+                <CardContent
+                  className={
+                    tab === "private" ? "space-y-2 py-3" : "space-y-3 pt-4"
+                  }
+                >
                   <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                     {tab === "private" ? (
                       <div className="min-w-0">
@@ -956,7 +1018,9 @@ export default function QuestionBankBrowser({
                             {difficultyLabels[question.difficulty_level]}
                           </span>
                           <span className="text-muted-foreground">·</span>
-                          <span className="text-muted-foreground">{question.points} оноо</span>
+                          <span className="text-muted-foreground">
+                            {question.points} оноо
+                          </span>
                           {question.grade_level ? (
                             <>
                               <span className="text-muted-foreground">·</span>
@@ -968,7 +1032,9 @@ export default function QuestionBankBrowser({
                           {question.subtopic ? (
                             <>
                               <span className="text-muted-foreground">·</span>
-                              <span className="text-muted-foreground">{question.subtopic}</span>
+                              <span className="text-muted-foreground">
+                                {question.subtopic}
+                              </span>
                             </>
                           ) : null}
                         </div>
@@ -976,10 +1042,14 @@ export default function QuestionBankBrowser({
                     ) : (
                       <div className="flex flex-wrap gap-2">
                         {question.subjects?.name ? (
-                          <Badge variant="outline">{question.subjects.name}</Badge>
+                          <Badge variant="outline">
+                            {question.subjects.name}
+                          </Badge>
                         ) : null}
                         {question.grade_level ? (
-                          <Badge variant="outline">{question.grade_level}-р анги</Badge>
+                          <Badge variant="outline">
+                            {question.grade_level}-р анги
+                          </Badge>
                         ) : null}
                         {question.subtopic ? (
                           <Badge variant="outline">{question.subtopic}</Badge>
