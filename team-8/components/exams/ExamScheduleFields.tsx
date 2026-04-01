@@ -5,13 +5,10 @@ import { format } from "date-fns";
 import { mn } from "date-fns/locale";
 import {
   CalendarDays,
-  Camera,
   ChevronDown,
   Clock3,
-  Monitor,
   RefreshCw,
   ShieldCheck,
-  Smartphone,
   Trophy,
 } from "lucide-react";
 import type {
@@ -475,18 +472,10 @@ export function ExamScheduleSection({
   );
 }
 
-export function ExamSettingsSection(props: ExamSettingsSectionProps) {
-  const {
-    initialPassingScore,
-    initialMaxAttempts,
-    initialProctoringMode,
-    initialRequireFullscreen,
-    initialRequireCamera,
-    initialIdentityVerification,
-    initialEvidenceMode,
-    initialPostExamSimilarityEnabled,
-    initialDevicePolicy,
-  } = props;
+export function ExamSettingsSection({
+  initialPassingScore,
+  initialMaxAttempts,
+}: ExamSettingsSectionProps) {
   const [attempts, setAttempts] = useState(String(initialMaxAttempts ?? 1));
 
   return (

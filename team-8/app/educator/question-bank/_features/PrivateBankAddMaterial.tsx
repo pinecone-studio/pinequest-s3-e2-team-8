@@ -7,7 +7,6 @@ import {
   ImagePlus,
   Loader2,
   Plus,
-  PlusCircle,
   Upload,
 } from "lucide-react";
 import {

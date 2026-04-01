@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import {
   getGroupById,
   getGroupMembers,
@@ -7,8 +6,7 @@ import {
   getAvailableExams,
 } from "@/lib/group/actions";
 import { createClient } from "@/lib/supabase/server";
-import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Users } from "lucide-react";
+import { Search, Users } from "lucide-react";
 import AddMemberForm from "./_features/AddMemberForm";
 import MemberList from "./_features/MemberList";
 import AssignExamSection from "./_features/AssignExamSection";
@@ -41,12 +39,6 @@ export default async function GroupDetailPage({ params }: Props) {
     getGroupExamAssignments(id),
     getAvailableExams(id),
   ]);
-
-  const groupTypeLabel: Record<string, string> = {
-    class: "Анги",
-    elective: "Сонголт",
-    mixed: "Холимог",
-  };
 
   return (
     <div className="space-y-6">

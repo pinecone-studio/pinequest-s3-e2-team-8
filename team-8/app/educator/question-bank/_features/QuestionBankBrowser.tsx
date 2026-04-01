@@ -71,12 +71,6 @@ function stableStringCompare(left: string, right: string) {
   return left < right ? -1 : 1;
 }
 
-function uniqueValues(values: Array<string | null | undefined>) {
-  return Array.from(
-    new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean)),
-  ).sort(stableStringCompare);
-}
-
 export default function QuestionBankBrowser({
   certifiedQuestions,
   privateQuestions,
@@ -94,11 +88,11 @@ export default function QuestionBankBrowser({
   const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
   const [tab, setTab] = useState<TabKey>(defaultTab);
-  const [query, setQuery] = useState("");
+  const query = "";
   const [subjectFilter, setSubjectFilter] = useState("all");
-  const [gradeFilter, setGradeFilter] = useState("all");
-  const [subtopicFilter, setSubtopicFilter] = useState("all");
-  const [difficultyFilter, setDifficultyFilter] = useState("all");
+  const gradeFilter = "all";
+  const subtopicFilter = "all";
+  const difficultyFilter = "all";
   const [typeFilter, setTypeFilter] = useState("all");
   const [batchFilter, setBatchFilter] = useState("all");
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
@@ -202,30 +196,6 @@ export default function QuestionBankBrowser({
     );
     return { hasNone, items };
   }, [privateQuestions]);
-
-  const gradeOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          [
-            ...certifiedQuestions.map((question) => question.grade_level),
-            ...privateQuestions.map((question) => question.grade_level),
-            ...sampleExams.map((sampleExam) => sampleExam.grade_level),
-          ].filter((grade): grade is number => Boolean(grade)),
-        ),
-      ).sort((left, right) => left - right),
-    [certifiedQuestions, privateQuestions, sampleExams],
-  );
-
-  const subtopicOptions = useMemo(
-    () =>
-      uniqueValues([
-        ...certifiedQuestions.map((question) => question.subtopic),
-        ...privateQuestions.map((question) => question.subtopic),
-        ...sampleExams.map((sampleExam) => sampleExam.subtopic),
-      ]),
-    [certifiedQuestions, privateQuestions, sampleExams],
-  );
 
   const filteredSampleExams = useMemo(() => {
     return sampleExams.filter((sampleExam) => {

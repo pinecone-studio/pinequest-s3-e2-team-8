@@ -80,7 +80,7 @@ export default function PreExamCheck({
       ? "Камерыг ачаалж байна..."
       : "Энэ шалгалтад камер заавал шаардлагагүй."
   );
-  const [fullscreenStatus, setFullscreenStatus] = useState<CheckStatus>(
+  const [, setFullscreenStatus] = useState<CheckStatus>(
     requireFullscreen ? "warning" : "ok"
   );
   const [, setFullscreenMessage] = useState(
