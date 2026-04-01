@@ -20,7 +20,9 @@ export default async function AdminLayout({
       <DashboardHeader profile={profile} />
       <div className="flex">
         <DashboardSidebar role="admin" />
-        <main className="flex-1 px-4 py-6 md:px-8">{children}</main>
+        <main className="flex-1 px-4 py-6 md:px-8">
+          <div className="mx-auto w-full max-w-[1440px]">{children}</div>
+        </main>
       </div>
     </div>
   );

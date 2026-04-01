@@ -72,7 +72,7 @@ export default function Header({ profile }: { profile: Profile }) {
           aria-label="Профайл руу очих"
           className="rounded-full transition-transform duration-200 hover:scale-[1.02]"
         >
-          <Avatar className="h-10 w-10 overflow-hidden border-[3px] border-white bg-[#f7d9b5] shadow-[0_10px_24px_rgba(122,103,72,0.14)]">
+          <Avatar className="h-10 w-10 overflow-hidden  bg-[#f7d9b5] shadow-[0_10px_24px_rgba(122,103,72,0.14)]">
             {profile.avatar_url ? (
               <AvatarImage
                 src={profile.avatar_url}

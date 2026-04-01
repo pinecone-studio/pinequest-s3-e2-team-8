@@ -32,7 +32,13 @@ export default function StudentShell({
       <div className="flex min-h-[100dvh] flex-1 flex-col">
         {!hideChrome && mobileHeader}
         {!hideChrome && header}
-        <main className={mainClassName}>{children}</main>
+        <main className={mainClassName}>
+          {hideChrome ? (
+            children
+          ) : (
+            <div className="mx-auto w-full max-w-[1440px]">{children}</div>
+          )}
+        </main>
         {!hideChrome && bottomNav}
       </div>
     </div>
