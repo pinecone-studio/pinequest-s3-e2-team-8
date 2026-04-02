@@ -4,8 +4,8 @@ function Logo(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      width={245}
-      height={50}
+      width={189}
+      height={31}
       fill="none"
       {...props}
     >
@@ -78,42 +78,8 @@ function Logo(props: React.SVGProps<SVGSVGElement>) {
           colorInterpolationFilters="sRGB"
           filterUnits="userSpaceOnUse"
         >
-          <feFlood floodOpacity={0} result="BackgroundImageFix" />
-          <feColorMatrix
-            in="SourceAlpha"
-            result="hardAlpha"
-            values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0"
-          />
-          <feOffset dy={4} />
-          <feGaussianBlur stdDeviation={2} />
-          <feColorMatrix values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.3 0" />
-          <feBlend
-            in2="BackgroundImageFix"
-            result="effect1_dropShadow_1499_6154"
-          />
-          <feColorMatrix
-            in="SourceAlpha"
-            result="hardAlpha"
-            values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0"
-          />
-          <feMorphology
-            in="SourceAlpha"
-            operator="dilate"
-            radius={6}
-            result="effect2_dropShadow_1499_6154"
-          />
-          <feOffset dy={8} />
-          <feGaussianBlur stdDeviation={6} />
-          <feColorMatrix values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.15 0" />
-          <feBlend
-            in2="effect1_dropShadow_1499_6154"
-            result="effect2_dropShadow_1499_6154"
-          />
-          <feBlend
-            in="SourceGraphic"
-            in2="effect2_dropShadow_1499_6154"
-            result="shape"
-          />
+      
+       
         </filter>
         <clipPath id="d">
           <path fill="#fff" d="M236.721 3h-28v28h28z" />
