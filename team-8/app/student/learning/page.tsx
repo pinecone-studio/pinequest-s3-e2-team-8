@@ -1,78 +1,241 @@
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  getStudentLearningPageData,
-} from "@/lib/student-learning/actions";
+import { getStudentLearningPageData } from "@/lib/student-learning/actions";
+import type {
+  StudentLearningSubjectSummary,
+  StudentLearningTopicSummary,
+} from "@/types";
 import StudyPlanPanel from "./_features/StudyPlanPanel";
 import PracticeBuilder from "./_features/PracticeBuilder";
 import LearningAutoRefresh from "./_features/LearningAutoRefresh";
 
 const LEARNING_ERROR_MESSAGES: Record<string, string> = {
-  practice_empty: "Practice шалгалтын өгөгдөл дутуу байна. Шинээр practice үүсгээд дахин оролдоно уу.",
+  practice_empty:
+    "Practice шалгалтын өгөгдөл дутуу байна. Шинээр practice үүсгээд дахин оролдоно уу.",
 };
+
+const RING_COLORS = ["#DED15B", "#FBC62F", "#F7A23B", "#F75D5F"] as const;
+
+function SectionHeader({
+  title,
+  subtitle,
+}: {
+  title: string;
+  subtitle: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <h2 className="text-[24px] font-semibold leading-[120%] text-black">
+        {title}
+      </h2>
+      <p className="text-[14px] font-normal leading-[140%] text-[#6B6B6B]">
+        {subtitle}
+      </p>
+    </div>
+  );
+}
+
+function getOverviewLegendTopics({
+  isActive,
+  activeTopics,
+  subject,
+}: {
+  isActive: boolean;
+  activeTopics: StudentLearningTopicSummary[];
+  subject: StudentLearningSubjectSummary;
+}) {
+  if (isActive && activeTopics.length > 0) {
+    return activeTopics.slice(0, 4).map((topic) => ({
+      label: topic.topic_label,
+      value: Math.round(topic.mastery_score),
+    }));
+  }
+
+  return [
+    {
+      label: `${subject.subject_name} ерөнхий mastery`,
+      value: Math.round(subject.mastery_score),
+    },
+    {
+      label: "Сул сэдвийн тоо",
+      value: subject.weak_topic_count,
+    },
+    {
+      label: "Official асуултууд",
+      value: subject.official_question_count,
+    },
+    {
+      label: "Practice асуултууд",
+      value: subject.practice_question_count,
+    },
+  ];
+}
+
+function SubjectRings({ values }: { values: number[] }) {
+  return (
+    <svg viewBox="0 0 220 220" className="h-[190px] w-[190px]">
+      {values.slice(0, 4).map((value, index) => {
+        const radius = 84 - index * 17;
+        const circumference = 2 * Math.PI * radius;
+        const progress = Math.max(8, Math.min(100, value));
+        const dash = `${(circumference * progress) / 100} ${circumference}`;
+
+        return (
+          <g key={`${radius}-${index}`}>
+            <circle
+              cx="110"
+              cy="110"
+              r={radius}
+              fill="none"
+              stroke="#F4F4F5"
+              strokeWidth="11"
+            />
+            <circle
+              cx="110"
+              cy="110"
+              r={radius}
+              fill="none"
+              stroke={RING_COLORS[index]}
+              strokeWidth="11"
+              strokeLinecap="round"
+              strokeDasharray={dash}
+              transform="rotate(-90 110 110)"
+            />
+          </g>
+        );
+      })}
+      <circle cx="110" cy="110" r="24" fill="#FAFAFA" />
+    </svg>
+  );
+}
+
+function SubjectOverviewCard({
+  subject,
+  isActive,
+  topics,
+}: {
+  subject: StudentLearningSubjectSummary;
+  isActive: boolean;
+  topics: StudentLearningTopicSummary[];
+}) {
+  const legendTopics = getOverviewLegendTopics({
+    isActive,
+    activeTopics: topics,
+    subject,
+  });
+
+  return (
+    <Link
+      href={`/student/learning?subject=${subject.subject_id}`}
+      className={`block min-h-[299px] rounded-[16px] border bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.08)] transition ${
+        isActive
+          ? "border-[#D5C4FF] ring-2 ring-[#7F32F5]/10"
+          : "border-[#ECECEC] hover:border-[#D5C4FF]"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <p className="text-[18px] font-semibold leading-[120%] text-[#111111]">
+            {subject.subject_name}
+          </p>
+          <p className="text-[14px] font-normal leading-[120%] text-[#6B6B6B]">
+            Тааруухан сэдвүүд
+          </p>
+        </div>
+        <p className="text-[32px] font-semibold leading-none text-[#111111]">
+          {Math.round(subject.mastery_score)}%
+        </p>
+      </div>
+
+      <div className="mt-6 grid grid-cols-[190px_minmax(0,1fr)] items-center gap-4">
+        <SubjectRings values={legendTopics.map((topic) => topic.value)} />
+
+        <div className="space-y-4">
+          {legendTopics.map((topic, index) => (
+            <div
+              key={`${subject.subject_id}-${topic.label}`}
+              className="flex items-center justify-between gap-3"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <span
+                  className="h-[10px] w-[10px] shrink-0 rounded-full"
+                  style={{ backgroundColor: RING_COLORS[index] }}
+                />
+                <span className="truncate text-[13px] font-medium leading-[120%] text-[#4C4C4C]">
+                  {topic.label}
+                </span>
+              </div>
+              <span className="shrink-0 text-[13px] font-semibold leading-[120%] text-[#111111]">
+                {topic.value}%
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {subject.needs_topic_backfill ? (
+        <p className="mt-4 text-xs text-amber-600">
+          Topic breakdown хараахан бүрэн бэлэн болоогүй байна.
+        </p>
+      ) : null}
+    </Link>
+  );
+}
+
+function LearningPageHeader() {
+  return (
+    <SectionHeader
+      title="Learning Hub"
+      subtitle="Сул сэдвүүдээ харж, AI study plan авч, зөвхөн өөртөө practice шалгалт өгнө."
+    />
+  );
+}
 
 export default async function StudentLearningPage({
   searchParams,
 }: {
   searchParams: Promise<{ subject?: string; error?: string }>;
 }) {
-  const { subject: requestedSubjectId, error: requestedError } = await searchParams;
+  const { subject: requestedSubjectId, error: requestedError } =
+    await searchParams;
   const pageData = await getStudentLearningPageData(requestedSubjectId);
 
   if ("error" in pageData) {
     return (
-      <div className="space-y-6">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Learning Hub</h2>
+      <div className="mx-auto w-full max-w-[1120px] space-y-10 px-2 pb-10 xl:w-[1120px] xl:max-w-[1120px]">
+        <LearningPageHeader />
+        <div className="rounded-[20px] border border-[#ECECEC] bg-white px-8 py-12 text-center text-[14px] text-[#6B6B6B] shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+          {pageData.error}
         </div>
-        <Card>
-          <CardContent className="py-10 text-center text-muted-foreground">
-            {pageData.error}
-          </CardContent>
-        </Card>
       </div>
     );
   }
 
   const { overview, selectedSubject, studyPlan: studyPlanState } = pageData;
-  const studyPlanResult = studyPlanState && !("error" in studyPlanState) ? studyPlanState : null;
+  const studyPlanResult =
+    studyPlanState && !("error" in studyPlanState) ? studyPlanState : null;
 
   if (overview.subjects.length === 0) {
     return (
-      <div className="space-y-6">
+      <div className="mx-auto w-full max-w-[1120px] space-y-10 px-2 pb-10 xl:w-[1120px] xl:max-w-[1120px]">
         <LearningAutoRefresh active={overview.isRefreshing} />
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Learning Hub</h2>
-          <p className="text-muted-foreground">
-            Таны mastery profile болон хувийн practice энд харагдана
-          </p>
+        <LearningPageHeader />
+        <div className="rounded-[20px] border border-[#ECECEC] bg-white px-8 py-12 text-center text-[14px] text-[#6B6B6B] shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+          {overview.isRefreshing
+            ? "Mastery profile шинэчлэгдэж байна. Түр хүлээгээд дахин шалгана уу."
+            : "Одоогоор weak-topic profile үүсгэх хангалттай data алга."}
         </div>
-
-        <Card>
-          <CardContent className="py-10 text-center text-muted-foreground">
-            {overview.isRefreshing
-              ? "Mastery profile шинэчлэгдэж байна. Түр хүлээгээд дахин шалгана уу."
-              : "Одоогоор weak-topic profile үүсгэх хангалттай data алга."}
-          </CardContent>
-        </Card>
       </div>
     );
   }
 
   if (!overview.selectedSubjectId || !selectedSubject) {
     return (
-      <div className="space-y-6">
+      <div className="mx-auto w-full max-w-[1120px] space-y-10 px-2 pb-10 xl:w-[1120px] xl:max-w-[1120px]">
         <LearningAutoRefresh active={overview.isRefreshing} />
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Learning Hub</h2>
+        <LearningPageHeader />
+        <div className="rounded-[20px] border border-[#ECECEC] bg-white px-8 py-12 text-center text-[14px] text-[#6B6B6B] shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+          Хичээлийн learning data олдсонгүй.
         </div>
-        <Card>
-          <CardContent className="py-10 text-center text-muted-foreground">
-            Хичээлийн learning data олдсонгүй.
-          </CardContent>
-        </Card>
       </div>
     );
   }
@@ -83,128 +246,39 @@ export default async function StudentLearningPage({
   const isStale = studyPlanResult?.isStale ?? false;
 
   return (
-    <div className="space-y-6 pb-10">
+    <div className="mx-auto w-full max-w-[1120px] space-y-10 px-2 pb-10 pt-2 xl:w-[1120px] xl:max-w-[1120px]">
       <LearningAutoRefresh
-        active={Boolean(overview.isRefreshing) || studyPlanResult?.status === "pending"}
+        active={
+          Boolean(overview.isRefreshing) ||
+          studyPlanResult?.status === "pending"
+        }
         subjectId={selectedSubjectId}
       />
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Learning Hub</h2>
-          <p className="text-muted-foreground">
-            Сул сэдвүүдээ харж, AI study plan авч, зөвхөн өөртөө practice шалгалт өгнө
-          </p>
-        </div>
-        <Link href="/student">
-          <Button variant="outline">Dashboard руу буцах</Button>
-        </Link>
-      </div>
+
+      <LearningPageHeader />
 
       {requestedError && LEARNING_ERROR_MESSAGES[requestedError] ? (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="rounded-[16px] border border-amber-300 bg-amber-50 px-5 py-4 text-[14px] text-amber-800">
           {LEARNING_ERROR_MESSAGES[requestedError]}
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {overview.subjects.map((subject) => {
-          const isActive = subject.subject_id === selectedSubjectId;
-          return (
-            <Link
-              key={subject.subject_id}
-              href={`/student/learning?subject=${subject.subject_id}`}
-              className={`rounded-2xl border bg-white p-5 shadow-sm transition ${
-                isActive ? "border-[#4078C1] ring-2 ring-[#4078C1]/20" : "hover:bg-zinc-50"
-              }`}
-            >
-              <div className="space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-base font-semibold text-zinc-900">{subject.subject_name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {subject.needs_topic_backfill
-                        ? "Topic summary pending"
-                        : subject.weak_topic_count > 0
-                          ? `${subject.weak_topic_count} сул сэдэв`
-                          : "Сул сэдэв алга"}
-                    </p>
-                  </div>
-                  <Badge variant={subject.mastery_score < 60 ? "secondary" : "outline"}>
-                    {Math.round(subject.mastery_score)}%
-                  </Badge>
-                </div>
-
-                <div className="h-2 overflow-hidden rounded-full bg-zinc-100">
-                  <div
-                    className="h-full rounded-full bg-[#4078C1]"
-                    style={{ width: `${Math.min(subject.mastery_score, 100)}%` }}
-                  />
-                </div>
-
-                {subject.needs_topic_backfill && (
-                  <p className="text-xs text-amber-600">
-                    Topic breakdown хараахан бүрэн бэлэн болоогүй байна.
-                  </p>
-                )}
-              </div>
-            </Link>
-          );
-        })}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {overview.subjects.map((subject) => (
+          <SubjectOverviewCard
+            key={subject.subject_id}
+            subject={subject}
+            isActive={subject.subject_id === selectedSubjectId}
+            topics={
+              subject.subject_id === selectedSubjectId
+                ? subjectLearning.topics
+                : []
+            }
+          />
+        ))}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-        <div className="space-y-5">
-          <Card className="rounded-2xl">
-            <CardHeader>
-              <CardTitle className="text-lg">
-                {subjectLearning.subject.subject_name} хичээлийн Weak Topic Map
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {subjectLearning.topics.length === 0 ? (
-                <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                  Энэ хичээл дээр topic-level detail хараахан бэлэн болоогүй байна.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {subjectLearning.topics.map((topic) => (
-                    <div key={topic.topic_key} className="rounded-xl border p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <p className="text-sm font-semibold text-zinc-900">{topic.topic_label}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Official: {topic.official_percentage ?? "—"}% · Practice:{" "}
-                            {topic.practice_percentage ?? "—"}%
-                          </p>
-                        </div>
-                        <Badge variant={topic.mastery_score < 60 ? "secondary" : "outline"}>
-                          {Math.round(topic.mastery_score)}%
-                        </Badge>
-                      </div>
-                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-100">
-                        <div
-                          className={`h-full rounded-full ${
-                            topic.mastery_score < 60 ? "bg-[#D44F45]" : "bg-[#4078C1]"
-                          }`}
-                          style={{ width: `${Math.min(topic.mastery_score, 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <PracticeBuilder
-            key={selectedSubjectId}
-            subjectId={selectedSubjectId}
-            subjectName={subjectLearning.subject.subject_name}
-            topics={subjectLearning.topics}
-            practiceHistory={subjectLearning.practiceHistory}
-          />
-        </div>
-
+      <section className="space-y-12 rounded-[32px] border border-transparent bg-[linear-gradient(180deg,#F4EEFA_0%,#FBF8FE_42%,#FFFFFF_100%)] px-7 py-8 shadow-[0_18px_40px_rgba(127,50,245,0.08)]">
         <StudyPlanPanel
           subjectId={selectedSubjectId}
           plan={plan}
@@ -212,11 +286,20 @@ export default async function StudentLearningPage({
           status={studyPlanResult?.status ?? "idle"}
           lastError={studyPlanResult?.lastError ?? null}
           isRefreshing={
-            Boolean(subjectLearning.isRefreshing) || Boolean(studyPlanResult?.isRefreshing)
+            Boolean(subjectLearning.isRefreshing) ||
+            Boolean(studyPlanResult?.isRefreshing)
           }
           disabled={subjectLearning.topics.length === 0}
         />
-      </div>
+
+        <PracticeBuilder
+          key={selectedSubjectId}
+          subjectId={selectedSubjectId}
+          subjectName={subjectLearning.subject.subject_name}
+          topics={subjectLearning.topics}
+          practiceHistory={subjectLearning.practiceHistory}
+        />
+      </section>
     </div>
   );
 }

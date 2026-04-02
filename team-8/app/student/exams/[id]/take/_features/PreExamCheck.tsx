@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   BatteryCharging,
   Camera,
   CheckCircle2,
@@ -44,17 +45,50 @@ interface Props {
   onStart: (payload: ReadinessPayload) => Promise<void> | void;
 }
 
-type EnrollmentState =
-  | {
-      referenceImageData: string;
-      referenceHash: string;
-      updatedAt: string;
-    }
-  | null;
+type EnrollmentState = {
+  referenceImageData: string;
+  referenceHash: string;
+  updatedAt: string;
+} | null;
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+}
+
+function StatusIndicator({ status }: { status: CheckStatus }) {
+  const textClass =
+    status === "checking"
+      ? "text-gray-400"
+      : status === "error"
+        ? "text-[#E05252]"
+        : status === "warning"
+          ? "text-[#E6A23C]"
+          : "text-[#3B8748]";
+
+  return (
+    <div className="flex flex-col items-center gap-0.5">
+      {status === "checking" ? (
+        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+      ) : status === "error" ? (
+        <XCircle className="h-6 w-6 text-[#E05252]" />
+      ) : status === "warning" ? (
+        <AlertTriangle className="h-6 w-6 text-[#E6A23C]" />
+      ) : (
+        <CheckCircle2 className="h-6 w-6 text-[#6BBF7A]" />
+      )}
+
+      <span className={`text-[12px] leading-none ${textClass}`}>
+        {status === "checking"
+          ? "Шалгаж байна"
+          : status === "warning"
+            ? "Анхаар"
+            : status === "error"
+              ? "Алдаа"
+              : "Хэвийн"}
+      </span>
+    </div>
+  );
 }
 
 export default function PreExamCheck({
@@ -69,32 +103,34 @@ export default function PreExamCheck({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [internetStatus, setInternetStatus] = useState<CheckStatus>("checking");
-  const [internetMessage, setInternetMessage] = useState("Сүлжээг шалгаж байна...");
+  const [internetMessage, setInternetMessage] = useState(
+    "Сүлжээг шалгаж байна...",
+  );
   const [batteryStatus, setBatteryStatus] = useState<CheckStatus>("checking");
   const [batteryMessage, setBatteryMessage] = useState("Цэнэг шалгаж байна...");
   const [cameraStatus, setCameraStatus] = useState<CheckStatus>(
-    requireCamera ? "checking" : "ok"
+    requireCamera ? "checking" : "ok",
   );
   const [cameraMessage, setCameraMessage] = useState(
     requireCamera
       ? "Камерыг ачаалж байна..."
-      : "Энэ шалгалтад камер заавал шаардлагагүй."
+      : "Энэ шалгалтад камер заавал шаардлагагүй.",
   );
   const [, setFullscreenStatus] = useState<CheckStatus>(
-    requireFullscreen ? "warning" : "ok"
+    requireFullscreen ? "warning" : "ok",
   );
   const [, setFullscreenMessage] = useState(
     requireFullscreen
       ? "Шалгалтаас өмнө fullscreen горимд орно."
-      : "Fullscreen заавал биш."
+      : "Fullscreen заавал биш.",
   );
   const [identityStatus, setIdentityStatus] = useState<CheckStatus>(
-    identityVerification ? "checking" : "ok"
+    identityVerification ? "checking" : "ok",
   );
   const [, setIdentityMessage] = useState(
     identityVerification
       ? "Identity enrollment мэдээлэл уншиж байна..."
-      : "Identity verification унтраалттай."
+      : "Identity verification унтраалттай.",
   );
   const [brightnessScore, setBrightnessScore] = useState<number | null>(null);
   const [enrollment, setEnrollment] = useState<EnrollmentState>(null);
@@ -105,30 +141,36 @@ export default function PreExamCheck({
   const [, setPwaMessage] = useState("PWA төлөв шалгаж байна...");
   const [, setOrientationStatus] = useState<CheckStatus>("checking");
   const [, setOrientationMessage] = useState(
-    "Дэлгэцийн байрлалыг шалгаж байна..."
+    "Дэлгэцийн байрлалыг шалгаж байна...",
   );
   const deferredPromptRef = useRef<BeforeInstallPromptEvent | null>(null);
 
   const deviceType = useMemo(() => getStudentDeviceType(), []);
   const isDesktop = deviceType === "desktop";
   const [displayMode, setDisplayMode] = useState<ProctorDisplayMode>(() =>
-    getDisplayMode()
+    getDisplayMode(),
   );
   const isStandalonePwa =
     displayMode === "standalone" || displayMode === "fullscreen";
   const [orientation, setOrientation] = useState<"portrait" | "landscape">(() =>
-    getOrientationMode()
+    getOrientationMode(),
   );
   const platform = useMemo(() => getPlatformLabel(), []);
   const isProctored = proctoringMode !== "off";
   const requiresDesktop = devicePolicy === "desktop_only";
   const shouldEnforceFullscreen =
-    requireFullscreen && !(deviceType === "mobile" && proctoringMode === "standard");
+    requireFullscreen &&
+    !(deviceType === "mobile" && proctoringMode === "standard");
   const canStart =
     internetStatus !== "error" &&
     (!requiresDesktop || isDesktop) &&
     (!requireCamera || cameraStatus === "ok" || cameraStatus === "warning") &&
     (!identityVerification || identityStatus === "ok");
+  const readinessSettled =
+    batteryStatus !== "checking" &&
+    internetStatus !== "checking" &&
+    (!requireCamera || cameraStatus !== "checking") &&
+    (!identityVerification || identityStatus !== "checking");
 
   useEffect(() => {
     let cancelled = false;
@@ -159,7 +201,7 @@ export default function PreExamCheck({
         setBatteryMessage(
           battery.charging
             ? `Цэнэг ${percentage}% (цэнэглэж байна)`
-            : `Цэнэг ${percentage}%`
+            : `Цэнэг ${percentage}%`,
         );
       } catch {
         if (!cancelled) {
@@ -196,7 +238,7 @@ export default function PreExamCheck({
         setInternetMessage(
           latency > 450
             ? `Холболт удаан байна (${latency}ms).`
-            : `Холболт хэвийн байна (${latency}ms).`
+            : `Холболт хэвийн байна (${latency}ms).`,
         );
       } catch {
         if (!cancelled) {
@@ -266,7 +308,9 @@ export default function PreExamCheck({
         setBrightnessScore(score);
         if (score < 30) {
           setCameraStatus("warning");
-          setCameraMessage("Орчны гэрэл бага байна. Илүү гэрэлтэй газар сууна уу.");
+          setCameraMessage(
+            "Орчны гэрэл бага байна. Илүү гэрэлтэй газар сууна уу.",
+          );
         } else if (score >= 30) {
           setCameraStatus("ok");
           setCameraMessage("Камер бэлэн байна.");
@@ -283,14 +327,15 @@ export default function PreExamCheck({
     const updatePwaState = () => {
       const nextDisplayMode = getDisplayMode();
       setDisplayMode(nextDisplayMode);
-      const standalone = nextDisplayMode === "standalone" || nextDisplayMode === "fullscreen";
+      const standalone =
+        nextDisplayMode === "standalone" || nextDisplayMode === "fullscreen";
       setPwaStatus(standalone ? "ok" : isProctored ? "warning" : "ok");
       setPwaMessage(
         standalone
           ? "Standalone/PWA горим идэвхтэй байна."
           : isProctored
             ? "App хэлбэрээр нээвэл илүү тогтвортой ажиллана."
-            : "Browser горим хангалттай."
+            : "Browser горим хангалттай.",
       );
     };
 
@@ -310,7 +355,10 @@ export default function PreExamCheck({
 
     return () => {
       standaloneQuery.removeEventListener?.("change", handleStandaloneChange);
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener(
+        "beforeinstallprompt",
+        handleBeforeInstallPrompt,
+      );
     };
   }, [isProctored]);
 
@@ -322,7 +370,7 @@ export default function PreExamCheck({
       setOrientationMessage(
         nextOrientation === "portrait"
           ? "Portrait байрлал mobile дээр тохиромжтой байна."
-          : "Landscape горимд ажиллах боломжтой ч portrait илүү тогтвортой."
+          : "Landscape горимд ажиллах боломжтой ч portrait илүү тогтвортой.",
       );
     };
 
@@ -348,7 +396,9 @@ export default function PreExamCheck({
       setLoadingEnrollment(false);
       if (result) {
         setIdentityStatus("warning");
-        setIdentityMessage("Reference selfie олдлоо. Start хийхийн өмнө live verification хийнэ.");
+        setIdentityMessage(
+          "Reference selfie олдлоо. Start хийхийн өмнө live verification хийнэ.",
+        );
       } else {
         setIdentityStatus("warning");
         setIdentityMessage("Enrollment selfie бүртгүүлээгүй байна.");
@@ -371,14 +421,14 @@ export default function PreExamCheck({
       const active = Boolean(document.fullscreenElement);
       setDisplayMode(getDisplayMode());
       setFullscreenStatus(
-        active ? "ok" : shouldEnforceFullscreen ? "warning" : "ok"
+        active ? "ok" : shouldEnforceFullscreen ? "warning" : "ok",
       );
       setFullscreenMessage(
         active
           ? "Fullscreen идэвхтэй байна."
           : shouldEnforceFullscreen
             ? "Start хийхийн өмнө fullscreen горимд орно."
-            : "Mobile standard дээр fullscreen нь нэмэлт signal байдлаар бүртгэгдэнэ."
+            : "Mobile standard дээр fullscreen нь нэмэлт signal байдлаар бүртгэгдэнэ.",
       );
     };
 
@@ -425,13 +475,15 @@ export default function PreExamCheck({
       const distance = getHashDistance(enrollment.referenceHash, liveHash);
       if (distance <= 56) {
         setIdentityStatus("ok");
-        setIdentityMessage(`Identity verification амжилттай (${distance} diff).`);
+        setIdentityMessage(
+          `Identity verification амжилттай (${distance} diff).`,
+        );
         return { ok: true, hash: liveHash };
       }
 
       setIdentityStatus("error");
       setIdentityMessage(
-        `Identity verification амжилтгүй (${distance} diff). Камерын өнцөг, гэрлээ засна уу.`
+        `Identity verification амжилтгүй (${distance} diff). Камерын өнцөг, гэрлээ засна уу.`,
       );
       return { ok: false, hash: liveHash };
     } catch {
@@ -477,95 +529,103 @@ export default function PreExamCheck({
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[rgba(250,250,250,0.98)] px-4 py-10">
+    <div
+      className="flex min-h-screen justify-center px-4 pb-10 pt-[84px] md:pt-[118px]"
+      style={{
+        background:
+          "linear-gradient(180deg, rgba(249,240,252,0.98) 0%, rgba(255,255,255,0.98) 100%)",
+      }}
+    >
       <div className="w-full max-w-[664px] space-y-[30px]">
-        <div className="flex flex-col items-center gap-5 text-center">
-          <div className="flex h-[60px] w-[60px] items-center justify-center rounded-full bg-[#D1D1D1]">
+        <div className="mx-auto flex w-full max-w-[580px] flex-col items-center gap-5 text-center">
+          <div className="flex h-[60px] w-[60px] items-center justify-center rounded-[100px] bg-[#D1D1D1]">
             <ShieldCheck className="h-8 w-8 text-black" />
           </div>
-          <div className="space-y-3">
+          <div className="flex flex-col items-center gap-[6px]">
             <h1 className="text-[24px] font-semibold leading-[120%] text-black">
               Системийн шалгалт
             </h1>
-            <p className="text-base leading-[120%] text-[#6B6B6B]">
-              Таны төхөөрөмж шалгалтад бэлэн эсэхийг шалгаж байна. Түр хүлээнэ үү.
+            <p className="text-[16px] font-normal leading-[120%] text-[#6B6B6B]">
+              Таны төхөөрөмж шалгалтад бэлэн эсэхийг шалгаж байна. Түр хүлээнэ
+              үү.
             </p>
           </div>
         </div>
 
         {!isDesktop && requiresDesktop ? (
-          <div className="rounded-[16px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            Энэ шалгалтыг mobile төхөөрөмж дээр эхлүүлэхгүй. Desktop эсвэл laptop ашиглана уу.
+          <div className="rounded-[16px] border border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700">
+            Энэ шалгалтыг mobile төхөөрөмж дээр эхлүүлэхгүй. Desktop эсвэл
+            laptop ашиглана уу.
           </div>
         ) : null}
 
         {error ? (
-          <div className="rounded-[16px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="rounded-[16px] border border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700">
             {error}
           </div>
         ) : null}
 
-        <div className="space-y-[9px]">
-          <div className="flex items-center justify-between rounded-[16px] border border-[#BDBDBD] bg-white px-6 py-4 shadow-sm">
+        <div className="flex w-full flex-col items-center gap-[9px] px-0 md:px-[10px]">
+          <div
+            className="flex h-[70px] w-full max-w-[644px] items-center justify-between rounded-[16px] bg-white px-6"
+            style={{ border: "0.5px solid #BDBDBD" }}
+          >
             <div className="flex items-center gap-5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md">
-                <BatteryCharging className="h-7 w-7 text-black" />
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+                <BatteryCharging className="h-8 w-8 text-black" />
               </div>
-              <div className="space-y-1">
-                <p className="text-base font-medium leading-[120%] text-black">Цэнэг</p>
-                <p className="text-sm leading-[120%] text-[#6B6B6B]">{batteryMessage}</p>
+              <div className="flex flex-col gap-[6px]">
+                <p className="text-[16px] font-medium leading-[120%] text-black">
+                  Цэнэг
+                </p>
+                <p className="text-[14px] font-normal leading-[120%] text-[#6B6B6B]">
+                  {batteryMessage}
+                </p>
               </div>
             </div>
-            <div className="flex w-[43px] flex-col items-center gap-0.5">
-              <CheckCircle2 className={`h-6 w-6 ${batteryStatus === "error" ? "text-[#E05252]" : "text-[#6BBF7A]"}`} />
-              <span className={`text-[12px] leading-[120%] ${batteryStatus === "error" ? "text-[#E05252]" : "text-[#3B8748]"}`}>
-                {batteryStatus === "warning" ? "Анхаар" : batteryStatus === "error" ? "Алдаа" : "Хэвийн"}
-              </span>
-            </div>
+            <StatusIndicator status={batteryStatus} />
           </div>
 
-          <div className="flex items-center justify-between rounded-[16px] border border-[#BDBDBD] bg-white px-6 py-4 shadow-sm">
+          <div
+            className="flex h-[70px] w-full max-w-[644px] items-center justify-between rounded-[16px] bg-white px-6"
+            style={{ border: "0.5px solid #BDBDBD" }}
+          >
             <div className="flex items-center gap-5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md">
-                <Wifi className="h-7 w-7 text-black" />
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+                <Wifi className="h-8 w-8 text-black" />
               </div>
-              <div className="space-y-1">
-                <p className="text-base font-medium leading-[120%] text-black">Интернет холболт</p>
-                <p className="text-sm leading-[120%] text-[#6B6B6B]">{internetMessage}</p>
+              <div className="flex flex-col gap-[6px]">
+                <p className="text-[16px] font-medium leading-[120%] text-black">
+                  Интернет холболт
+                </p>
+                <p className="text-[14px] font-normal leading-[120%] text-[#6B6B6B]">
+                  {internetMessage}
+                </p>
               </div>
             </div>
-            <div className="flex w-[43px] flex-col items-center gap-0.5">
-              <CheckCircle2 className={`h-6 w-6 ${internetStatus === "error" ? "text-[#E05252]" : "text-[#6BBF7A]"}`} />
-              <span className={`text-[12px] leading-[120%] ${internetStatus === "error" ? "text-[#E05252]" : "text-[#3B8748]"}`}>
-                {internetStatus === "warning" ? "Анхаар" : internetStatus === "error" ? "Алдаа" : "Хэвийн"}
-              </span>
-            </div>
+            <StatusIndicator status={internetStatus} />
           </div>
 
-          <div className="flex items-center justify-between rounded-[16px] border border-[#BDBDBD] bg-white px-6 py-4 shadow-sm">
+          <div
+            className="flex h-[70px] w-full max-w-[644px] items-center justify-between rounded-[16px] bg-white px-6"
+            style={{ border: "0.5px solid #BDBDBD" }}
+          >
             <div className="flex items-center gap-5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md">
-                <Camera className="h-7 w-7 text-black" />
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+                <Camera className="h-8 w-8 text-black" />
               </div>
-              <div className="space-y-1">
-                <p className="text-base font-medium leading-[120%] text-black">Камер</p>
-                <p className="text-sm leading-[120%] text-[#6B6B6B]">
+              <div className="flex flex-col gap-[6px]">
+                <p className="text-[16px] font-medium leading-[120%] text-black">
+                  Камер
+                </p>
+                <p className="text-[14px] font-normal leading-[120%] text-[#6B6B6B]">
                   {brightnessScore !== null
                     ? `${cameraMessage}${cameraMessage.endsWith(".") ? "" : "."}`
                     : cameraMessage}
                 </p>
               </div>
             </div>
-            <div className="flex w-[43px] flex-col items-center gap-0.5">
-              {cameraStatus === "error" ? (
-                <XCircle className="h-6 w-6 text-[#E05252]" />
-              ) : (
-                <CheckCircle2 className="h-6 w-6 text-[#6BBF7A]" />
-              )}
-              <span className={`text-[12px] leading-[120%] ${cameraStatus === "error" ? "text-[#E05252]" : "text-[#3B8748]"}`}>
-                {cameraStatus === "warning" ? "Анхаар" : cameraStatus === "error" ? "Алдаа" : "Хэвийн"}
-              </span>
-            </div>
+            <StatusIndicator status={cameraStatus} />
           </div>
 
           <video
@@ -573,42 +633,61 @@ export default function PreExamCheck({
             autoPlay
             muted
             playsInline
-            className="absolute h-0 w-0 opacity-0 pointer-events-none"
+            className="pointer-events-none absolute h-0 w-0 opacity-0"
           />
 
-          <div className="rounded-[16px] border border-[#6BBF7A] bg-[#DBF0DF] px-6 py-3 text-sm font-medium text-[#3B8748]">
-            Бүгд хэвийн. Таны төхөөрөмж шалгалтад бэлэн байна.
+          {canStart && readinessSettled ? (
+            <div
+              className="flex h-[44px] w-full max-w-[644px] items-center rounded-[16px] bg-[#DBF0DF] px-6 text-[14px] font-medium leading-[120%] text-[#3B8748]"
+              style={{ border: "0.4px solid #6BBF7A" }}
+            >
+              Бүгд хэвийн. Таны төхөөрөмж шалгалтад бэлэн байна.
+            </div>
+          ) : null}
+
+          <div
+            className="w-full max-w-[644px] rounded-[16px] bg-[#FBE9E9] p-5 text-[#E05252]"
+            style={{ border: "0.4px solid #E05252", minHeight: "176px" }}
+          >
+            <div className="flex flex-col gap-[10px]">
+              <div className="flex items-center gap-[10px]">
+                <AlertTriangle className="h-8 w-8 shrink-0" />
+                <p className="text-[16px] font-medium leading-[120%]">
+                  Анхааруулга
+                </p>
+              </div>
+              <div className="flex flex-col gap-[10px] text-[14px] leading-[140%]">
+                <p className="font-normal">
+                  Шалгалтын явцад таны камер идэвхтэй ажиллаж, таны үйлдлийг
+                  хянах болно. Иймд шалгалтын хугацаанд өөр таб нээх, цонх
+                  солих, гаднын эх сурвалж ашиглах зэрэг зөрчил гаргавал систем
+                  илрүүлж, тухайн үйлдлийг хуулбарлах оролдлого гэж үзнэ.
+                </p>
+                <p className="font-medium">
+                  Ийм тохиолдолд таны шалгалтыг хүчингүйд тооцох боломжтойг
+                  анхаарна уу.
+                </p>
+              </div>
+            </div>
           </div>
 
-          <div className="rounded-[16px] border border-[#E05252] bg-[#FBE9E9] px-5 py-5 text-[#E05252]">
-            <div className="mb-4 flex items-center gap-3">
-              <XCircle className="h-7 w-7" />
-              <p className="text-base font-medium leading-[120%]">Анхааруулга</p>
-            </div>
-            <div className="space-y-3 text-sm leading-[140%]">
-              <p>
-                Шалгалтын явцад таны камер идэвхтэй ажиллаж, таны үйлдлийг хянах болно. Иймд шалгалтын хугацаанд өөр таб нээх, цонх солих, гаднын эх сурвалж ашиглах зэрэг зөрчил гаргавал систем илрүүлж, тухайн үйлдлийг хуулбарлах оролдлого гэж үзнэ.
-              </p>
-              <p className="font-medium">
-                Ийм тохиолдолд таны шалгалтыг хүчингүйд тооцох боломжтойг анхаарна уу.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:gap-7">
+          <div className="flex w-full max-w-[644px] flex-col gap-3 md:h-10 md:flex-row md:gap-[28px]">
             <Button
               type="button"
               variant="outline"
-              className="h-10 flex-1 rounded-[8px] border border-[#BDBDBD] bg-white text-sm font-medium text-black hover:bg-zinc-50"
+              className="h-10 flex-1 rounded-[8px] bg-white text-[14px] font-medium text-black hover:bg-zinc-50"
+              style={{ border: "0.4px solid #BDBDBD" }}
               onClick={() => window.location.reload()}
             >
               Дахин шалгах
             </Button>
             <Button
               type="button"
-              className="h-10 flex-1 rounded-[8px] bg-black text-sm font-medium text-white hover:bg-black/90"
+              className="h-10 flex-1 rounded-[8px] bg-black text-[14px] font-medium text-white hover:bg-black/90"
               onClick={() => void handleStart()}
-              disabled={!canStart || actionLoading || (requiresDesktop && !isDesktop)}
+              disabled={
+                !canStart || actionLoading || (requiresDesktop && !isDesktop)
+              }
             >
               {actionLoading ? (
                 <>

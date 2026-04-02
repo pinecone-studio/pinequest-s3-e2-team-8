@@ -1,16 +1,56 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import type { StudentSubjectStudyPlan } from "@/types";
-import { refreshStudentSubjectStudyPlan } from "@/lib/student-learning/actions";
+
+function PlanColumnCard({
+  accentColor,
+  itemColor,
+  title,
+  items,
+}: {
+  accentColor: string;
+  itemColor: string;
+  title: string;
+  items: string[];
+}) {
+  return (
+    <article className="min-h-[242px] rounded-[10px] border border-[#ECECEC] bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.08)]">
+      <div className="flex items-center gap-2 pb-4">
+        <span
+          className="h-[10px] w-[10px] rounded-full"
+          style={{ backgroundColor: accentColor }}
+        />
+        <h4 className="text-[14px] font-semibold leading-[120%] text-[#111111]">
+          {title}
+        </h4>
+      </div>
+
+      <div className="space-y-3">
+        {items.length === 0 ? (
+          <div
+            className="rounded-[8px] px-3 py-3 text-[13px] leading-[150%] text-[#6B6B6B]"
+            style={{ backgroundColor: itemColor }}
+          >
+            Одоогоор санал болгох зүйл алга.
+          </div>
+        ) : (
+          items.map((item) => (
+            <div
+              key={item}
+              className="rounded-[8px] px-3 py-3 text-[13px] leading-[150%] text-[#2F2F2F]"
+              style={{ backgroundColor: itemColor }}
+            >
+              {item}
+            </div>
+          ))
+        )}
+      </div>
+    </article>
+  );
+}
 
 export default function StudyPlanPanel({
-  subjectId,
   plan,
-  isStale,
   status,
   lastError,
   isRefreshing,
@@ -24,129 +64,61 @@ export default function StudyPlanPanel({
   isRefreshing: boolean;
   disabled: boolean;
 }) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-
-  const handleRefresh = () => {
-    startTransition(async () => {
-      setError(null);
-      const result = await refreshStudentSubjectStudyPlan(subjectId);
-      if ("error" in result) {
-        setError(result.error ?? "AI study plan боловсруулахад алдаа гарлаа.");
-        return;
-      }
-
-      router.refresh();
-    });
-  };
-
-  const effectiveError = error ?? lastError;
+  const effectiveError = lastError;
   const hasPendingPlan = status === "pending";
+  const introCopy =
+    plan?.summary ??
+    (disabled
+      ? isRefreshing
+        ? "Mastery profile шинэчлэгдэж байна. Дараа нь AI төлөвлөгөө гарна."
+        : "Энэ хичээл дээр topic-level data хангалтгүй байна."
+      : hasPendingPlan
+        ? "AI таны хувийн төлөвлөгөөг бэлтгэж байна. Дуусмагц энэ хэсэг автоматаар шинэчлэгдэнэ."
+        : "AI таны сул сэдвүүд дээр тулгуурлан 3 алхамтай хувийн төлөвлөгөө гаргана.");
 
   return (
-    <div className="rounded-2xl border bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h3 className="text-lg font-semibold">AI Personalized Study Plan</h3>
-          <p className="text-sm text-muted-foreground">
-            Таны сул сэдвүүд дээр суурилсан хувийн төлөвлөгөө
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {plan && (
-            <Badge variant={isStale ? "outline" : "secondary"}>
-              {isStale ? "Шинэчлэлт хэрэгтэй" : "Cache бэлэн"}
-            </Badge>
-          )}
-          {status === "pending" && (
-            <Badge variant="secondary">AI боловсруулж байна</Badge>
-          )}
-          {status === "failed" && (
-            <Badge variant="outline">Сүүлчийн оролдлого амжилтгүй</Badge>
-          )}
-          {isRefreshing && (
-            <Badge variant="outline">Mastery шинэчлэгдэж байна</Badge>
-          )}
-          <Button
-            type="button"
-            size="sm"
-            variant={plan ? "outline" : "default"}
-            disabled={disabled || isPending || hasPendingPlan || isRefreshing}
-            onClick={handleRefresh}
-          >
-            {isPending || hasPendingPlan
-              ? "AI боловсруулж байна..."
-              : plan
-                ? "Дахин боловсруулах"
-                : "AI төлөвлөгөө гаргах"}
-          </Button>
-        </div>
+    <section className="space-y-6">
+      <div className="space-y-2">
+        <h3 className="text-[24px] font-semibold leading-[120%] text-black">
+          AI Personalized Study Plan
+        </h3>
+        <p className="text-[14px] font-normal leading-[140%] text-[#6B6B6B]">
+          Таны сул сэдвүүд дээр суурилсан хувийн төлөвлөгөө
+        </p>
       </div>
 
-      {effectiveError && (status === "failed" || Boolean(error)) && (
-        <div className="mt-4 rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+      {effectiveError && status === "failed" ? (
+        <div className="rounded-[16px] border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
           {effectiveError}
         </div>
-      )}
+      ) : null}
 
-      {!plan ? (
-        <div className="mt-4 rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-          {disabled
-            ? isRefreshing
-              ? "Mastery profile шинэчлэгдэж байна. Дараа нь AI төлөвлөгөө гарна."
-              : "Энэ хичээл дээр topic-level data хангалтгүй байна."
-            : hasPendingPlan
-              ? "AI таны хувийн төлөвлөгөөг бэлтгэж байна. Дуусмагц энэ хэсэг автоматаар шинэчлэгдэнэ."
-              : "AI таны сул сэдвүүд дээр тулгуурлан 3 алхамтай хувийн төлөвлөгөө гаргана."}
-        </div>
-      ) : (
-        <div className="mt-4 space-y-5">
-          {hasPendingPlan && (
-            <div className="rounded-xl border border-[#4078C1]/30 bg-[#ECF1F9] p-4 text-sm text-[#1E4F8F]">
-              Шинэ AI төлөвлөгөө боловсруулж байна. Одоогоор өмнөх хадгалсан төлөвлөгөөг харуулж байна.
-            </div>
-          )}
-          <div className="rounded-xl bg-zinc-50 p-4">
-            <p className="text-sm leading-6 text-zinc-700">{plan.summary}</p>
-          </div>
+      <div className="rounded-[8px] border border-[#D6E2EC] bg-[linear-gradient(90deg,#EEF5FF_0%,#EFF9F0_48%,#FFF0F7_100%)] px-6 py-5 text-[14px] leading-[160%] text-[#2E2E2E] shadow-[0_6px_20px_rgba(15,23,42,0.06)]">
+        {hasPendingPlan && plan
+          ? "Шинэ AI төлөвлөгөө боловсруулж байна. Одоогоор өмнөх хадгалсан төлөвлөгөөг харуулж байна."
+          : introCopy}
+      </div>
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="rounded-xl border p-4">
-              <p className="text-sm font-semibold text-zinc-900">Эхний анхаарах зүйлс</p>
-              <ul className="mt-3 space-y-2 text-sm text-zinc-700">
-                {plan.priorities.map((item, index) => (
-                  <li key={index} className="rounded-lg bg-zinc-50 px-3 py-2">
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="rounded-xl border p-4">
-              <p className="text-sm font-semibold text-zinc-900">3 алхамтай төлөвлөгөө</p>
-              <ul className="mt-3 space-y-2 text-sm text-zinc-700">
-                {plan.steps.map((item, index) => (
-                  <li key={index} className="rounded-lg bg-zinc-50 px-3 py-2">
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="rounded-xl border p-4">
-              <p className="text-sm font-semibold text-zinc-900">Дараагийн practice focus</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {plan.next_practice_focus.map((item, index) => (
-                  <Badge key={index} variant="outline">
-                    {item}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <div className="grid gap-5 lg:grid-cols-3">
+        <PlanColumnCard
+          accentColor="#6366F1"
+          itemColor="#EEF2FF"
+          title="3 алхамтай төлөвлөгөө"
+          items={plan?.steps ?? []}
+        />
+        <PlanColumnCard
+          accentColor="#6BBF7A"
+          itemColor="#E3F3E5"
+          title="Эхний анхаарах зүйлс"
+          items={plan?.priorities ?? []}
+        />
+        <PlanColumnCard
+          accentColor="#D86AD9"
+          itemColor="#FEF0FE"
+          title="Дараагийн practice focus"
+          items={plan?.next_practice_focus ?? []}
+        />
+      </div>
+    </section>
   );
 }

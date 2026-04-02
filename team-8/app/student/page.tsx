@@ -73,17 +73,20 @@ function ExamCard({
   exam,
   paletteIndex,
   isActive,
+  cardWidth,
 }: {
   exam: UpcomingExam;
   paletteIndex: number;
   isActive: boolean;
+  cardWidth: string;
 }) {
   const bgColor = CARD_PALETTES[paletteIndex % CARD_PALETTES.length];
   const timeLabel = formatExamTimeLabel(exam.start_time, exam.duration_minutes);
 
   return (
     <article
-      className={`relative h-[226px] w-full overflow-hidden rounded-[13px] ${bgColor} shadow-[0_2px_6px_rgba(0,0,0,0.25)] sm:max-w-[340px]`}
+      className={`relative h-[226px] overflow-hidden rounded-[13px] ${bgColor} shadow-[0_2px_6px_rgba(0,0,0,0.25)]`}
+      style={{ width: cardWidth }}
     >
       <div
         className="absolute left-0 top-[68px] h-[158px] w-full bg-white shadow-[0_4px_10px_rgba(0,0,0,0.10)]"
@@ -188,79 +191,150 @@ export default async function StudentDashboard() {
   );
 
   return (
-    <div className="relative space-y-6">
-      {/* 1. The Background Card */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#ffffff] via-[#ffeac0] to-[#ffd474] px-8 py-6">
-        <div className="relative z-0 max-w-2xl space-y-2">
-          <h2 className="text-2xl font-bold tracking-tight md:text-3xl">
-            Сурагчын самбар
-          </h2>
-          <p className="text-sm text-muted-foreground md:text-base">
-            Шалгалт, дүнгийн мэдээллээ нэг доороос хянаарай.
-          </p>
+    <div className="relative flex w-full flex-col" style={{ gap: "40px" }}>
+      {/* Hero Banner */}
+      <div
+        className="relative"
+        style={{
+          height: "145px",
+        }}
+      >
+        <div
+          className="absolute inset-0 rounded-[24px]"
+          style={{
+            height: "145px",
+            background:
+              "linear-gradient(270.96deg, #FFD372 0%, #FFFFFF 89.87%)",
+            zIndex: 1,
+          }}
+        >
+          <div
+            className="absolute flex flex-col justify-center"
+            style={{
+              left: "31px",
+              top: 0,
+              bottom: 0,
+              width: "601px",
+              gap: "12px",
+              zIndex: 2,
+            }}
+          >
+            <h2
+              style={{
+                fontSize: "30px",
+                fontWeight: 600,
+                lineHeight: "120%",
+                color: "#000000",
+                margin: 0,
+              }}
+            >
+              Сурагчын самбар
+            </h2>
+            <p
+              style={{
+                fontSize: "16px",
+                fontWeight: 500,
+                lineHeight: "120%",
+                color: "#6B6B6B",
+                margin: 0,
+              }}
+            >
+              Шалгалт, дүнгийн мэдээллээ нэг доороос хянаарай.
+            </p>
+          </div>
+        </div>
+
+        <div
+          className="pointer-events-none absolute hidden md:block"
+          style={{
+            width: "396px",
+            height: "291.26px",
+            right: "24px",
+            top: "-45px",
+            zIndex: 3,
+          }}
+        >
+          <DashboardImage
+            width={396}
+            height={291.26}
+            style={{ display: "block" }}
+          />
         </div>
       </div>
 
-      {/* 2. The Image Layer - Moved OUTSIDE the overflow-hidden div */}
-      <div className="pointer-events-none absolute -top-32 right-0 z-[60] hidden h-full w-auto scale-77 origin-bottom-right md:block">
-        <DashboardImage />
+      <div className="flex flex-col" style={{ gap: "35px" }}>
+        {/* Active Exams Section */}
+        <section className="flex flex-col" style={{ gap: "32px" }}>
+          <div
+            className="flex items-center"
+            style={{ height: "36px", gap: "26px" }}
+          >
+            <h3 className="text-[20px] leading-[120%] font-medium text-black">
+              Идэвхтэй шалгалтууд
+            </h3>
+            <span
+              className="inline-flex items-center justify-center rounded-[30px] bg-black/10 text-base leading-[120%] font-normal text-black"
+              style={{ width: "36px", height: "36px" }}
+            >
+              {activeExams.length}
+            </span>
+          </div>
+
+          {activeExams.length === 0 ? (
+            <p className="text-muted-foreground py-2 text-sm">
+              Одоогоор идэвхтэй шалгалт байхгүй байна.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 justify-start gap-x-[34px] gap-y-6 md:grid-cols-[repeat(2,340px)] xl:grid-cols-[repeat(4,340px)]">
+              {activeExams.map((exam, index) => (
+                <ExamCard
+                  key={exam.id}
+                  exam={exam}
+                  paletteIndex={index}
+                  isActive={true}
+                  cardWidth="340px"
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Upcoming Exams Section */}
+        <section className="flex flex-col" style={{ gap: "32px" }}>
+          <div
+            className="flex items-center"
+            style={{ height: "36px", gap: "26px" }}
+          >
+            <h3 className="text-[20px] leading-[120%] font-medium text-black">
+              Удахгүй болох шалгалтууд
+            </h3>
+            <span
+              className="inline-flex items-center justify-center rounded-[30px] bg-black/10 text-base leading-[120%] font-normal text-black"
+              style={{ width: "36px", height: "36px" }}
+            >
+              {scheduledExams.length}
+            </span>
+          </div>
+
+          {scheduledExams.length === 0 ? (
+            <p className="text-muted-foreground py-2 text-sm">
+              Удахгүй болох шалгалт байхгүй байна.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 justify-start gap-x-[34px] gap-y-6 md:grid-cols-[repeat(2,316px)] xl:grid-cols-[repeat(4,316px)]">
+              {scheduledExams.map((exam, index) => (
+                <ExamCard
+                  key={exam.id}
+                  exam={exam}
+                  paletteIndex={index + 3}
+                  isActive={false}
+                  cardWidth="316px"
+                />
+              ))}
+            </div>
+          )}
+        </section>
       </div>
-
-      {/* Active Exams Section */}
-      <section className="space-y-8">
-        <div className="flex items-center gap-[26px]">
-          <h3 className="text-[20px] leading-[120%] font-medium text-black">
-            Идэвхтэй шалгалтууд
-          </h3>
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-[30px] bg-black/10 text-base leading-[120%] font-normal text-black">
-            {activeExams.length}
-          </span>
-        </div>
-        {activeExams.length === 0 ? (
-          <p className="text-muted-foreground text-sm py-2">
-            Одоогоор идэвхтэй шалгалт байхгүй байна.
-          </p>
-        ) : (
-          <div className="grid grid-cols-1 justify-items-stretch gap-x-[34px] gap-y-6 sm:justify-items-start lg:grid-cols-2">
-            {activeExams.map((exam, index) => (
-              <ExamCard
-                key={exam.id}
-                exam={exam}
-                paletteIndex={index}
-                isActive={true}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Upcoming Exams Section */}
-      <section className="space-y-8">
-        <div className="flex items-center gap-[26px]">
-          <h3 className="text-[20px] leading-[120%] font-medium text-black">
-            Удахгүй болох шалгалтууд
-          </h3>
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-[30px] bg-black/10 text-base leading-[120%] font-normal text-black">
-            {scheduledExams.length}
-          </span>
-        </div>
-        {scheduledExams.length === 0 ? (
-          <p className="text-muted-foreground text-sm py-2">
-            Удахгүй болох шалгалт байхгүй байна.
-          </p>
-        ) : (
-          <div className="grid grid-cols-1 justify-items-stretch gap-x-[34px] gap-y-[22px] sm:justify-items-start md:grid-cols-2 xl:grid-cols-3">
-            {scheduledExams.map((exam, index) => (
-              <ExamCard
-                key={exam.id}
-                exam={exam}
-                paletteIndex={index + 3}
-                isActive={false}
-              />
-            ))}
-          </div>
-        )}
-      </section>
     </div>
   );
 }

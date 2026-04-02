@@ -5,8 +5,13 @@ import { logout } from "@/lib/auth/actions";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import NotificationBell from "@/components/NotificationBell";
 import Logo from "@/app/_icons/Logo";
+import type { StudentProfileDisplay } from "./profile-display";
 
-export default function MobileHeader() {
+export default function MobileHeader({
+  profile,
+}: {
+  profile: StudentProfileDisplay;
+}) {
   return (
     <header className="sticky top-0 z-40 flex items-center justify-between border-b border-zinc-200/60 bg-white/90 px-4 pb-3 pt-[calc(12px+env(safe-area-inset-top))] backdrop-blur md:hidden">
       <div className="flex items-center gap-2">
@@ -16,8 +21,8 @@ export default function MobileHeader() {
       <div className="flex items-center gap-2">
         <NotificationBell variant="header" />
         <Avatar className="h-9 w-9 border border-white shadow-sm">
-          <AvatarImage src="https://github.com/shadcn.png" alt="User" />
-          <AvatarFallback>BT</AvatarFallback>
+          <AvatarImage src={profile.avatarUrl ?? undefined} alt={profile.name} />
+          <AvatarFallback>{profile.initials}</AvatarFallback>
         </Avatar>
         <form action={logout}>
           <button
