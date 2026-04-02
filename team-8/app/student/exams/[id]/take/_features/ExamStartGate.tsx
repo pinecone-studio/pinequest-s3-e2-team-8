@@ -16,6 +16,7 @@ interface ExamStartGateProps {
 export default function ExamStartGate({ exam }: ExamStartGateProps) {
   const router = useRouter();
   const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const examId = String(exam.id ?? "");
   const proctoringMode = useMemo(
     () =>
@@ -28,6 +29,7 @@ export default function ExamStartGate({ exam }: ExamStartGateProps) {
     if (starting) return;
     setStarting(true);
 
+    setStartError(null);
     try {
       const result = await startExamAttempt(examId, payload);
       if ("redirectTo" in result && typeof result.redirectTo === "string") {
@@ -36,12 +38,12 @@ export default function ExamStartGate({ exam }: ExamStartGateProps) {
       }
 
       if ("error" in result) {
-        alert(result.error);
+        setStartError(result.error ?? "Шалгалт эхлүүлэхэд алдаа гарлаа.");
         return;
       }
 
       if (!("sessionId" in result) || !("startedAt" in result)) {
-        alert("Шалгалтын session мэдээллийг бэлтгэж чадсангүй.");
+        setStartError("Шалгалтын session мэдээллийг бэлтгэж чадсангүй.");
         return;
       }
 
@@ -65,21 +67,30 @@ export default function ExamStartGate({ exam }: ExamStartGateProps) {
   }
 
   return (
-    <PreExamCheck
-      examTitle={typeof exam.title === "string" ? exam.title : undefined}
-      proctoringMode={proctoringMode}
-      devicePolicy={
-        (exam.device_policy as
-          | "any"
-          | "mobile_preferred"
-          | "desktop_only"
-          | undefined) ?? "any"
-      }
-      requireFullscreen={Boolean(exam.require_fullscreen)}
-      requireCamera={Boolean(exam.require_camera)}
-      identityVerification={Boolean(exam.identity_verification)}
-      resumeMode={false}
-      onStart={handleStart}
-    />
+    <>
+      {startError && (
+        <div className="fixed inset-x-0 top-4 z-200 flex justify-center px-4">
+          <div className="w-full max-w-lg rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-medium text-red-700 shadow-lg">
+            {startError}
+          </div>
+        </div>
+      )}
+      <PreExamCheck
+        examTitle={typeof exam.title === "string" ? exam.title : undefined}
+        proctoringMode={proctoringMode}
+        devicePolicy={
+          (exam.device_policy as
+            | "any"
+            | "mobile_preferred"
+            | "desktop_only"
+            | undefined) ?? "any"
+        }
+        requireFullscreen={Boolean(exam.require_fullscreen)}
+        requireCamera={Boolean(exam.require_camera)}
+        identityVerification={Boolean(exam.identity_verification)}
+        resumeMode={false}
+        onStart={handleStart}
+      />
+    </>
   );
 }

@@ -86,5 +86,17 @@ export function useCameraMonitor({
     };
   }, [cameraApiAvailable, sessionId, enabled, preferFrontCamera]);
 
+  // Secondary attach: if the video element mounted after getUserMedia resolved
+  // (common on iOS Safari where React may defer the ref assignment), ensure the
+  // stream is assigned to srcObject before the component renders.
+  useEffect(() => {
+    if (cameraStatus !== "granted") return;
+    const video = videoRef.current;
+    if (video && streamRef.current && video.srcObject !== streamRef.current) {
+      video.srcObject = streamRef.current;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraStatus]);
+
   return { cameraStatus: effectiveCameraStatus, videoRef };
 }
