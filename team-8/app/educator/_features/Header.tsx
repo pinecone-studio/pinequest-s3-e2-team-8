@@ -40,6 +40,8 @@ export default function Header({ profile }: { profile: Profile }) {
   const isExamsPage = pathname === "/educator/exams";
   const isExamResultsPage =
     pathname?.startsWith("/educator/exams/") && pathname?.endsWith("/results");
+  const isExamQuestionsPage =
+    pathname?.startsWith("/educator/exams/") && pathname?.endsWith("/questions");
   const isExamBuilderPage =
     pathname === "/educator/create-exam" ||
     (pathname?.startsWith("/educator/exams/") && pathname?.endsWith("/edit"));
@@ -47,6 +49,7 @@ export default function Header({ profile }: { profile: Profile }) {
   const hideGreeting =
     isExamsPage ||
     isExamResultsPage ||
+    isExamQuestionsPage ||
     isExamBuilderPage ||
     pathname === "/educator/groups" ||
     pathname?.startsWith("/educator/question-bank") ||
@@ -54,6 +57,7 @@ export default function Header({ profile }: { profile: Profile }) {
 
   const showGroupsBackLink = pathname?.startsWith("/educator/groups/");
   const showExamResultsBackLink = isExamResultsPage;
+  const showExamQuestionsBackLink = isExamQuestionsPage;
   const showDashboardBackLink =
     pathname?.startsWith("/educator/grading") ||
     pathname === "/educator/question-bank/ai-create";
@@ -77,11 +81,13 @@ export default function Header({ profile }: { profile: Profile }) {
         hideGreeting &&
         !showGroupsBackLink &&
         !showExamResultsBackLink &&
+        !showExamQuestionsBackLink &&
         !showQuestionBankBackLink &&
         !showDashboardBackLink
           ? "sm:justify-end"
           : showGroupsBackLink ||
               showExamResultsBackLink ||
+              showExamQuestionsBackLink ||
               showQuestionBankBackLink ||
               showDashboardBackLink
             ? "sm:justify-start"
@@ -101,11 +107,21 @@ export default function Header({ profile }: { profile: Profile }) {
       ) : showExamResultsBackLink ? (
         <Link
           href="/educator/exams"
+          className="text-[15px] font-medium text-[#111111] hover:text-[#1f2937] cursor-pointer"
+        >
+          <div className="flex items-center gap-1 text-[#030217] ">
+            <ArrowLeft size={16} />
+            Шалгалтууд руу буцах
+          </div>
+        </Link>
+      ) : showExamQuestionsBackLink ? (
+        <Link
+          href="/educator/exams"
           className="text-[15px] font-medium text-[#111111] hover:text-[#1f2937]"
         >
           <div className="flex items-center gap-1 text-[#030217]">
             <ArrowLeft size={16} />
-            Шалгалтууд руу буцах
+            Шалгалтын жагсаалт руу буцах
           </div>
         </Link>
       ) : showDashboardBackLink ? (
@@ -143,6 +159,7 @@ export default function Header({ profile }: { profile: Profile }) {
         className={`flex h-[40px] w-[100px] items-center justify-end gap-[20px] self-end sm:self-auto ${
           showGroupsBackLink ||
           showExamResultsBackLink ||
+          showExamQuestionsBackLink ||
           showQuestionBankBackLink ||
           showDashboardBackLink
             ? "sm:ml-auto"

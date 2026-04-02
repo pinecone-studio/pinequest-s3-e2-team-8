@@ -433,9 +433,9 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
   return (
     <div className="space-y-5 pb-6">
       <div className="space-y-2">
-        <p className="text-[22px] font-medium text-[#111827] flex gap-1">
-          <p className="font-semibold"> {exam.subject?.name ?? "Хичээл тодорхойгүй"}</p>
-          хичээлийн  <p className="font-semibold">{exam.title}</p> дүнгийн мэдээлэл
+        <p className="text-[22px] font-regular text-[#111827] flex gap-1">
+          <p className="font-medium"> {exam.subject?.name ?? "Хичээл тодорхойгүй"}</p>
+          хичээлийн  <p className="font-medium">{exam.title}</p> дүнгийн мэдээлэл
         </p>
       </div>
 

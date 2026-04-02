@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/actions";
-import { DashboardHeader } from "@/components/dashboard/header";
-import { DashboardSidebar } from "@/components/dashboard/sidebar";
+import AdminShell from "./_features/AdminShell";
+import AdminSidebar from "./_features/AdminSidebar";
 
 export default async function AdminLayout({
   children,
@@ -16,13 +16,10 @@ export default async function AdminLayout({
   }
 
   return (
-    <div className="min-h-screen bg-muted/30 text-foreground">
-      <DashboardHeader profile={profile} />
-      <div className="flex">
-        <DashboardSidebar role="admin" />
-        <main className="flex-1 px-4 py-6 md:px-8">
-          <div className="mx-auto w-full max-w-[1440px]">{children}</div>
-        </main>
+    <div className="min-h-screen bg-[#FAFAFA] text-zinc-900">
+      <div className="flex min-h-screen">
+        <AdminSidebar />
+        <AdminShell profile={profile}>{children}</AdminShell>
       </div>
     </div>
   );

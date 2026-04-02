@@ -376,6 +376,7 @@ export default function AdminExamCalendar({
   }
 
   return (
+    <div className="flex flex-col gap-7.5">
     <Card className="rounded-[28px] border-zinc-200 shadow-none">
       <CardContent className="p-4 md:p-5">
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px]">
@@ -580,7 +581,11 @@ export default function AdminExamCalendar({
             ) : null}
           </div>
 
-          <aside className="border-t border-zinc-100 pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
+      
+        </div>
+      </CardContent>
+    </Card>
+    <aside className="border-t border-zinc-100 pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
             <div className="space-y-1">
               <h4 className="text-xl font-semibold tracking-tight text-[#1d3d8f]">
                 Өдрийн тойм
@@ -689,9 +694,6 @@ export default function AdminExamCalendar({
                 ))}
               </div>
             </div>
-          </aside>
-        </div>
-      </CardContent>
-    </Card>
+          </aside></div>
   );
 }
