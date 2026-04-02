@@ -13,6 +13,7 @@ import { addQuestion } from "@/lib/question/actions";
 import { parsePastedQuestionText } from "@/lib/question/paste";
 import MathContent from "@/components/math/MathContent";
 import LatexShortcutPanel from "@/components/math/LatexShortcutPanel";
+import { hasMathMarkup } from "@/components/math/math-text";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -77,10 +78,6 @@ function buildSelectionOptions(options: string[]) {
   return options.length >= 4
     ? options
     : [...options, ...Array.from({ length: 4 - options.length }, () => "")];
-}
-
-function hasMathMarkup(value: string) {
-  return value.includes("$") || value.includes("\\(") || value.includes("\\[");
 }
 
 export default function AddQuestionForm({ examId, passages }: Props) {
@@ -615,7 +612,7 @@ export default function AddQuestionForm({ examId, passages }: Props) {
                 label: "Асуулт",
               })
             }
-            placeholder="Асуултаа энд бичнэ үү..."
+            placeholder={"Асуултаа энд бичнэ үү...\nЖишээ: \\frac{a+b}{c} эсвэл $\\frac{a+b}{c}$"}
             rows={4}
             required
             className="min-h-[180px] rounded-[24px] border-zinc-200 bg-white px-4 py-3 text-base leading-7 shadow-none focus-visible:ring-zinc-200"

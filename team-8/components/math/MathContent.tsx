@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { normalizeMathText } from "@/components/math/math-text";
 
 declare global {
   interface Window {
@@ -42,12 +43,16 @@ export default function MathContent({
     signature: string;
     message: string;
   } | null>(null);
-  const signature = useMemo(() => `${html ?? ""}\u0000${text ?? ""}`, [html, text]);
+  const normalizedText = useMemo(() => normalizeMathText(text), [text]);
+  const signature = useMemo(
+    () => `${html ?? ""}\u0000${normalizedText}`,
+    [html, normalizedText]
+  );
   const fallbackText = useMemo(() => {
-    if (text) return text;
+    if (normalizedText) return normalizedText;
     if (html) return stripHtmlTags(html);
     return "";
-  }, [html, text]);
+  }, [html, normalizedText]);
 
   useEffect(() => {
     const element = ref.current;
@@ -57,7 +62,7 @@ export default function MathContent({
 
     let cancelled = false;
     let attempts = 0;
-    const currentSignature = `${html ?? ""}\u0000${text ?? ""}`;
+    const currentSignature = `${html ?? ""}\u0000${normalizedText}`;
 
     const runTypeset = () => {
       if (cancelled || !ref.current) return;
@@ -106,7 +111,7 @@ export default function MathContent({
     return () => {
       cancelled = true;
     };
-  }, [html, text]);
+  }, [html, normalizedText]);
 
   if (typesetError?.signature === signature) {
     return (
@@ -131,7 +136,7 @@ export default function MathContent({
 
   return (
     <div ref={ref} className={className}>
-      {text}
+      {normalizedText}
     </div>
   );
 }
