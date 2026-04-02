@@ -790,6 +790,7 @@ export default function ExamTaker({
 }: ExamTakerProps) {
   const router = useRouter();
   const draftStorageKey = `exam-session:${sessionId}:drafts`;
+  const indexStorageKey = `exam-session:${sessionId}:index`;
   const [displayQuestions] = useState(() =>
     getDisplayQuestions(
       questions,
@@ -798,7 +799,20 @@ export default function ExamTaker({
     )
   );
 
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(() => {
+    // Restore the last viewed question across page reloads.
+    if (typeof window === "undefined") return 0;
+    try {
+      const saved = window.localStorage.getItem(`exam-session:${sessionId}:index`);
+      if (!saved) return 0;
+      const parsed = parseInt(saved, 10);
+      return Number.isFinite(parsed) && parsed >= 0
+        ? Math.min(parsed, questions.length - 1)
+        : 0;
+    } catch {
+      return 0;
+    }
+  });
   const [answers, setAnswers] = useState<Record<string, string>>(() => {
     if (typeof window === "undefined") return savedAnswers;
 
@@ -818,6 +832,8 @@ export default function ExamTaker({
     initialAnswerAnalytics
   );
   const [timeLeft, setTimeLeft] = useState(initialTimeLeftSeconds);
+  // Wall-clock deadline — used to compensate for timer throttling on backgrounded mobile tabs.
+  const timerEndEpochRef = useRef<number>(Date.now() + initialTimeLeftSeconds * 1000);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
@@ -861,6 +877,8 @@ export default function ExamTaker({
   );
   const [spotCheckBusy, setSpotCheckBusy] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+  const [tabWarningMessage, setTabWarningMessage] = useState<string | null>(null);
+  const [submitErrorMessage, setSubmitErrorMessage] = useState<string | null>(null);
   const [orientation, setOrientation] = useState<"portrait" | "landscape">(
     runtimeReadiness?.orientation ?? "portrait"
   );
@@ -1259,7 +1277,10 @@ export default function ExamTaker({
   }, [sessionId]);
 
   const flushPendingAnswers = useCallback(async () => {
-    while (isCheckpointingRef.current) {
+    // Wait for any in-flight checkpoint, but cap the wait at 4 seconds so a
+    // stalled network request on mobile never permanently blocks the submit button.
+    const deadline = Date.now() + 4000;
+    while (isCheckpointingRef.current && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     await checkpointDirtyAnswers();
@@ -1288,17 +1309,19 @@ export default function ExamTaker({
     if ("success" in result && result.success) {
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(draftStorageKey);
+        window.localStorage.removeItem(indexStorageKey);
       }
       router.replace(`/student/exams/${exam.id as string}/result`);
     } else {
       isSubmittingRef.current = false;
       setIsSubmitting(false);
-      alert(("error" in result && result.error) || "Алдаа гарлаа");
+      setSubmitErrorMessage(("error" in result && result.error) || "Илгээхэд алдаа гарлаа. Дахин оролдоно уу.");
     }
   }, [
     draftStorageKey,
     exam.id,
     flushPendingAnswers,
+    indexStorageKey,
     router,
     sessionId,
   ]);
@@ -1309,22 +1332,29 @@ export default function ExamTaker({
     };
   }, [handleSubmit]);
 
-  // Timer
+  // Timer — recalculates from wall clock each tick so backgrounded mobile tabs
+  // don't end up with a timer that is many seconds behind reality.
   useEffect(() => {
     const timer = setInterval(() => {
-      if (challengeOpen) {
-        return;
-      }
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
+      if (challengeOpen) return;
+      const remaining = Math.max(0, Math.round((timerEndEpochRef.current - Date.now()) / 1000));
+      setTimeLeft(remaining);
     }, 1000);
     return () => clearInterval(timer);
   }, [challengeOpen]);
+
+  // Resync timer the moment the page becomes visible again (catches up after
+  // the browser throttled/froze the interval while the tab was backgrounded).
+  useEffect(() => {
+    const handleTimerResync = () => {
+      if (!document.hidden) {
+        const remaining = Math.max(0, Math.round((timerEndEpochRef.current - Date.now()) / 1000));
+        setTimeLeft(remaining);
+      }
+    };
+    document.addEventListener("visibilitychange", handleTimerResync);
+    return () => document.removeEventListener("visibilitychange", handleTimerResync);
+  }, []);
 
   // Submit when timer hits zero (must be outside the state updater to avoid
   // calling router.push during React's reconciliation phase).
@@ -1338,6 +1368,12 @@ export default function ExamTaker({
     if (typeof window === "undefined") return;
     window.localStorage.setItem(draftStorageKey, JSON.stringify(answers));
   }, [answers, draftStorageKey]);
+
+  // Persist current question index so it survives a page reload.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(indexStorageKey, String(currentIndex));
+  }, [currentIndex, indexStorageKey]);
 
   // Batched checkpoint: flush dirty answers every 5 seconds
   useEffect(() => {
@@ -1394,7 +1430,7 @@ export default function ExamTaker({
         void checkpointDirtyAnswers();
 
         if (!isMobileSession && newCount >= 3) {
-          alert(
+          setTabWarningMessage(
             `Анхааруулга: Та ${newCount} удаа цонхноос гарлаа. Integrity challenge идэвхжиж болно.`
           );
         }
@@ -1921,8 +1957,8 @@ export default function ExamTaker({
       )}
 
       {spotCheckOpen && (
-        <div className="fixed inset-0 z-[115] bg-black/65 px-4 py-6">
-          <div className="mx-auto mt-56 w-full max-w-md rounded-3xl border bg-background p-5 shadow-2xl">
+        <div className="fixed inset-0 z-[115] flex items-center justify-center bg-black/65 px-4 py-6">
+          <div className="w-full max-w-md rounded-3xl border bg-background p-5 shadow-2xl">
             <h3 className="text-lg font-semibold">Camera Spot-check</h3>
             <p className="mt-2 text-sm text-muted-foreground">{spotCheckMessage}</p>
             <div className="mt-4 grid grid-cols-2 gap-3">
@@ -2000,7 +2036,7 @@ export default function ExamTaker({
         <div className="relative flex h-full items-center justify-center px-6">
           {/* Camera indicator — aligned with content start */}
           {requireCamera && (
-            <div className="absolute left-[calc((100%-1220px)/2+1rem)] flex items-center gap-2">
+            <div className="absolute left-4 md:left-[calc((100%-1220px)/2+1rem)] flex items-center gap-2">
               <div className="flex items-center gap-1.5">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#DBF0DF]">
                   <svg viewBox="0 0 20 16" className="h-4 w-4 fill-[#3B8748]">
@@ -2067,6 +2103,26 @@ export default function ExamTaker({
             Сүлжээ тасарсан байна. Хариултыг төхөөрөмж дээр хадгалж, холболт сэргээхийг хүлээж байна.
           </div>
         )}
+        {tabWarningMessage && (
+          <div
+            className="w-full max-w-[1090px] cursor-pointer rounded-2xl border border-orange-200 bg-orange-50 px-4 py-2 text-center text-sm font-medium text-orange-800"
+            onClick={() => setTabWarningMessage(null)}
+          >
+            {tabWarningMessage}
+          </div>
+        )}
+        {submitErrorMessage && (
+          <div className="w-full max-w-[1090px] rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-center text-sm font-medium text-red-700">
+            {submitErrorMessage}
+            <button
+              type="button"
+              className="ml-3 underline"
+              onClick={() => { setSubmitErrorMessage(null); void handleSubmit(); }}
+            >
+              Дахин оролдох
+            </button>
+          </div>
+        )}
         {gazeWarningCount > 0 && !isMobileStandard && (
           <div className="w-full max-w-[1090px] rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-center text-sm font-medium text-red-700">
             {gazeWarningCount < 3
@@ -2090,11 +2146,11 @@ export default function ExamTaker({
 
         {/* Two-column content: question card + tools */}
         <div className="flex items-start gap-[22px]">
-          {/* Left column — 1090px */}
-          <div className="flex w-[1090px] shrink-0 flex-col gap-[22px]">
+          {/* Left column */}
+          <div className="flex w-full md:w-[1090px] md:shrink-0 flex-col gap-[22px]">
 
-            {/* Fixed-height question card */}
-            <div className="h-[656px] w-[1090px] overflow-y-auto rounded-[16px] bg-white shadow-[0_4px_10px_rgba(0,0,0,0.1)]">
+            {/* Question card */}
+            <div className="h-auto md:h-[656px] w-full md:w-[1090px] overflow-y-auto rounded-[16px] bg-white shadow-[0_4px_10px_rgba(0,0,0,0.1)]">
               <div className="mx-auto flex w-full max-w-[992px] flex-col gap-[42px] py-5">
                 <div className="flex flex-col gap-[42px]">
                   <div className="px-4 sm:px-0">
@@ -2234,8 +2290,8 @@ export default function ExamTaker({
               </div>
             </div>
 
-            {/* Bottom nav row — spread prev/next */}
-            <div className="flex h-10 w-[1090px] items-center justify-between">
+            {/* Bottom nav row — desktop only, mobile uses fixed bottom bar */}
+            <div className="hidden md:flex h-10 w-full md:w-[1090px] items-center justify-between">
               <Button
                 variant="ghost"
                 onClick={() => setCurrentIndex((p) => Math.max(0, p - 1))}
@@ -2272,8 +2328,8 @@ export default function ExamTaker({
             </div>
           </div>
 
-          {/* Right tool column — 108px */}
-          <div className="flex w-[108px] shrink-0 flex-col gap-[16px]">
+          {/* Right tool column — desktop only */}
+          <div className="hidden md:flex w-[108px] shrink-0 flex-col gap-[16px]">
             <ToolTile
               icon={<Calculator className="h-[18px] w-[18px]" />}
               label="Тооцоолуур"

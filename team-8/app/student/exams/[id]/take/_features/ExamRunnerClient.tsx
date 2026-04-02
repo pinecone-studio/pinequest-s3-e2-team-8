@@ -3,6 +3,14 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { persistExamStartTelemetry } from "@/lib/student/actions";
 import type { AnswerChangeAnalytics } from "@/lib/proctoring";
+import {
+  getDisplayMode,
+  getOrientationMode,
+  getPlatformLabel,
+  getStudentDeviceType,
+  isDesktopLikeDevice,
+  isStandaloneDisplayMode,
+} from "@/lib/proctoring-client";
 import ExamTaker from "./ExamTaker";
 import PreExamCheck from "./PreExamCheck";
 import {
@@ -61,8 +69,31 @@ export default function ExamRunnerClient({
     exam.require_fullscreen,
   ]);
 
+  // When sessionStorage has been cleared (browser restart, Safari memory eviction,
+  // new tab) and the exam does NOT require proctoring checks, synthesize a readiness
+  // object from the current runtime instead of defaulting to "desktop" everywhere.
+  const synthesizedReadiness = useMemo<ExamRuntimeReadiness>(() => {
+    const deviceType = getStudentDeviceType();
+    const displayMode = getDisplayMode();
+    return {
+      isDesktop: isDesktopLikeDevice(),
+      deviceType,
+      displayMode,
+      orientation: getOrientationMode(),
+      isStandalonePwa: isStandaloneDisplayMode(),
+      platform: getPlatformLabel(),
+      fullscreenReady: false,
+      cameraReady: false,
+      identityVerified: false,
+      brightnessScore: null,
+      identityHash: null,
+    };
+  }, []);
+
   const effectiveRuntimeReadiness =
-    runtimeReadiness ?? storedContext?.runtimeReadiness ?? null;
+    runtimeReadiness ??
+    storedContext?.runtimeReadiness ??
+    (!requiresResumeCheck ? synthesizedReadiness : null);
   const telemetryAlreadyPersisted =
     telemetryPersisted || Boolean(storedContext?.telemetryPersisted);
 
