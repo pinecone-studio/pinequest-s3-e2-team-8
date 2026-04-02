@@ -1,12 +1,29 @@
 "use server";
 
+import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+
+const PROFILE_MEDIA_BUCKET = "question-media";
+const MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_AVATAR_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
 
 function getProfilePath(role: string) {
   if (role === "teacher") return "/educator/profile";
   if (role === "student") return "/student/profile";
   return "/admin";
+}
+
+function getImageExtension(mimeType: string) {
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/webp") return "webp";
+  if (mimeType === "image/gif") return "gif";
+  return "jpg";
 }
 
 export async function updateCurrentProfile(formData: FormData) {
@@ -25,8 +42,13 @@ export async function updateCurrentProfile(formData: FormData) {
 
   const role = profile?.role ?? "student";
   const fullName = String(formData.get("full_name") || "").trim();
+  const avatarFileEntry = formData.get("avatar_file");
+  const avatarFile =
+    avatarFileEntry instanceof File && avatarFileEntry.size > 0
+      ? avatarFileEntry
+      : null;
   const avatarUrlRaw = String(formData.get("avatar_url") || "").trim();
-  const avatarUrl = avatarUrlRaw || null;
+  let avatarUrl = avatarUrlRaw || null;
   const newPassword = String(formData.get("new_password") || "");
   const confirmPassword = String(formData.get("confirm_password") || "");
 
@@ -34,7 +56,39 @@ export async function updateCurrentProfile(formData: FormData) {
     return { error: "Нэрээ оруулна уу." };
   }
 
-  if (avatarUrl) {
+  if (avatarFile) {
+    if (!ALLOWED_AVATAR_MIME_TYPES.has(avatarFile.type)) {
+      return { error: "PNG, JPG, WEBP эсвэл GIF зураг сонгоно уу." };
+    }
+
+    if (avatarFile.size > MAX_AVATAR_SIZE_BYTES) {
+      return { error: "Зургийн хэмжээ 5MB-аас ихгүй байна." };
+    }
+
+    const buffer = Buffer.from(await avatarFile.arrayBuffer());
+    const path = `${user.id}/profile-${randomUUID()}.${getImageExtension(
+      avatarFile.type,
+    )}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(PROFILE_MEDIA_BUCKET)
+      .upload(path, buffer, {
+        contentType: avatarFile.type,
+        upsert: false,
+      });
+
+    if (uploadError) {
+      return {
+        error: `Зураг хадгалахад алдаа: ${uploadError.message}. Storage bucket «${PROFILE_MEDIA_BUCKET}» идэвхтэй эсэхийг шалгана уу.`,
+      };
+    }
+
+    const { data: publicFile } = supabase.storage
+      .from(PROFILE_MEDIA_BUCKET)
+      .getPublicUrl(path);
+
+    avatarUrl = publicFile.publicUrl;
+  } else if (avatarUrl) {
     try {
       new URL(avatarUrl);
     } catch {
@@ -95,6 +149,7 @@ export async function updateCurrentProfile(formData: FormData) {
 
   return {
     success: true,
+    avatarUrl,
     message: newPassword
       ? "Профайл болон нууц үг амжилттай шинэчлэгдлээ."
       : "Профайл амжилттай шинэчлэгдлээ.",
