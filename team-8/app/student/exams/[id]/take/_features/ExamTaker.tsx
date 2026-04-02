@@ -835,6 +835,7 @@ export default function ExamTaker({
   // Wall-clock deadline — used to compensate for timer throttling on backgrounded mobile tabs.
   const timerEndEpochRef = useRef<number>(Date.now() + initialTimeLeftSeconds * 1000);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const lastCheckpointRef = useRef<Record<string, string>>(savedAnswers);
@@ -878,7 +879,6 @@ export default function ExamTaker({
   const [spotCheckBusy, setSpotCheckBusy] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [tabWarningMessage, setTabWarningMessage] = useState<string | null>(null);
-  const [submitErrorMessage, setSubmitErrorMessage] = useState<string | null>(null);
   const [orientation, setOrientation] = useState<"portrait" | "landscape">(
     runtimeReadiness?.orientation ?? "portrait"
   );
@@ -1276,36 +1276,41 @@ export default function ExamTaker({
     }
   }, [sessionId]);
 
-  const flushPendingAnswers = useCallback(async () => {
-    // Wait for any in-flight checkpoint, but cap the wait at 4 seconds so a
-    // stalled network request on mobile never permanently blocks the submit button.
-    const deadline = Date.now() + 4000;
-    while (isCheckpointingRef.current && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    await checkpointDirtyAnswers();
-  }, [checkpointDirtyAnswers]);
-
   // Шалгалт дуусгах
   const handleSubmit = useCallback(async () => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
     setIsSubmitting(true);
+    setSubmitError(null);
 
-    await flushPendingAnswers();
+    // Submit payload нь in-flight autosave-с үл хамааран одоогийн client state-г authoritative болгоно.
     const pendingDelta = buildDirtyAnswerDelta(
       { ...answersRef.current },
       lastCheckpointRef.current,
       { ...answerAnalyticsRef.current }
     );
-    const result =
-      Object.keys(pendingDelta.answers).length > 0
-        ? await submitExam(
-            sessionId,
-            pendingDelta.answers,
-            pendingDelta.answerAnalytics
-          )
-        : await submitExam(sessionId);
+
+    let result: Awaited<ReturnType<typeof submitExam>>;
+    try {
+      const submitPromise =
+        Object.keys(pendingDelta.answers).length > 0
+          ? submitExam(sessionId, pendingDelta.answers, pendingDelta.answerAnalytics)
+          : submitExam(sessionId);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("SUBMIT_TIMEOUT")), 25_000)
+      );
+      result = await Promise.race([submitPromise, timeoutPromise]);
+    } catch (err) {
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
+      setSubmitError(
+        err instanceof Error && err.message === "SUBMIT_TIMEOUT"
+          ? "Сүлжээний холболт удаашраж байна. Дахин оролдоно уу."
+          : "Шалгалт илгээхэд алдаа гарлаа. Дахин оролдоно уу."
+      );
+      return;
+    }
+
     if ("success" in result && result.success) {
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(draftStorageKey);
@@ -1315,12 +1320,11 @@ export default function ExamTaker({
     } else {
       isSubmittingRef.current = false;
       setIsSubmitting(false);
-      setSubmitErrorMessage(("error" in result && result.error) || "Илгээхэд алдаа гарлаа. Дахин оролдоно уу.");
+      setSubmitError(("error" in result && result.error) || "Шалгалт илгээхэд алдаа гарлаа. Дахин оролдоно уу.");
     }
   }, [
     draftStorageKey,
     exam.id,
-    flushPendingAnswers,
     indexStorageKey,
     router,
     sessionId,
@@ -1886,7 +1890,50 @@ export default function ExamTaker({
       className="min-h-screen pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:pb-8"
       style={{ background: "linear-gradient(180deg, rgba(249,240,252,0.98) 0%, rgba(255,255,255,0.98) 100%)" }}
     >
-      {/* ── Modals (unchanged) ── */}
+      {/* ── Submission overlay — shown while server action is in-flight ── */}
+      {isSubmitting && (
+        <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="relative h-16 w-16">
+              <div className="absolute inset-0 rounded-full border-4 border-primary/20" />
+              <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-primary" />
+            </div>
+            <div>
+              <p className="text-lg font-semibold text-foreground">Шалгалт илгээгдэж байна</p>
+              <p className="mt-1 text-sm text-muted-foreground">Хуудсыг бүү хааж, түр хүлээнэ үү</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Submit error banner — shown when submit failed ── */}
+      {submitError && !isSubmitting && (
+        <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-1/2 z-[190] w-full max-w-md -translate-x-1/2 px-4 md:bottom-8">
+          <div className="flex items-start gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 shadow-lg backdrop-blur-sm">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-destructive">{submitError}</p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                className="text-xs text-muted-foreground underline underline-offset-2"
+                onClick={() => setSubmitError(null)}
+              >
+                Хаах
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-destructive px-3 py-1 text-xs font-medium text-destructive-foreground"
+                onClick={() => void handleSubmit()}
+              >
+                Дахин оролдох
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Submit confirm dialog ── */}
       {showSubmitConfirm && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-4">
           <div className="w-full max-w-md rounded-3xl border bg-background p-6 shadow-xl">
@@ -1904,7 +1951,7 @@ export default function ExamTaker({
               Дуусгасны дараа засах боломжгүй.
             </p>
             <div className="mt-4 flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => setShowSubmitConfirm(false)}>
+              <Button variant="outline" className="flex-1" onClick={() => { setShowSubmitConfirm(false); setSubmitError(null); }}>
                 Буцах
               </Button>
               <Button
@@ -2111,18 +2158,6 @@ export default function ExamTaker({
             onClick={() => setTabWarningMessage(null)}
           >
             {tabWarningMessage}
-          </div>
-        )}
-        {submitErrorMessage && (
-          <div className="w-full max-w-[1090px] rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-center text-sm font-medium text-red-700">
-            {submitErrorMessage}
-            <button
-              type="button"
-              className="ml-3 underline"
-              onClick={() => { setSubmitErrorMessage(null); void handleSubmit(); }}
-            >
-              Дахин оролдох
-            </button>
           </div>
         )}
         {gazeWarningCount > 0 && !isMobileStandard && (

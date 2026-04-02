@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { redis } from "@/lib/redis";
 import { getModel } from "@/lib/ai/config";
 import { pickBestAttempt } from "@/lib/exam-attempt-utils";
 import type {
@@ -236,6 +237,14 @@ type ProcessCurrentStudentLearningWorkResult = {
   status: "idle" | "processed" | "claimed_elsewhere" | "error";
   error?: string;
 };
+
+function getPracticeQuestionsCacheKey(practiceExamId: string) {
+  return `practice:${practiceExamId}:questions`;
+}
+
+function getPracticeBuildReadyKey(practiceExamId: string) {
+  return `practice:${practiceExamId}:build-ready`;
+}
 
 const FULL_MASTERY_REFRESH_SCOPE_KEY = "__all__";
 const DEFAULT_MASTERY_REFRESH_BATCH_SIZE = 10;
@@ -2746,6 +2755,29 @@ async function processClaimedPracticeBuildJob(
       throw new Error(finalizeError.message);
     }
 
+    // Cache questions and signal build completion for fast client detection
+    try {
+      const { data: builtQuestions } = await admin
+        .from("student_practice_questions")
+        .select(
+          "id, practice_exam_id, subject_id, topic_key, subtopic, type, content, content_html, image_url, options, points, order_index"
+        )
+        .eq("practice_exam_id", practiceExam.id)
+        .order("order_index", { ascending: true });
+
+      if (builtQuestions && builtQuestions.length > 0) {
+        await redis.set(
+          getPracticeQuestionsCacheKey(practiceExam.id),
+          JSON.stringify(builtQuestions),
+          { ex: 86400 }
+        );
+      }
+    } catch {}
+
+    await redis
+      .set(getPracticeBuildReadyKey(practiceExam.id), "1", { ex: 300 })
+      .catch(() => {});
+
     return { success: true as const };
   } catch (buildError) {
     const errorMessage =
@@ -2873,6 +2905,17 @@ async function listStudentPracticeBuildCandidates(
   }
 
   return (data ?? []) as QueuedPracticeExamRow[];
+}
+
+export async function checkPracticeExamBuildStatus(
+  practiceExamId: string
+): Promise<{ ready: boolean }> {
+  try {
+    const hit = await redis.get(getPracticeBuildReadyKey(practiceExamId));
+    return { ready: Boolean(hit) };
+  } catch {
+    return { ready: false };
+  }
 }
 
 export async function processCurrentStudentLearningWork(input: {
@@ -3181,6 +3224,17 @@ async function getStudentPracticeQuestionsForTake(
   admin: SupabaseAdminClient,
   practiceExamId: string
 ) {
+  const cacheKey = getPracticeQuestionsCacheKey(practiceExamId);
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      const parsed = typeof cached === "string" ? JSON.parse(cached) : cached;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed as StudentPracticeQuestionForTake[];
+      }
+    }
+  } catch {}
+
   const { data, error } = await admin
     .from("student_practice_questions")
     .select(
@@ -3191,6 +3245,10 @@ async function getStudentPracticeQuestionsForTake(
 
   if (error) {
     throw new Error(error.message);
+  }
+
+  if (data && data.length > 0) {
+    redis.set(cacheKey, JSON.stringify(data), { ex: 86400 }).catch(() => {});
   }
 
   return (data ?? []) as StudentPracticeQuestionForTake[];

@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  checkPracticeExamBuildStatus,
   processCurrentStudentLearningWork,
   retryStudentPracticeExamBuild,
 } from "@/lib/student-learning/actions";
@@ -36,6 +37,24 @@ export default function PracticeBuildStatus({
       await processCurrentStudentLearningWork({ practiceExamId });
     },
   });
+
+  useEffect(() => {
+    if (status !== "building") return;
+    let cancelled = false;
+
+    const fastPoll = async () => {
+      try {
+        const { ready } = await checkPracticeExamBuildStatus(practiceExamId);
+        if (!cancelled && ready) router.refresh();
+      } catch {}
+    };
+
+    const timer = setInterval(() => void fastPoll(), 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [status, practiceExamId, router]);
 
   const handleRetry = () => {
     startTransition(async () => {

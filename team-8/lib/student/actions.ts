@@ -48,6 +48,7 @@ import {
   normalizeProctoringSettings,
   toStudentAttemptSummary,
   canAttemptExamAgain,
+  type AssignedExamRow,
   type StudentAssignedExam,
   type StudentExamAttemptSummary,
 } from "@/lib/student-exam-access";
@@ -167,6 +168,38 @@ function getSessionAnswerMetaCacheKey(sessionId: string, userId: string) {
 
 function getSessionMetaCacheKey(sessionId: string, userId: string) {
   return `session:${sessionId}:user:${userId}:meta`;
+}
+
+function getExamAccessCacheKey(examId: string, userId: string) {
+  return `exam-access:${examId}:user:${userId}`;
+}
+
+async function resolveExamAccessWithCache(
+  supabase: SupabaseServerClient,
+  examId: string,
+  userId: string
+): Promise<{ assignedRow: AssignedExamRow; assignedExamRecord: StudentAssignedExam } | null> {
+  try {
+    const cached = await redis.get(getExamAccessCacheKey(examId, userId));
+    if (cached) {
+      const parsed = (typeof cached === "string" ? JSON.parse(cached) : cached) as {
+        assignedRow: AssignedExamRow;
+        exam: StudentAssignedExam;
+      };
+      if (parsed?.assignedRow && parsed?.exam) {
+        return { assignedRow: parsed.assignedRow, assignedExamRecord: parsed.exam };
+      }
+    }
+  } catch {}
+
+  const accessContext = await loadStudentExamAccessContext(supabase, userId, {
+    examId,
+    includeLatestSessions: false,
+  });
+  const assignedRow = accessContext.rowMap.get(examId);
+  const assignedExamRecord = accessContext.accessMap.get(examId);
+  if (!assignedRow || !assignedExamRecord) return null;
+  return { assignedRow, assignedExamRecord };
 }
 
 function getSessionHeartbeatCacheKey(sessionId: string) {
@@ -984,49 +1017,91 @@ export async function getExamForStudent(examId: string) {
 
 type FinalizeSessionReason = "submit" | "timeout";
 
+function parseAnswerAnalyticsValue(
+  rawAnalytics: string | AnswerChangeAnalytics | null | undefined
+) {
+  if (!rawAnalytics) {
+    return {
+      firstAnsweredAt: null,
+      lastChangedAt: null,
+      changeCount: 0,
+    };
+  }
+
+  const parsed =
+    typeof rawAnalytics === "string"
+      ? tryParseJson<AnswerChangeAnalytics>(rawAnalytics)
+      : rawAnalytics;
+
+  return {
+    firstAnsweredAt:
+      typeof parsed?.firstAnsweredAt === "string"
+        ? parsed.firstAnsweredAt
+        : null,
+    lastChangedAt:
+      typeof parsed?.lastChangedAt === "string"
+        ? parsed.lastChangedAt
+        : null,
+    changeCount: Number(parsed?.changeCount ?? 0),
+  };
+}
+
 function buildFinalizeAnswerPayload(
   redisAnswers: Record<string, string> | null,
   redisAnswerMeta: Record<string, string> | null,
+  clientAnswers?: Record<string, string>,
+  clientAnswerAnalytics: Record<string, AnswerChangeAnalytics> = {},
 ) {
-  const answersPayload: FinalizeAnswerPayload[] = [];
+  const answerMap = new Map<string, string>();
+  const analyticsMap = new Map<
+    string,
+    {
+      firstAnsweredAt: string | null;
+      lastChangedAt: string | null;
+      changeCount: number;
+    }
+  >();
 
-  if (!redisAnswers || Object.keys(redisAnswers).length === 0) {
-    return answersPayload;
+  if (redisAnswers) {
+    for (const [questionId, answer] of Object.entries(redisAnswers)) {
+      answerMap.set(questionId, String(answer));
+      analyticsMap.set(
+        questionId,
+        parseAnswerAnalyticsValue(redisAnswerMeta?.[questionId]),
+      );
+    }
   }
 
-  for (const [questionId, answer] of Object.entries(redisAnswers)) {
-    let firstAnsweredAt: string | null = null;
-    let lastChangedAt: string | null = null;
-    let changeCount = 0;
-
-    const rawAnalytics = redisAnswerMeta?.[questionId];
-    if (typeof rawAnalytics === "string") {
-      try {
-        const parsed = JSON.parse(rawAnalytics) as AnswerChangeAnalytics;
-        firstAnsweredAt =
-          typeof parsed.firstAnsweredAt === "string"
-            ? parsed.firstAnsweredAt
-            : null;
-        lastChangedAt =
-          typeof parsed.lastChangedAt === "string"
-            ? parsed.lastChangedAt
-            : null;
-        changeCount = Number(parsed.changeCount ?? 0);
-      } catch {
-        // ignore parse errors
+  if (clientAnswers) {
+    for (const [questionId, answer] of Object.entries(clientAnswers)) {
+      if (answer === "") {
+        answerMap.delete(questionId);
+        analyticsMap.delete(questionId);
+      } else {
+        answerMap.set(questionId, String(answer));
+        analyticsMap.set(
+          questionId,
+          parseAnswerAnalyticsValue(clientAnswerAnalytics[questionId]),
+        );
       }
     }
-
-    answersPayload.push({
-      question_id: questionId,
-      answer: String(answer),
-      first_answered_at: firstAnsweredAt,
-      last_changed_at: lastChangedAt,
-      change_count: changeCount,
-    });
   }
 
-  return answersPayload;
+  return Array.from(answerMap.entries()).map(([questionId, answer]) => {
+    const analytics = analyticsMap.get(questionId) ?? {
+      firstAnsweredAt: null,
+      lastChangedAt: null,
+      changeCount: 0,
+    };
+
+    return {
+      question_id: questionId,
+      answer,
+      first_answered_at: analytics.firstAnsweredAt,
+      last_changed_at: analytics.lastChangedAt,
+      change_count: analytics.changeCount,
+    } satisfies FinalizeAnswerPayload;
+  });
 }
 
 function getClosedSessionStatus(
@@ -1588,33 +1663,38 @@ async function finalizeSessionAttempt(
     examId,
     userId,
     reason,
+    clientAnswers,
+    clientAnswerAnalytics = {},
     skipPostFinalizeSideEffects = false,
   }: {
     sessionId: string;
     examId: string;
     userId: string;
     reason: FinalizeSessionReason;
+    clientAnswers?: Record<string, string>;
+    clientAnswerAnalytics?: Record<string, AnswerChangeAnalytics>;
     skipPostFinalizeSideEffects?: boolean;
   }
 ) {
   const redisKey = getSessionAnswersCacheKey(sessionId, userId);
   const analyticsKey = getSessionAnswerMetaCacheKey(sessionId, userId);
+  const lockKey = getSubmitSessionLockKey(sessionId, userId);
+
+  // Fetch Redis answers/analytics + acquire lock in parallel
   const fetchPipe = redis.pipeline();
   fetchPipe.hgetall(redisKey);
   fetchPipe.hgetall(analyticsKey);
-  const [redisAnswers, redisAnswerMeta] = (await fetchPipe.exec()) as [
-    Record<string, string> | null,
-    Record<string, string> | null,
-  ];
+  const [[redisAnswers, redisAnswerMeta], lockAcquired] = (await Promise.all([
+    fetchPipe.exec(),
+    redis.set(lockKey, "1", { ex: 30, nx: true }),
+  ])) as [[Record<string, string> | null, Record<string, string> | null], string | null];
+
   const answersPayload = buildFinalizeAnswerPayload(
     redisAnswers,
     redisAnswerMeta,
+    clientAnswers,
+    clientAnswerAnalytics,
   );
-  const lockKey = getSubmitSessionLockKey(sessionId, userId);
-  const lockAcquired = await redis.set(lockKey, "1", {
-    ex: 30,
-    nx: true,
-  });
 
   if (!lockAcquired) {
     const { data: lockedSession } = await supabase
@@ -1651,12 +1731,17 @@ async function finalizeSessionAttempt(
   }
 
   try {
-    const { data: session, error: sessionError } = await supabase
-      .from("exam_sessions")
-      .select("id, status, total_score, max_score, flag_status")
-      .eq("id", sessionId)
-      .eq("user_id", userId)
-      .maybeSingle();
+    // Fetch session + question context in parallel
+    const [{ data: session, error: sessionError }, questionContext] =
+      await Promise.all([
+        supabase
+          .from("exam_sessions")
+          .select("id, status, total_score, max_score, flag_status")
+          .eq("id", sessionId)
+          .eq("user_id", userId)
+          .maybeSingle(),
+        loadFinalizeQuestionContext(supabase, examId),
+      ]);
 
     if (sessionError) return { error: sessionError.message };
     if (!session) return { error: "Session олдсонгүй" };
@@ -1678,8 +1763,6 @@ async function finalizeSessionAttempt(
         gradingPending: isSessionScorePending(session),
       };
     }
-
-    const questionContext = await loadFinalizeQuestionContext(supabase, examId);
     if ("error" in questionContext) return { error: questionContext.error };
 
     if (answersPayload.length > 0) {
@@ -2368,6 +2451,21 @@ export async function getExamStartGatePayload(
     };
   }
 
+  // Cache access context + warm question cache in background (non-blocking)
+  after(async () => {
+    try {
+      await redis.set(
+        getExamAccessCacheKey(examId, user.id),
+        JSON.stringify({ assignedRow, exam }),
+        { ex: 30 }
+      );
+    } catch {}
+    try {
+      const admin = createAdminClient() as unknown as SupabaseActionClient;
+      await loadStudentExamPayload(admin, examId, { row: assignedRow, exam });
+    } catch {}
+  });
+
   return {
     exam: exam as StudentAssignedExam & Record<string, unknown>,
   };
@@ -2383,15 +2481,11 @@ export async function startExamAttempt(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" } as const;
 
-  const accessContext = await loadStudentExamAccessContext(supabase, user.id, {
-    examId,
-    includeLatestSessions: false,
-  });
-  const assignedRow = accessContext.rowMap.get(examId);
-  const assignedExamRecord = accessContext.accessMap.get(examId);
-  if (!assignedRow || !assignedExamRecord) {
+  const examAccess = await resolveExamAccessWithCache(supabase, examId, user.id);
+  if (!examAccess) {
     return { error: "Шалгалт олдсонгүй" } as const;
   }
+  const { assignedRow, assignedExamRecord } = examAccess;
   const assignedExam = { row: assignedRow, exam: assignedExamRecord };
 
   const readinessError = await validateExamReadiness(
@@ -2540,15 +2634,11 @@ export async function prepareExamTakePayload(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Нэвтрээгүй байна" } as const;
 
-  const accessContext = await loadStudentExamAccessContext(supabase, user.id, {
-    examId,
-    includeLatestSessions: false,
-  });
-  const assignedRow = accessContext.rowMap.get(examId);
-  const assignedExamRecord = accessContext.accessMap.get(examId);
-  if (!assignedRow || !assignedExamRecord) {
+  const examAccess = await resolveExamAccessWithCache(supabase, examId, user.id);
+  if (!examAccess) {
     return { redirectTo: "/student/exams?error=exam_not_found" } as const;
   }
+  const { assignedRow, assignedExamRecord } = examAccess;
   if (assignedRow.excused_at) {
     return { redirectTo: "/student/exams?error=exam_not_found" } as const;
   }
@@ -2773,26 +2863,15 @@ export async function submitExamForUserClient(
     };
   }
 
-  // Canonical submit source нь Redis draft.
-  // Submit дээр зөвхөн unsaved delta ирсэн үед л fallback flush хийнэ.
-  if (clientAnswers && Object.keys(clientAnswers).length > 0) {
-    const batchResult = await saveAnswersBatchForUserClient(
-      supabase,
-      userId,
-      sessionId,
-      clientAnswers,
-      clientAnswerAnalytics
-    );
-    if ("error" in batchResult) {
-      return batchResult;
-    }
-  }
-
+  // Submit дээр client-ээс ирсэн delta-г authoritative гэж үзнэ.
+  // Ингэснээр өмнө эхэлсэн autosave удааширсан үед submit түүнд түгжигдэхгүй.
   return finalizeSessionAttempt(supabase, {
     sessionId,
     examId: session.exam_id,
     userId,
     reason: "submit",
+    clientAnswers,
+    clientAnswerAnalytics,
     skipPostFinalizeSideEffects:
       options?.skipPostFinalizeSideEffects ?? false,
   });
