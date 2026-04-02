@@ -24,12 +24,16 @@ export default function PracticeExamTaker({
   examTitle,
   subjectName,
   questions,
+  attemptId,
+  questionSetFingerprint,
   savedAnswers,
 }: {
   practiceExamId: string;
   examTitle: string;
   subjectName: string;
   questions: StudentPracticeQuestionForTake[];
+  attemptId: string | null;
+  questionSetFingerprint: string;
   savedAnswers: Record<string, string>;
 }) {
   const router = useRouter();
@@ -47,7 +51,7 @@ export default function PracticeExamTaker({
     [questions]
   );
   const lastSavedSnapshotRef = useRef(getSerializedDraftSnapshot(savedAnswers));
-  const savePromiseRef = useRef<Promise<void> | null>(null);
+  const savePromiseRef = useRef<Promise<boolean> | null>(null);
   const currentQuestion = questions[currentIndex] ?? questions[0] ?? null;
   const currentQuestionId = currentQuestion?.id ?? "";
   const currentMultiAnswer = parseStoredArray(answers[currentQuestionId]);
@@ -67,12 +71,20 @@ export default function PracticeExamTaker({
     [answers, questions]
   );
 
+  const practiceClientState = useMemo(
+    () => ({
+      attemptId,
+      questionSetFingerprint,
+    }),
+    [attemptId, questionSetFingerprint]
+  );
+
   const persistDraft = useCallback(async (nextAnswers: Record<string, string>) => {
     const normalizedAnswers = normalizeDraftAnswersForQuestions(questions, nextAnswers);
     const serializedSnapshot = JSON.stringify(normalizedAnswers);
     if (serializedSnapshot === lastSavedSnapshotRef.current) {
       setDraftStatus("saved");
-      return;
+      return true;
     }
 
     setDraftStatus("saving");
@@ -82,16 +94,21 @@ export default function PracticeExamTaker({
         await previousSave;
       }
 
-      const result = await saveStudentPracticeDraft(practiceExamId, normalizedAnswers);
+      const result = await saveStudentPracticeDraft(
+        practiceExamId,
+        normalizedAnswers,
+        practiceClientState
+      );
       if ("error" in result) {
         setDraftStatus("error");
         setError(result.error ?? "Practice draft хадгалахад алдаа гарлаа.");
-        return;
+        return false;
       }
 
       lastSavedSnapshotRef.current = serializedSnapshot;
       setError(null);
       setDraftStatus("saved");
+      return true;
     })();
 
     const trackedPromise = savePromise.finally(() => {
@@ -101,8 +118,8 @@ export default function PracticeExamTaker({
     });
     savePromiseRef.current = trackedPromise;
 
-    await trackedPromise;
-  }, [practiceExamId, questions]);
+    return trackedPromise;
+  }, [practiceClientState, practiceExamId, questions]);
 
   const flushDraftSave = async () => {
     if (draftTimerRef.current) {
@@ -112,13 +129,14 @@ export default function PracticeExamTaker({
 
     const serializedAnswers = getSerializedDraftSnapshot(answers);
     if (serializedAnswers !== lastSavedSnapshotRef.current) {
-      await persistDraft(answers);
-      return;
+      return persistDraft(answers);
     }
 
     if (savePromiseRef.current) {
-      await savePromiseRef.current;
+      return savePromiseRef.current;
     }
+
+    return true;
   };
 
   useEffect(() => {
@@ -198,8 +216,16 @@ export default function PracticeExamTaker({
 
     startTransition(async () => {
       setError(null);
-      await flushDraftSave();
-      const result = await submitStudentPracticeExam(practiceExamId, answers);
+      const draftSaved = await flushDraftSave();
+      if (!draftSaved) {
+        return;
+      }
+
+      const result = await submitStudentPracticeExam(
+        practiceExamId,
+        answers,
+        practiceClientState
+      );
       if ("error" in result) {
         setError(result.error ?? "Practice шалгалтыг илгээхэд алдаа гарлаа.");
         return;

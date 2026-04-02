@@ -5,6 +5,13 @@ import type {
 } from "@/types";
 
 type PracticeQuestionLike = Pick<StudentPracticeQuestionForTake, "id" | "type">;
+type PracticeQuestionIdentity = Pick<StudentPracticeQuestionForTake, "id">;
+
+export function createPracticeQuestionSetFingerprint(
+  questions: PracticeQuestionIdentity[]
+) {
+  return questions.map((question) => question.id).join(":");
+}
 
 export function parseStringArray(value: unknown) {
   if (Array.isArray(value)) {

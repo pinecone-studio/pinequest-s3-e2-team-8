@@ -41,6 +41,8 @@ export default async function StudentPracticeExamPage({
       examTitle={data.exam.title}
       subjectName={data.exam.subject_name}
       questions={data.questions}
+      attemptId={data.attemptId}
+      questionSetFingerprint={data.questionSetFingerprint}
       savedAnswers={data.savedAnswers}
     />
   );

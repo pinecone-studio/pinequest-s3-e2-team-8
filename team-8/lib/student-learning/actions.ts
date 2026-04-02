@@ -28,6 +28,7 @@ import {
   shouldIncludeTopicInProjection,
 } from "@/lib/student-learning/utils";
 import {
+  createPracticeQuestionSetFingerprint,
   gradePracticeQuestion,
   normalizeDraftAnswersForQuestions,
   parseDraftAnswerRecord,
@@ -190,9 +191,15 @@ type QueuedPracticeExamRow = {
   selected_topics: unknown;
   generated_metadata: Record<string, unknown> | null;
   build_requested_at: string | null;
-  status: "building" | "ready" | "failed";
+  build_claimed_at: string | null;
+  status: "building" | "processing" | "ready" | "failed";
   build_error: string | null;
   subjects?: { name: string } | { name: string }[] | null;
+};
+
+type PracticeClientState = {
+  attemptId?: string | null;
+  questionSetFingerprint?: string | null;
 };
 
 type PracticeExamCreationResult =
@@ -236,6 +243,9 @@ const DEFAULT_STUDY_PLAN_BATCH_SIZE = 2;
 const DEFAULT_PRACTICE_BUILD_BATCH_SIZE = 2;
 const MAX_MASTERY_REFRESH_BACKOFF_MINUTES = 30;
 const STALE_MASTERY_PROCESSING_MS = 2 * 60 * 1000;
+const STALE_PRACTICE_BUILD_CLAIM_MS = 10 * 60 * 1000;
+const PRACTICE_SESSION_STALE_ERROR =
+  "Practice асуултууд шинэчлэгдсэн байна. Хуудсыг дахин ачаалаад үргэлжлүүлнэ үү.";
 
 function scheduleStudentLearningProcessing() {
   try {
@@ -304,6 +314,54 @@ function isMissingColumnError(
     message.includes(`column ${table}.${column} does not exist`) ||
     message.includes(`Could not find the '${column}' column of '${table}'`)
   );
+}
+
+function getPublicPracticeExamStatus(
+  status: "building" | "processing" | "ready" | "failed" | null | undefined
+) {
+  if (status === "processing") {
+    return "building" as const;
+  }
+
+  return status ?? "ready";
+}
+
+function isPracticeBuildClaimStale(buildClaimedAt: string | null | undefined) {
+  if (!buildClaimedAt) return true;
+
+  const claimedAt = new Date(buildClaimedAt).getTime();
+  if (Number.isNaN(claimedAt)) return true;
+
+  return Date.now() - claimedAt >= STALE_PRACTICE_BUILD_CLAIM_MS;
+}
+
+function getPracticeSessionStateError() {
+  return PRACTICE_SESSION_STALE_ERROR;
+}
+
+function validatePracticeClientState(
+  attemptId: string | null | undefined,
+  questions: Array<{ id: string }>,
+  clientState?: PracticeClientState
+) {
+  if (!attemptId) {
+    return getPracticeSessionStateError();
+  }
+
+  if (!clientState?.attemptId || !clientState.questionSetFingerprint) {
+    return getPracticeSessionStateError();
+  }
+
+  if (clientState.attemptId !== attemptId) {
+    return getPracticeSessionStateError();
+  }
+
+  const currentFingerprint = createPracticeQuestionSetFingerprint(questions);
+  if (currentFingerprint !== clientState.questionSetFingerprint) {
+    return getPracticeSessionStateError();
+  }
+
+  return null;
 }
 
 function extractJsonObject(text: string) {
@@ -1267,7 +1325,7 @@ async function getPracticeHistoryForSubject(
     title: string;
     question_count: number | null;
     created_at: string;
-    status?: "building" | "ready" | "failed";
+    status?: "building" | "processing" | "ready" | "failed";
     build_error?: string | null;
   }> = [];
   let usesLegacyPracticeSchema = false;
@@ -1368,7 +1426,8 @@ async function getPracticeHistoryForSubject(
       question_count: Number(exam.question_count ?? 0),
       created_at: exam.created_at,
       status:
-        !usesLegacyPracticeSchema && exam.status === "building"
+        !usesLegacyPracticeSchema &&
+        (exam.status === "building" || exam.status === "processing")
           ? "building"
           : !usesLegacyPracticeSchema && exam.status === "failed"
             ? "failed"
@@ -2487,20 +2546,50 @@ async function claimPendingPracticeBuild(
   admin: SupabaseAdminClient,
   practiceExam: QueuedPracticeExamRow
 ) {
-  const currentBuildRequestedAt = practiceExam.build_requested_at;
-  if (!currentBuildRequestedAt) return false;
+  const claimAt = new Date().toISOString();
+  const update = {
+    status: "processing" as const,
+    build_claimed_at: claimAt,
+    build_error: null,
+  };
+  let data:
+    | {
+        id: string;
+      }
+    | null = null;
+  let error: { message: string } | null = null;
 
-  const { data, error } = await admin
-    .from("student_practice_exams")
-    .update({
-      build_requested_at: new Date().toISOString(),
-      build_error: null,
-    })
-    .eq("id", practiceExam.id)
-    .eq("status", "building")
-    .eq("build_requested_at", currentBuildRequestedAt)
-    .select("id")
-    .maybeSingle();
+  if (practiceExam.status === "building") {
+    const result = await admin
+      .from("student_practice_exams")
+      .update(update)
+      .eq("id", practiceExam.id)
+      .eq("status", "building")
+      .select("id")
+      .maybeSingle();
+    data = result.data;
+    error = result.error;
+  } else if (practiceExam.status === "processing") {
+    if (!isPracticeBuildClaimStale(practiceExam.build_claimed_at)) {
+      return false;
+    }
+
+    const baseQuery = admin
+      .from("student_practice_exams")
+      .update(update)
+      .eq("id", practiceExam.id)
+      .eq("status", "processing");
+
+    const result = await (practiceExam.build_claimed_at
+      ? baseQuery.eq("build_claimed_at", practiceExam.build_claimed_at)
+      : baseQuery.is("build_claimed_at", null))
+      .select("id")
+      .maybeSingle();
+    data = result.data;
+    error = result.error;
+  } else {
+    return false;
+  }
 
   if (error) {
     throw new Error(error.message);
@@ -2519,6 +2608,7 @@ async function markPracticeBuildFailed(
     .update({
       status: "failed",
       build_error: message,
+      build_claimed_at: null,
       ready_at: null,
       question_count: 0,
     })
@@ -2671,9 +2761,10 @@ async function processPendingPracticeBuildJobs(limit = DEFAULT_PRACTICE_BUILD_BA
   const { data, error } = await admin
     .from("student_practice_exams")
     .select(
-      "id, student_id, subject_id, title, description, selected_topics, generated_metadata, build_requested_at, status, build_error, subjects(name)"
+      "id, student_id, subject_id, title, description, selected_topics, generated_metadata, build_requested_at, build_claimed_at, status, build_error, subjects(name)"
     )
-    .eq("status", "building")
+    .in("status", ["building", "processing"])
+    .order("status", { ascending: true })
     .order("build_requested_at", { ascending: true })
     .limit(safeLimit);
 
@@ -2763,10 +2854,11 @@ async function listStudentPracticeBuildCandidates(
   let query = admin
     .from("student_practice_exams")
     .select(
-      "id, student_id, subject_id, title, description, selected_topics, generated_metadata, build_requested_at, status, build_error, subjects(name)"
+      "id, student_id, subject_id, title, description, selected_topics, generated_metadata, build_requested_at, build_claimed_at, status, build_error, subjects(name)"
     )
     .eq("student_id", studentId)
-    .eq("status", "building")
+    .in("status", ["building", "processing"])
+    .order("status", { ascending: true })
     .order("build_requested_at", { ascending: true })
     .limit(practiceExamId ? 1 : 5);
 
@@ -2952,7 +3044,7 @@ async function getStudentPracticeExamBase(
         generated_metadata?: Record<string, unknown> | null;
         question_count: number | null;
         created_at: string;
-        status?: "building" | "ready" | "failed";
+        status?: "building" | "processing" | "ready" | "failed";
         build_error?: string | null;
         build_requested_at?: string | null;
         ready_at?: string | null;
@@ -3062,7 +3154,7 @@ async function getStudentPracticeExamBase(
         exam.generated_metadata && typeof exam.generated_metadata === "object"
           ? (exam.generated_metadata as Record<string, unknown>)
           : null,
-      status: usesLegacyExamSchema ? "ready" : exam.status ?? "ready",
+      status: usesLegacyExamSchema ? "ready" : getPublicPracticeExamStatus(exam.status),
       build_error: usesLegacyExamSchema ? null : exam.build_error ?? null,
       build_requested_at:
         usesLegacyExamSchema ? null : exam.build_requested_at ?? null,
@@ -3179,6 +3271,8 @@ export async function getStudentPracticeExamForTake(practiceExamId: string) {
   return {
     ...base,
     questions,
+    attemptId: base.attempt?.id ?? null,
+    questionSetFingerprint: createPracticeQuestionSetFingerprint(questions),
     savedAnswers: base.attempt?.draft_answers ?? {},
   };
 }
@@ -3243,6 +3337,7 @@ export async function retryStudentPracticeExamBuild(practiceExamId: string) {
           status: "building",
           build_error: null,
           build_requested_at: resetTimestamp,
+          build_claimed_at: null,
           ready_at: null,
           question_count: 0,
         })
@@ -3271,7 +3366,8 @@ export async function retryStudentPracticeExamBuild(practiceExamId: string) {
 
 export async function saveStudentPracticeDraft(
   practiceExamId: string,
-  answers: Record<string, string>
+  answers: Record<string, string>,
+  clientState?: PracticeClientState
 ) {
   const context = await getAuthenticatedStudentContext();
   if ("error" in context) {
@@ -3286,6 +3382,15 @@ export async function saveStudentPracticeDraft(
 
   if (!practice?.attempt || practice.exam.status !== "ready") {
     return { error: "Practice draft хадгалах боломжгүй байна." };
+  }
+
+  const staleError = validatePracticeClientState(
+    practice.attempt.id,
+    draftQuestions,
+    clientState
+  );
+  if (staleError) {
+    return { error: staleError, refreshRequired: true as const };
   }
 
   if (practice.attempt.status === "graded") {
@@ -3324,7 +3429,8 @@ export async function saveStudentPracticeDraft(
 
 export async function submitStudentPracticeExam(
   practiceExamId: string,
-  answers: Record<string, string>
+  answers: Record<string, string>,
+  clientState?: PracticeClientState
 ) {
   const context = await getAuthenticatedStudentContext();
   if ("error" in context) {
@@ -3349,6 +3455,15 @@ export async function submitStudentPracticeExam(
 
   if (practice.attempt.status === "graded") {
     return { success: true, redirectTo: `/student/learning/practice/${practiceExamId}/result` };
+  }
+
+  const staleError = validatePracticeClientState(
+    practice.attempt.id,
+    practice.questions,
+    clientState
+  );
+  if (staleError) {
+    return { error: staleError, refreshRequired: true as const };
   }
 
   const normalizedAnswers =
