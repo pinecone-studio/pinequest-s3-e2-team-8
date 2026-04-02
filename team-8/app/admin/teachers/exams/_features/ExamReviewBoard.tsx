@@ -1,7 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BookOpen, Search, Users } from "lucide-react";
+import {
+  Atom,
+  BookOpen,
+  Calculator,
+  FlaskConical,
+  Globe2,
+  Laptop2,
+  Search,
+  Sigma,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AdminExamOverview } from "@/lib/admin/actions";
 
@@ -22,18 +31,6 @@ const LIFECYCLE_BADGE_CLASSNAME: Record<string, string> = {
   finalized: "bg-[#eef2ff] text-[#4338ca]",
 };
 
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Хуваарьгүй";
-
-  return new Intl.DateTimeFormat("mn-MN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
 function getTabForExam(exam: AdminExamOverview): TabId {
   const key = exam.lifecycle?.key;
 
@@ -45,35 +42,75 @@ function getTabForExam(exam: AdminExamOverview): TabId {
   return "draft";
 }
 
+function getSubjectPresentation(subjectName: string | null) {
+  const subject = (subjectName ?? "").toLowerCase();
+
+  if (subject.includes("мат")) {
+    return { Icon: Sigma, iconClassName: "bg-[#4a90f5] text-white" };
+  }
+
+  if (subject.includes("физ")) {
+    return { Icon: Atom, iconClassName: "bg-[#7c83fd] text-white" };
+  }
+
+  if (subject.includes("хими") || subject.includes("био")) {
+    return { Icon: FlaskConical, iconClassName: "bg-[#2fb36d] text-white" };
+  }
+
+  if (
+    subject.includes("мэдээлэл") ||
+    subject.includes("информ") ||
+    subject.includes("техно")
+  ) {
+    return { Icon: Laptop2, iconClassName: "bg-[#0ea5a4] text-white" };
+  }
+
+  if (
+    subject.includes("монгол") ||
+    subject.includes("англи") ||
+    subject.includes("орос") ||
+    subject.includes("хэл")
+  ) {
+    return { Icon: BookOpen, iconClassName: "bg-[#f4c95d] text-white" };
+  }
+
+  if (
+    subject.includes("түүх") ||
+    subject.includes("нийгэм") ||
+    subject.includes("газарзүй") ||
+    subject.includes("иргэн")
+  ) {
+    return { Icon: Globe2, iconClassName: "bg-[#56b85c] text-white" };
+  }
+
+  if (subject.includes("геометр") || subject.includes("алгебр")) {
+    return { Icon: Calculator, iconClassName: "bg-[#4a90f5] text-white" };
+  }
+
+  return { Icon: BookOpen, iconClassName: "bg-[#8b8fa3] text-white" };
+}
+
 function ExamCard({ exam }: { exam: AdminExamOverview }) {
   const lifecycleKey = exam.lifecycle?.key ?? "draft";
   const lifecycleLabel = exam.lifecycle?.label ?? "Ноорог";
+  const { Icon, iconClassName } = getSubjectPresentation(exam.subjectName);
 
   return (
-    <article className="flex flex-col gap-4 rounded-[24px] border border-zinc-200 bg-white p-5 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#edf4ff] text-[#4D97F8]">
-          <BookOpen className="h-7 w-7" strokeWidth={1.8} />
-        </div>
-
-        <span
+    <article className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm mt-4">
+      <div className="flex items-start justify-center">
+        <div
           className={cn(
-            "rounded-full px-3 py-1 text-[12px] font-semibold",
-            LIFECYCLE_BADGE_CLASSNAME[lifecycleKey] ??
-              "bg-[#f4f4f5] text-[#52525b]",
+            "relative -top-10 flex h-15 w-15 items-center justify-center rounded-full",
+            iconClassName,
           )}
         >
-          {lifecycleLabel}
-        </span>
+          <Icon className="h-7 w-7" strokeWidth={1.8} />
+        </div>
       </div>
 
-      <div className="space-y-1">
-        <h3 className="text-[16px] font-semibold leading-snug text-zinc-950">
-          {exam.title}
-        </h3>
-        <p className="text-[13px] text-zinc-500">
-          {exam.subjectName ?? "Хичээлгүй"}
-        </p>
+      <div className="flex justify-center font-semibold text-[16px] -mt-11">
+        <p className="">{exam.subjectName ?? "Хичээлгүй"}</p> -{" "}
+        <h3 className=" leading-snug text-zinc-950">{exam.title}</h3>
       </div>
 
       <p className="min-h-[40px] text-[13px] leading-snug text-zinc-500">
@@ -84,22 +121,23 @@ function ExamCard({ exam }: { exam: AdminExamOverview }) {
         <span className="rounded-full border border-zinc-200 px-3 py-1 text-[12px] text-zinc-600">
           {exam.questionCount} асуулт
         </span>
-        <span className="rounded-full border border-zinc-200 px-3 py-1 text-[12px] text-zinc-600">
-          {exam.assignedGroupCount} бүлэг
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-3 py-1 text-[12px] text-zinc-600">
-          <Users className="h-3.5 w-3.5" />
-          {exam.assignedStudentCount} сурагч
+        <span
+          className={cn(
+            "rounded-full px-3 py-1 text-[12px] font-semibold",
+            LIFECYCLE_BADGE_CLASSNAME[lifecycleKey] ??
+              "bg-[#f4f4f5] text-[#52525b]",
+          )}
+        >
+          {lifecycleLabel}
         </span>
       </div>
-
-      <div className="rounded-[16px] bg-[#f8fafc] px-4 py-3 text-[12px] text-zinc-600">
-        <p>Эхлэх: {formatDateTime(exam.startTime)}</p>
-        <p className="mt-1">Үргэлжлэх: {exam.durationMinutes} минут</p>
-        <p className="mt-1">
-          Явц: {exam.inProgressCount} өгч байна, {exam.pendingGradingCount} шалгалт
-          хүлээгдэж байна, {exam.gradedCount} дүн гарсан
-        </p>
+      <div className="grid grid-cols-2 gap-3.5 font-medium">
+        <div className="flex justify-center border border-gray-300 rounded-lg py-1 px-8.5 bg-[#FAFAFA]">
+          Татгалзах
+        </div>{" "}
+        <div className="flex justify-center border border-gray-300 rounded-lg py-1 px-8.5 bg-[#FAFAFA]">
+          Батлах
+        </div>
       </div>
     </article>
   );
