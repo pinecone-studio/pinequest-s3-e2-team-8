@@ -126,26 +126,26 @@ export default async function AdminDashboard() {
 
   return (
     <div className="space-y-6">
-      <section className="overflow-hidden rounded-[32px] bg-[radial-gradient(circle_at_top_left,_rgba(125,180,255,0.45),_transparent_34%),linear-gradient(135deg,#17356d_0%,#2356aa_52%,#69a2ff_100%)] p-5 text-white shadow-sm md:p-6">
+      <section className="overflow-hidden rounded-[32px] bg-[radial-gradient(circle_at_top_left,_rgba(180,160,200,0.6),_transparent_40%),linear-gradient(135deg,#9b8aac_0%,#c4906a_45%,#e8824a_75%,#f0935a_100%)] p-5 text-white shadow-sm md:p-6">
         <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
           <div className="max-w-2xl space-y-3">
-            <Badge className="w-fit border-white/20 bg-white/12 px-3 py-1 text-white hover:bg-white/12">
+            <Badge className=" bg-white px-6.5 py-2 h-8.5 text-black text-[16px]">
               {formatDateLabelUB(now)}
             </Badge>
             <div className="space-y-2">
-              <h2 className="text-3xl font-semibold tracking-tight md:text-[2rem]">
+              <h2 className="text-[24px] font-semibold tracking-tight md:text-[2rem]">
                 Сургалтын менежерийн dashboard
               </h2>
-              <p className="max-w-xl text-sm leading-6 text-blue-50/90 md:text-base">
+              <p className="text-[16px]  md:text-base">
                 Өнөөдөр болон ирэх өдрүүдийн шалгалтын тов, анхаарах зөрчил,
                 системийн ерөнхий төлөвийг нэг дороос хянахад зориулсан самбар.
               </p>
             </div>
-            <p className="text-sm text-blue-50/85">
+            {/* <p className="text-sm text-blue-50/85">
               {nextExam
                 ? `Дараагийн шалгалт: ${nextExam.title} · ${formatDateLabelUB(nextExam.start_time)} · ${formatTimeUB(nextExam.start_time)}`
                 : "Ойрын хугацаанд товлогдсон шинэ шалгалт алга."}
-            </p>
+            </p> */}
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -188,14 +188,14 @@ export default async function AdminDashboard() {
         </div>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      {/* <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {systemCards.map((card) => {
           const Icon = card.icon;
 
           return (
             <div
               key={card.title}
-              className="rounded-[24px] border border-zinc-200 bg-white px-4 py-4 shadow-none"
+              className="rounded-lg border border-zinc-200 bg-white px-4 py-4 shadow-none"
             >
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-zinc-500">{card.title}</p>
@@ -210,7 +210,7 @@ export default async function AdminDashboard() {
             </div>
           );
         })}
-      </section>
+      </section> */}
 
       <AdminExamCalendar scheduleRows={scheduleRows} initialNowIso={initialNowIso} />
     </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type CSSProperties, type SVGProps } from "react";
@@ -58,67 +59,54 @@ function CloseNavIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-const allNavItems: NavItem[] = [
+const navItems: NavItem[] = [
   {
-    href: "/educator",
-    label: "Нүүр хуудас",
+    href: "/admin",
+    label: "Хянах самбар",
     iconPath: "/educator-icons/home.png",
     iconClassName: "h-5 w-5",
   },
   {
-    href: "/educator/question-bank",
-    label: "Асуултын сан",
+    href: "/admin/teachers",
+    label: "Хичээл оноолт",
     iconPath: "/educator-icons/import_contacts.png",
     iconClassName: "h-5 w-5",
   },
   {
-    href: "/educator/exams",
-    label: "Шалгалтууд",
+    href: "/admin/users",
+    label: "Хэрэглэгчид",
     iconPath: "/educator-icons/exams.png",
     iconClassName: "h-5 w-4",
   },
 ];
 
-export default function Sidebar() {
+export default function AdminSidebar() {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
-
-  const isExamBuilderRoute =
-    pathname === "/educator/create-exam" ||
-    (pathname?.startsWith("/educator/exams/") && pathname?.endsWith("/edit"));
-  const collapsed = isCollapsed || isExamBuilderRoute;
-  const widthClass = isExamBuilderRoute
-    ? "w-[54px]"
-    : collapsed
-      ? "w-[70px]"
-      : "w-[260px]";
+  const widthClass = isCollapsed ? "w-[70px]" : "w-[260px]";
 
   return (
     <>
       <div className={`shrink-0 transition-all duration-200 ${widthClass}`} />
       <aside
         className={`fixed inset-y-0 left-0 z-30 flex h-screen flex-col justify-between overflow-y-auto bg-white pt-6 shadow-xl transition-all duration-200 ${
-          isExamBuilderRoute ? "px-1.5" : collapsed ? "px-2" : "px-4"
+          isCollapsed ? "px-2" : "px-4"
         } ${widthClass}`}
       >
         <div className="flex flex-col gap-6">
           <div
             className={`flex items-start ${
-              collapsed ? "justify-center" : "justify-between"
+              isCollapsed ? "justify-center" : "justify-between"
             }`}
           >
-            {!collapsed ? <Logo /> : null}
+            {!isCollapsed ? <Logo /> : null}
             <button
               type="button"
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              onClick={() => {
-                if (!isExamBuilderRoute) {
-                  setIsCollapsed((prev) => !prev);
-                }
-              }}
+              aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={() => setIsCollapsed((prev) => !prev)}
               className="rounded-lg p-1 text-gray-600 transition-colors hover:text-brand"
             >
-              {collapsed ? (
+              {isCollapsed ? (
                 <ChevronLeft size={28} className="rotate-180" />
               ) : (
                 <CloseNavIcon className="h-[18px] w-[18px] text-[#3f3f3f]" />
@@ -127,31 +115,31 @@ export default function Sidebar() {
           </div>
 
           <nav className="flex flex-col gap-2">
-            {allNavItems.map((item) => {
+            {navItems.map((item) => {
               const isActive =
                 pathname === item.href ||
-                (item.href !== "/educator" && pathname.startsWith(item.href));
+                (item.href !== "/admin" && pathname.startsWith(item.href));
 
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  title={collapsed ? item.label : undefined}
+                  title={isCollapsed ? item.label : undefined}
                   className={`group flex min-h-[48px] items-center rounded-[12px] px-[16px] py-[11px] text-[15px] font-medium transition-all duration-200 ${
                     isActive
-                      ? "border-2 border-[#4A80D8] bg-[#EDF4FF] text-[#4A80D8]"
-                      : "text-[#757575] hover:bg-[#F7F9FC] hover:text-[#4A80D8]"
-                  } ${collapsed ? "justify-center gap-0 px-3" : "gap-[14px]"}`}
+                      ? "border-2 bg-[#3B763B] text-white"
+                      : "text-[#757575] hover:bg-[#F7F9FC] hover:text-[#3B763B]"
+                  } ${isCollapsed ? "justify-center gap-0 px-3" : "gap-[14px]"}`}
                 >
                   <SidebarItemIcon
                     iconPath={item.iconPath}
                     className={`${item.iconClassName} shrink-0 ${
                       isActive
-                        ? "text-[#4A80D8]"
-                        : "text-[#666666] group-hover:text-[#4A80D8]"
+                        ? "text-white"
+                        : "text-[#666666] group-hover:text-[#3B763B]"
                     }`}
                   />
-                  {!collapsed && <span>{item.label}</span>}
+                  {!isCollapsed && <span>{item.label}</span>}
                 </Link>
               );
             })}
@@ -163,13 +151,13 @@ export default function Sidebar() {
             <button
               type="submit"
               className={`group flex cursor-pointer items-center gap-3 rounded-md transition-colors hover:text-brand ${
-                collapsed ? "justify-center pl-4 pb-4" : "pl-3"
+                isCollapsed ? "justify-center pl-4 pb-4" : "pl-3"
               }`}
               aria-label="Гарах"
-              title={collapsed ? "Гарах" : undefined}
+              title={isCollapsed ? "Гарах" : undefined}
             >
-              <LogOut className="h-7 w-7 group-hover:text-red-500" />
-              {!collapsed && (
+              <LogOut className="h-7 w-7" />
+              {!isCollapsed && (
                 <p className="text-[15px] font-semibold text-[#7F7F7F] group-hover:text-red-500">
                   Гарах
                 </p>
@@ -177,7 +165,14 @@ export default function Sidebar() {
             </button>
           </form>
 
-          {!collapsed && <SideBarImage />}
+          {!isCollapsed && (
+            <Image
+              src="/book.png"
+              alt="Books illustration"
+              width={84}
+              height={85}
+            />
+          )}
         </div>
       </aside>
     </>

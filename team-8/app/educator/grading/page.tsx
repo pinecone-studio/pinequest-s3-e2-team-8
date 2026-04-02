@@ -84,13 +84,13 @@ export default async function GradingPage() {
       </div>
       <div className="rounded-2xl bg-white p-5 shadow">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-[18px] font-semibold text-[#111111]">
-            Review request ирсэн essay-үүд
+          <h2 className="text-[20px] font-medium text-[#111111]">
+          Сурагчдын хариулт засах
           </h2>
-          <div className="flex items-center gap-2 rounded-full border border-[#e6e6e6] bg-white p-1 text-sm">
+          <div className="flex items-center gap-2 rounded-full bg-[#F0EEEE]  p-1 text-sm">
             <button
               type="button"
-              className="rounded-full bg-[#f3f6fb] px-4 py-1.5 text-[13px] font-medium text-[#111111]"
+              className="rounded-full bg-[#FFFFFF] px-4 py-1.5 text-[13px] font-medium text-[#111111]"
             >
               Бүгд
             </button>
@@ -110,7 +110,7 @@ export default async function GradingPage() {
         </div>
 
         {submissions.length === 0 ? (
-          <Card>
+          <Card className="mt-7.5">
             <CardContent className="py-10 text-center text-muted-foreground">
               Хянах review request одоогоор алга байна.
             </CardContent>

@@ -21,7 +21,7 @@ const DEMO_CREDENTIALS: Record<LoginRole, { email: string; password: string }> =
     password: "PineExam123!",
   },
   teacher: {
-    email: "teacher10@pineexam.test",
+    email: "teacher09@pineexam.test",
     password: "PineExam123!",
   },
   student: {
@@ -195,12 +195,13 @@ function RolePicker({
             </p>
           </div>
 
-          <div className="flex justify-center ">
+          <div className="flex justify-center">
             <RoleCard
               role="admin"
               featured
               disabled={disabled}
               onClick={() => onSelect("admin")}
+         
             />
           </div>
 
