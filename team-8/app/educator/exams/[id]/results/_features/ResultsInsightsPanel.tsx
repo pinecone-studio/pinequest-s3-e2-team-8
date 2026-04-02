@@ -135,112 +135,32 @@ export default function ResultsInsightsPanel({
           </TabsContent>
 
           <TabsContent value="questions" className="mt-5 space-y-4">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-[24px] border border-[#F7E6E6] bg-[#FFF4F4] px-5 py-4">
-                <p className="text-[16px] font-medium text-[#6B7280]">Хамгийн хэцүү</p>
+            <div className="grid gap-4 grid-cols-2">
+              <div className="rounded-[24px] border border-[#F7E6E6] bg-[#FFF4F4] px-5 py-5">
+                <p className="text-[16px] font-semibold text-[#E05252]">Хамгийн их алдсан</p>
                 <p className="mt-3 text-[22px] font-semibold text-[#111827]">
                   {hardestQuestion ? `Асуулт ${hardestQuestion.questionNumber}` : "—"}
                 </p>
-                <p className="mt-2 text-[14px] text-[#6B7280]">
+                <p className="mt-2 text-[14px] font-medium text-[#575555]">
                   {hardestQuestion
-                    ? `${hardestQuestion.masteryRate}% амжилт`
+                    ? `${hardestQuestion}`
                     : "Мэдээлэл алга"}
                 </p>
               </div>
 
-              <div className="rounded-[24px] border border-[#DDF8EE] bg-[#EEFBF3] px-5 py-4">
-                <p className="text-[16px] font-medium text-[#6B7280]">Хамгийн сайн</p>
+              <div className="rounded-[24px] border border-[#DDF8EE] bg-[#EEFBF3] px-5 py-5">
+                <p className="text-[16px] font-semibold text-[#6BBF7A]">Хамгийн сайн хариулсан</p>
                 <p className="mt-3 text-[22px] font-semibold text-[#111827]">
                   {easiestQuestion ? `Асуулт ${easiestQuestion.questionNumber}` : "—"}
                 </p>
-                <p className="mt-2 text-[14px] text-[#6B7280]">
+                <p className="mt-2 text-[14px] font-medium text-[#575555]">
                   {easiestQuestion
-                    ? `${easiestQuestion.masteryRate}% амжилт`
+                    ? `${easiestQuestion}`
                     : "Мэдээлэл алга"}
                 </p>
               </div>
-
-              <div className="rounded-[24px] border border-[#E0F0FF] bg-[#EEF7FF] px-5 py-4">
-                <p className="text-[16px] font-medium text-[#6B7280]">Асуулт</p>
-                <p className="mt-3 text-[22px] font-semibold text-[#111827]">
-                  {questionCount}
-                </p>
-                <p className="mt-2 text-[14px] text-[#6B7280]">
-                  Нийт анализлагдсан асуулт
-                </p>
-              </div>
-
-              <div className="rounded-[24px] border border-[#ECE9FF] bg-[#F2F0FF] px-5 py-4">
-                <p className="text-[16px] font-medium text-[#6B7280]">Бүрэн зөв</p>
-                <p className="mt-3 text-[22px] font-semibold text-[#111827]">
-                  {fullyMasteredQuestions.length}
-                </p>
-                <p className="mt-2 text-[14px] text-[#6B7280]">
-                  Бүгд зөв хариулсан асуулт
-                </p>
-              </div>
             </div>
-
-            <div className="grid gap-4 xl:grid-cols-[1.1fr_1.2fr]">
-              <div className="rounded-[24px] border border-[#ECECEC] bg-[#FAFAFA] p-5">
-                <p className="text-[16px] font-medium text-[#111827]">Онооны тархалт</p>
-                <div className="mt-4 space-y-3">
-                  {scoreDistribution.map((band) => (
-                    <div key={band.label}>
-                      <div className="mb-1 flex items-center justify-between text-[14px]">
-                        <span className="text-[#6B7280]">{band.label}</span>
-                        <span className="font-medium text-[#111827]">
-                          {band.count} сурагч
-                        </span>
-                      </div>
-                      <div className="h-2.5 rounded-full bg-[#EAEAEA]">
-                        <div
-                          className="h-full rounded-full bg-[#8EA2FF]"
-                          style={{ width: `${Math.max(band.percentage, band.count > 0 ? 8 : 0)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-[24px] border border-[#ECECEC] bg-[#FAFAFA] p-5">
-                <p className="text-[16px] font-medium text-[#111827]">Анхаарах асуултууд</p>
-                <div className="mt-4 space-y-3">
-                  {questionPerformance.slice(0, 4).length > 0 ? (
-                    questionPerformance.slice(0, 4).map((question) => (
-                      <div
-                        key={question.questionId}
-                        className="rounded-[18px] bg-white px-4 py-3"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-[14px] font-medium text-[#111827]">
-                              Асуулт {question.questionNumber}
-                            </p>
-                            <p className="mt-1 text-[13px] text-[#6B7280]">
-                              {question.shortLabel}
-                            </p>
-                          </div>
-                          <p className="text-[15px] font-semibold text-[#3C468B]">
-                            {question.masteryRate}%
-                          </p>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-[14px] text-[#6B7280]">
-                      Асуултын мэдээлэл алга.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <p className="text-[14px] text-[#6B7280]">
-              {attemptedCount}/{totalCount} оролдлого анализлагдсан.
-            </p>
-          </TabsContent>
+ </TabsContent>
         </Tabs>
       )}
     </section>
