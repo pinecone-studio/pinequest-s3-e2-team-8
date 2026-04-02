@@ -9,7 +9,7 @@ import {
   type CSSProperties,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, Eye, EyeOff } from "lucide-react";
+import { AlertCircle, BookOpen, Eye, EyeOff } from "lucide-react";
 import { login } from "@/lib/auth/actions";
 import Logo from "@/app/_icons/Logo";
 
@@ -37,6 +37,7 @@ const ROLE_META: Record<
     cardSubtitle: string;
     loginTitle: string;
     iconPath: string;
+    lucideIcon?: typeof BookOpen;
     iconTint: string;
     iconBox: string;
     emailPlaceholder: string;
@@ -48,14 +49,15 @@ const ROLE_META: Record<
     cardSubtitle: "Шалгалт удирдах",
     loginTitle: "Багшаар нэвтрэх",
     iconPath: "/educator-icons/import_contacts.png",
+    lucideIcon: BookOpen,
     iconTint: "#5d92e8",
     iconBox: "#eef4ff",
     emailPlaceholder: "example@school.edu.mn",
     titleTone: "link",
   },
   admin: {
-    cardTitle: "Сургалтын\nменежер",
-    cardSubtitle: "Хянах",
+    cardTitle: "Сургалтын менежерээр нэвтрэх",
+    cardSubtitle: "Шалгалт хянах",
     loginTitle: "Менежерээр нэвтрэх",
     iconPath: "/educator-icons/admin-shield.svg",
     iconTint: "#f2a15f",
@@ -112,6 +114,7 @@ function RoleCard({
   featured?: boolean;
 }) {
   const meta = ROLE_META[role];
+  const LucideIcon = meta.lucideIcon;
   const iconStyle = useMemo(
     () => createMaskStyle(meta.iconPath, meta.iconTint),
     [meta.iconPath, meta.iconTint]
@@ -122,7 +125,7 @@ function RoleCard({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`flex flex-col items-center rounded-[8px] border border-[#d7d7d7] bg-white text-center shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-[0_6px_16px_rgba(0,0,0,0.08)] disabled:cursor-not-allowed disabled:opacity-70 ${
+      className={`flex flex-col items-center rounded-[8px] border border-[#bdbdbd] bg-[#fafafa] text-center shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-[0_6px_16px_rgba(0,0,0,0.08)] disabled:cursor-not-allowed disabled:opacity-70 ${
         featured
           ? "min-h-[207px] w-[279px] p-5 "
           : "min-h-[178px] p-5"
@@ -132,7 +135,20 @@ function RoleCard({
         className="flex h-[60px] w-[60px] items-center justify-center rounded-[8px]"
         style={{ backgroundColor: meta.iconBox }}
       >
-        <span aria-hidden="true" className="h-[22px] w-[22px]" style={iconStyle} />
+        {LucideIcon ? (
+          <LucideIcon
+            aria-hidden="true"
+            className="h-[22px] w-[22px]"
+            style={{ color: meta.iconTint }}
+            strokeWidth={2}
+          />
+        ) : (
+          <span
+            aria-hidden="true"
+            className="h-[22px] w-[22px]"
+            style={iconStyle}
+          />
+        )}
       </span>
 
       <span
@@ -171,7 +187,7 @@ function RolePicker({
       <section className="rounded-[16px] w-[505px] h-[553px] border border-[#e5e5e5] bg-[#FFFFFF] px-[16px] pb-[14px] pt-[18px] shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)] backdrop-blur-[2px]">
         <div className="space-y-[30px]">
           <div className="space-y-2.5 text-center">
-            <h2 className="text-[20px] font-semibold text-[#202020] sm:text-[19px]">
+            <h2 className="text-[20px] font-semibold text-[#202020] ">
               Нэвтрэх
             </h2>
             <p className="text-[16px] font-medium text-[#6B6B6B]">
@@ -225,6 +241,7 @@ function RoleLoginCard({
   onBack: () => void;
 }) {
   const meta = ROLE_META[role];
+  const LucideIcon = meta.lucideIcon;
   const iconStyle = useMemo(
     () => createMaskStyle(meta.iconPath, meta.iconTint),
     [meta.iconPath, meta.iconTint]
@@ -241,30 +258,38 @@ function RoleLoginCard({
   }
 
   return (
-    <div className="w-full max-w-[315px] text-center">
+    <div className="flex justify-center items-center">
+    <div className="w-full  text-center">
       <BrandBlock />
 
-      <section className="min-h-[412px] rounded-[19px] border border-[#ddd8d3] bg-white/94 px-[25px] pb-[22px] pt-[24px] shadow-[0_2px_4px_rgba(76,87,110,0.14),0_10px_24px_rgba(104,113,132,0.14)] backdrop-blur-[2px]">
+      <section className="min-h-[532px] rounded-[24px] w-100 border border-[#ddd8d3] bg-white/94 px-[25px] pb-[22px] pt-[24px] shadow-[0_2px_4px_rgba(76,87,110,0.14),0_10px_24px_rgba(104,113,132,0.14)] backdrop-blur-[2px]">
         <div
           className="mx-auto flex h-[60px] w-[60px] items-center justify-center rounded-[8px]"
           style={{ backgroundColor: meta.iconBox }}
         >
-          <span aria-hidden="true" className="h-[22px] w-[22px]" style={iconStyle} />
+          {LucideIcon ? (
+            <LucideIcon
+              aria-hidden="true"
+              className="h-[22px] w-[22px]"
+              style={{ color: meta.iconTint }}
+              strokeWidth={2}
+            />
+          ) : (
+            <span
+              aria-hidden="true"
+              className="h-[22px] w-[22px]"
+              style={iconStyle}
+            />
+          )}
         </div>
 
-        {meta.titleTone === "link" ? (
-          <button
-            type="button"
-            onClick={onBack}
-            className="mt-[14px] inline-block text-[16px] font-semibold text-[#355fa4] underline decoration-[1.5px] underline-offset-[2px]"
-          >
-            {meta.loginTitle}
-          </button>
-        ) : (
-          <div className="mt-[14px] text-[16px] font-semibold text-[#3b3b3b]">
-            {meta.loginTitle}
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={meta.titleTone === "link" ? onBack : undefined}
+          className="mt-[14px] inline-block text-[20px] font-semibold text-black"
+        >
+          {meta.loginTitle}
+        </button>
 
         {error ? (
           <div className="mt-5 flex items-start gap-2 rounded-[10px] border border-[#f0b8b8] bg-[#fff1f1] px-3 py-2 text-left text-[12px] text-[#bc4a4a]">
@@ -288,7 +313,7 @@ function RoleLoginCard({
           </div>
         </div>
 
-        <form action={onSubmit} className="mt-[36px] space-y-[16px] text-left">
+        <form action={onSubmit} className="mt-4 space-y-[16px] text-left">
           <div className="space-y-[7px]">
             <label
               htmlFor="email"
@@ -346,14 +371,15 @@ function RoleLoginCard({
               <input
                 type="checkbox"
                 name="remember_me"
-                className="h-[14px] w-[14px] rounded-[4px] border border-[#d8d8d8] accent-[#35519b]"
+                className="h-[14px] w-[14px] rounded-[4px] border border-[#d8d8d8] text-[#B0B0B0]"
               />
-              Намайг сана
+              <p className="text-[#262626">  Намайг сана</p>
+            
             </label>
 
             <button
               type="button"
-              className="text-[12px] font-medium text-[#648de4]"
+              className="text-[12px] font-medium text-[#2357C4]"
             >
               Нууц үг мартсан?
             </button>
@@ -362,7 +388,7 @@ function RoleLoginCard({
           <button
             type="submit"
             disabled={isPending}
-            className="mt-[8px] h-[38px] w-full rounded-[10px] bg-[#334d95] text-[15px] font-semibold text-white shadow-[0_4px_10px_rgba(53,81,155,0.18)] transition-colors hover:bg-[#2f4789] disabled:cursor-not-allowed disabled:opacity-70"
+            className="mt-2 h-12 w-full rounded-[10px] py-3 bg-[#334d95] text-[15px] font-semibold text-white shadow-[0_4px_10px_rgba(53,81,155,0.18)] transition-colors hover:bg-[#2f4789] disabled:cursor-not-allowed disabled:opacity-70"
           >
             {isPending ? "Нэвтэрч байна..." : "Нэвтрэх"}
           </button>
@@ -370,7 +396,7 @@ function RoleLoginCard({
           <div className="pt-[2px] text-center">
             <Link
               href="/register"
-              className="text-[14px] font-medium text-[#648de4]"
+              className="text-[14px] font-medium text-[#2357C4]"
             >
               Бүртгүүлэх
             </Link>
@@ -381,6 +407,7 @@ function RoleLoginCard({
       <footer className="mt-[18px] text-[13px] font-medium text-[#8a8a8a]">
         {currentYear} SmartExam. Бүх эрх хуулиар хамгаалагдсан.
       </footer>
+    </div>
     </div>
   );
 }
@@ -418,8 +445,8 @@ function LoginPageContent() {
     selectedRole === "student"
       ? "radial-gradient(circle at 50% 48%, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.97) 24%, rgba(250,247,255,0.95) 44%, rgba(236,225,255,0.9) 70%, rgba(207,183,255,0.86) 100%), radial-gradient(circle at 8% 10%, rgba(214,195,255,0.62) 0%, rgba(214,195,255,0) 32%), radial-gradient(circle at 96% 9%, rgba(238,186,210,0.55) 0%, rgba(238,186,210,0) 30%), radial-gradient(circle at 94% 82%, rgba(160,115,255,0.62) 0%, rgba(160,115,255,0) 30%), radial-gradient(circle at 7% 92%, rgba(255,211,219,0.46) 0%, rgba(255,211,219,0) 26%)"
       : selectedRole === "admin"
-        ? "radial-gradient(circle at 50% 48%, rgba(255,255,255,0.985) 0%, rgba(255,255,255,0.97) 24%, rgba(244,246,255,0.95) 46%, rgba(224,213,244,0.9) 74%, rgba(202,188,232,0.84) 100%), radial-gradient(circle at 0% 0%, rgba(171,133,246,0.7) 0%, rgba(171,133,246,0) 42%), radial-gradient(circle at 0% 100%, rgba(245,157,118,0.72) 0%, rgba(245,157,118,0) 40%), radial-gradient(circle at 100% 96%, rgba(111,153,229,0.72) 0%, rgba(111,153,229,0) 42%), radial-gradient(circle at 100% 8%, rgba(193,210,243,0.5) 0%, rgba(193,210,243,0) 28%)"
-      : "radial-gradient(circle at 25% 50%, rgba(120,165,220,0.9) 0%, rgba(120,165,220,0) 50%), radial-gradient(circle at 78% 12%, rgba(205,175,185,0.8) 0%, rgba(205,175,185,0) 42%), radial-gradient(circle at 88% 85%, rgba(160,185,215,0.65) 0%, rgba(160,185,215,0) 38%), radial-gradient(circle at 50% 50%, rgba(255,255,255,0.88) 0%, rgba(235,242,252,0.5) 60%, rgba(175,200,230,0.3) 100%)";
+        ? "radial-gradient(circle at 50% 48%, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.97) 24%, rgba(255,249,242,0.95) 44%, rgba(255,228,202,0.9) 70%, rgba(255,194,145,0.86) 100%), radial-gradient(circle at 8% 10%, rgba(255,216,176,0.62) 0%, rgba(255,216,176,0) 32%), radial-gradient(circle at 96% 9%, rgba(255,186,140,0.55) 0%, rgba(255,186,140,0) 30%), radial-gradient(circle at 94% 82%, rgba(255,153,94,0.62) 0%, rgba(255,153,94,0) 30%), radial-gradient(circle at 7% 92%, rgba(255,218,188,0.46) 0%, rgba(255,218,188,0) 26%)"
+      : "radial-gradient(circle at 50% 48%, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.96) 24%, rgba(246,249,255,0.94) 44%, rgba(220,232,255,0.9) 70%, rgba(187,209,245,0.86) 100%), radial-gradient(circle at 7% 88%, rgba(126,165,237,0.6) 0%, rgba(126,165,237,0) 34%), radial-gradient(circle at 99% 10%, rgba(226,181,191,0.42) 0%, rgba(226,181,191,0) 28%), radial-gradient(circle at 99% 92%, rgba(147,166,216,0.45) 0%, rgba(147,166,216,0) 33%), radial-gradient(circle at 8% 12%, rgba(163,196,248,0.34) 0%, rgba(163,196,248,0) 28%)";
 
   return (
     <main
@@ -429,7 +456,7 @@ function LoginPageContent() {
           selectedRole === "student"
             ? "#ecdffe"
             : selectedRole === "admin"
-              ? "#d8cfe8"
+              ? "#FFE1C2"
               : "#c8d9ef",
         backgroundImage,
       }}
