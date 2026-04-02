@@ -1,14 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft,
-  CheckCircle,
   ChevronDown,
-  Clock,
-  TrendingUp,
-  UserCheck,
-  UserX,
-  Users,
 } from "lucide-react";
 import { getExamResults } from "@/lib/exam/actions";
 import {
@@ -18,7 +11,7 @@ import {
 } from "@/lib/exam-recipient-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -89,11 +82,11 @@ function buildStats(rows: ResultRow[]) {
     avgScore:
       attemptedRows.length > 0
         ? Math.round(
-            attemptedRows.reduce(
-              (sum, row) => sum + Number(row.percentage ?? 0),
-              0
-            ) / attemptedRows.length
-          )
+          attemptedRows.reduce(
+            (sum, row) => sum + Number(row.percentage ?? 0),
+            0
+          ) / attemptedRows.length
+        )
         : 0,
     passCount,
     passRate:
@@ -161,11 +154,11 @@ function buildResultsInsights(
   const averageScore =
     attemptedRows.length > 0
       ? clampPercent(
-          attemptedRows.reduce(
-            (sum, row) => sum + Number(row.percentage ?? 0),
-            0
-          ) / attemptedRows.length
-        )
+        attemptedRows.reduce(
+          (sum, row) => sum + Number(row.percentage ?? 0),
+          0
+        ) / attemptedRows.length
+      )
       : 0;
   const participationRate =
     rows.length > 0
@@ -184,7 +177,14 @@ function buildResultsInsights(
       ? clampPercent((excellenceCount / attemptedRows.length) * 100)
       : 0;
 
-  const metrics = [
+  const metrics = [ {
+      key: "excellent",
+      label: "90%+",
+      value: excellenceRate,
+      suffix: "%",
+      description: `${excellenceCount} сурагч өндөр амжилттай`,
+      tone: "violet" as const,
+    },
     {
       key: "participation",
       label: "Оролцоо",
@@ -192,6 +192,13 @@ function buildResultsInsights(
       suffix: "%",
       description: `${attemptedRows.length} сурагчийн дүн бүртгэгдсэн`,
       tone: "sky" as const,
+    }, {
+      key: "success",
+      label: "Амжилт",
+      value: passRate,
+      suffix: "%",
+      description: `${passCount} сурагч тэнцсэн`,
+      tone: "emerald" as const,
     },
     {
       key: "average",
@@ -201,22 +208,8 @@ function buildResultsInsights(
       description: `Тэнцэх босго ${passingScore}%`,
       tone: "amber" as const,
     },
-    {
-      key: "success",
-      label: "Амжилт",
-      value: passRate,
-      suffix: "%",
-      description: `${passCount} сурагч тэнцсэн`,
-      tone: "emerald" as const,
-    },
-    {
-      key: "excellent",
-      label: "90%+",
-      value: excellenceRate,
-      suffix: "%",
-      description: `${excellenceCount} сурагч өндөр амжилттай`,
-      tone: "violet" as const,
-    },
+   
+   
   ];
 
   const scoreBands = [
@@ -310,11 +303,11 @@ function buildResultsInsights(
   const easiestQuestion =
     rankedQuestions.length > 0
       ? [...rankedQuestions].sort(
-          (left, right) =>
-            right.masteryRate - left.masteryRate ||
-            right.perfectCount - left.perfectCount ||
-            left.questionNumber - right.questionNumber
-        )[0]
+        (left, right) =>
+          right.masteryRate - left.masteryRate ||
+          right.perfectCount - left.perfectCount ||
+          left.questionNumber - right.questionNumber
+      )[0]
       : null;
 
   return {
@@ -335,28 +328,67 @@ function buildResultsInsights(
 function getStatusBadge(status: string, label: string) {
   switch (status) {
     case "graded":
-      return <Badge variant="secondary">{label}</Badge>;
+      return (
+        <span className="inline-flex min-h-10 items-center rounded-full border border-[#E3E3E3] bg-[#FAFAFA] px-5 text-[15px] font-medium text-[#8B8B8B]">
+          {label}
+        </span>
+      );
     case "submitted":
-      return <Badge variant="outline">Шалгаж байна</Badge>;
+      return (
+        <span className="inline-flex min-h-10 items-center rounded-full border border-[#D8E6FF] bg-[#F4F8FF] px-5 text-[15px] font-medium text-[#5B78B8]">
+          Шалгаж байна
+        </span>
+      );
     case "in_progress":
-      return <Badge variant="secondary">Өгөөд эхэлсэн</Badge>;
+      return (
+        <span className="inline-flex min-h-10 items-center rounded-full border border-[#D8E6FF] bg-[#F4F8FF] px-5 text-[15px] font-medium text-[#5B78B8]">
+          Өгөөд эхэлсэн
+        </span>
+      );
     case "retake_available":
     case "retake_scheduled":
-      return <Badge variant="secondary">{label}</Badge>;
+      return (
+        <span className="inline-flex min-h-10 items-center rounded-full border border-[#E7D8FF] bg-[#F8F3FF] px-5 text-[15px] font-medium text-[#7E5DB0]">
+          {label}
+        </span>
+      );
     case "excused":
-      return <Badge variant="outline">Чөлөөлөгдсөн</Badge>;
+      return (
+        <span className="inline-flex min-h-10 items-center rounded-full border border-[#E7D8FF] bg-[#FAF5FF] px-5 text-[15px] font-medium text-[#8B5CF6]">
+          Чөлөөлөгдсөн
+        </span>
+      );
     case "timed_out":
-      return <Badge variant="outline">Хугацаа дууссан</Badge>;
+      return (
+        <span className="inline-flex min-h-10 items-center rounded-full border border-[#FBD4D4] bg-[#FFF5F5] px-5 text-[15px] font-medium text-[#E57373]">
+          Хугацаа дууссан
+        </span>
+      );
     case "absent":
-      return <Badge variant="outline">Өгөөгүй</Badge>;
+      return (
+        <span className="inline-flex min-h-10 items-center rounded-full border border-[#E3E3E3] bg-[#FAFAFA] px-5 text-[15px] font-medium text-[#8B8B8B]">
+          Өгөөгүй
+        </span>
+      );
     default:
-      return <Badge variant="outline">{label}</Badge>;
+      return (
+        <span className="inline-flex min-h-10 items-center rounded-full border border-[#E3E3E3] bg-[#FAFAFA] px-5 text-[15px] font-medium text-[#8B8B8B]">
+          {label}
+        </span>
+      );
   }
 }
 
-function getScoreText(value: number | null, maxValue: number | null) {
-  if (value === null || maxValue === null) return "—";
-  return `${value} / ${maxValue}`;
+function getResultBadge(passed: boolean) {
+  return passed ? (
+    <span className="inline-flex min-h-10 items-center rounded-full border border-[#7DD78A] bg-[#E4F8E7] px-5 text-[15px] font-medium text-[#60B56E]">
+      Тэнцсэн
+    </span>
+  ) : (
+    <span className="inline-flex min-h-10 items-center rounded-full border border-[#F29A9A] bg-[#FFF1F1] px-5 text-[15px] font-medium text-[#EB7676]">
+      Тэнцээгүй
+    </span>
+  );
 }
 
 function getStudentAvatarTone(row: ResultRow) {
@@ -382,8 +414,8 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
 
   const filtered = groupFilter
     ? sessions.filter((session) =>
-        session.groups.some((group) => group.id === groupFilter)
-      )
+      session.groups.some((group) => group.id === groupFilter)
+    )
     : sessions;
   const displayStats = groupFilter ? buildStats(filtered) : stats;
   const activeGroup =
@@ -399,177 +431,127 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
   const scopeLabel = activeGroup ? `${activeGroup.name} бүлэг` : "Бүх сурагч";
 
   return (
-    <div className="space-y-6">
-      <div>
-        <Link
-          href="/educator/exams"
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-3 w-3" />
-          Шалгалтын жагсаалт руу буцах
-        </Link>
-        <div className="mt-1">
-          <h2 className="text-2xl font-bold tracking-tight">{exam.title}</h2>
-          <p className="text-muted-foreground">
-            {exam.subject?.name ?? "Хичээл тодорхойгүй"} · Тэнцэх оноо:{" "}
-            {exam.passing_score}%
-          </p>
-        </div>
+    <div className="space-y-6 pb-6">
+      <div className="space-y-2">
+        <h1 className="text-[26px] font-semibold tracking-[-0.04em] text-[#111827]">
+          {exam.title}
+        </h1>
+        <p className="text-[15px] text-[#6B7280]">
+          {exam.subject?.name ?? "Хичээл тодорхойгүй"} · Тэнцэх босго{" "}
+          {exam.passing_score}% · {displayStats.total} сурагч
+        </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <Users className="h-4 w-4" /> Нийт оролцогч
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{displayStats.total}</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <Clock className="h-4 w-4" /> Оролдсон
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{displayStats.attempted}</p>
-            <p className="text-xs text-muted-foreground">
-              Шалгагдаж буй: {displayStats.submitted} · Баталгаажсан:{" "}
-              {displayStats.graded}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <TrendingUp className="h-4 w-4" /> Дундаж оноо
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{displayStats.avgScore}%</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <CheckCircle className="h-4 w-4" /> Тэнцсэн
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">
-              {displayStats.passCount}
-              <span className="ml-1 text-base font-normal text-muted-foreground">
-                / {displayStats.attempted}
-              </span>
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {displayStats.passRate}% тэнцсэн
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <UserX className="h-4 w-4" /> Өгөөгүй
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{displayStats.absent}</p>
-            {displayStats.timedOut > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Хугацаа дууссан: {displayStats.timedOut}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <UserCheck className="h-4 w-4" /> Чөлөөлсөн
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{displayStats.excused}</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {groups.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          <Link href={`/educator/exams/${examId}/results`}>
-            <Badge
-              variant={!groupFilter ? "default" : "outline"}
-              className="cursor-pointer"
-            >
-              Бүгд ({sessions.length})
-            </Badge>
-          </Link>
-          {groups.map((group) => {
-            const count = sessions.filter((session) =>
-              session.groups.some((studentGroup) => studentGroup.id === group.id)
-            ).length;
-
-            return (
-              <Link
-                key={group.id}
-                href={`/educator/exams/${examId}/results?group=${group.id}`}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        {groups.length > 0 && (
+          <div className="flex h-auto w-fit flex-wrap gap-1 rounded-full border border-slate-200/50 bg-[#F0EEEE] p-1">
+            <Link href={`/educator/exams/${examId}/results`}>
+              <Badge
+                variant="outline"
+                className={`h-auto cursor-pointer rounded-full border-none px-5 py-2 text-base transition-all ${!groupFilter
+                    ? "bg-white text-black shadow-sm"
+                    : "bg-transparent text-muted-foreground hover:bg-slate-200/50"
+                  }`}
               >
-                <Badge
-                  variant={groupFilter === group.id ? "default" : "outline"}
-                  className="cursor-pointer"
+                Бүгд ({sessions.length})
+              </Badge>
+            </Link>
+
+            {groups.map((group) => {
+              const count = sessions.filter((session) =>
+                session.groups.some((studentGroup) => studentGroup.id === group.id)
+              ).length;
+
+              const isActive = groupFilter === group.id;
+
+              return (
+                <Link
+                  key={group.id}
+                  href={`/educator/exams/${examId}/results?group=${group.id}`}
                 >
-                  {group.name} ({count})
-                </Badge>
-              </Link>
-            );
-          })}
-        </div>
-      )}
+                  <Badge
+                    variant="outline"
+                    className={`h-auto cursor-pointer rounded-full border-none px-5 py-2 text-base transition-all ${isActive
+                        ? "bg-white text-black shadow-sm"
+                        : "bg-transparent text-muted-foreground hover:bg-slate-200/50"
+                      }`}
+                  >
+                    {group.name} ({count})
+                  </Badge>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+
+        <Link href={`/educator/exams/${examId}/questions`}>
+          <Button className="h-11 rounded-full bg-[#5199F6] px-5 text-[15px] font-medium shadow-[0_14px_28px_-16px_rgba(81,153,246,0.8)] hover:bg-[#4389E4]">
+            Асуултууд харах
+          </Button>
+        </Link>
+      </div>
 
       {groupFilter && (
-        <div className="rounded-md border bg-muted/50 px-4 py-3 text-sm">
+        <div className="rounded-2xl border border-[#E8E8E8] bg-[#FBFBFB] px-4 py-3 text-sm text-[#6B7280]">
           Шүүж харж буй бүлэг дээр {displayStats.total} сурагч байна.
         </div>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(340px,0.95fr)]">
+      <div className="space-y-6">
+        <ResultsInsightsPanel
+          scopeLabel={scopeLabel}
+          passingScore={exam.passing_score}
+          totalCount={displayStats.total}
+          attemptedCount={displayStats.attempted}
+          questionCount={questions.length}
+          metrics={insights.metrics}
+          scoreDistribution={insights.scoreDistribution}
+          questionPerformance={insights.questionPerformance}
+          hardestQuestion={insights.hardestQuestion}
+          easiestQuestion={insights.easiestQuestion}
+          fullyMasteredQuestions={insights.fullyMasteredQuestions}
+        />
+
         <div>
           {filtered.length === 0 ? (
-            <Card className="rounded-[28px]">
+            <Card className="rounded-[28px] border border-[#ECECEC] shadow-[0_18px_44px_-28px_rgba(15,23,42,0.18)]">
               <CardContent className="py-10 text-center text-muted-foreground">
                 Оролцогч байхгүй байна.
               </CardContent>
             </Card>
           ) : (
-            <Card className="rounded-[28px]">
+            <Card className="overflow-hidden rounded-[28px] border border-[#ECECEC] shadow-[0_18px_44px_-28px_rgba(15,23,42,0.18)]">
               <CardContent className="overflow-x-auto p-0">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[880px] text-sm">
                   <thead>
-                    <tr className="border-b bg-muted/50">
-                      <th className="px-4 py-3 text-left font-medium">Сурагч</th>
-                      <th className="px-4 py-3 text-left font-medium">Бүлэг</th>
-                      <th className="px-4 py-3 text-right font-medium">Оноо</th>
-                      <th className="px-4 py-3 text-right font-medium">Хувь</th>
-                      <th className="px-4 py-3 text-center font-medium">Дүн</th>
-                      <th className="px-4 py-3 text-center font-medium">Төлөв</th>
-                      <th className="px-4 py-3 text-right font-medium">Үйлдэл</th>
+                    <tr className="border-b border-[#ECECEC] bg-[#FFFFFF]">
+                      <th className="px-5 py-4 text-left text-[15px] font-semibold text-[#111827]">
+                        Сурагчид
+                      </th>
+                      <th className="px-4 py-4 text-left text-[15px] font-semibold text-[#111827]">
+                        Бүлэг
+                      </th>
+                      <th className="px-4 py-4 text-left text-[15px] font-semibold text-[#111827]">
+                        Оноо
+                      </th>
+                      <th className="px-4 py-4 text-center text-[15px] font-semibold text-[#111827]">
+                        Дүн
+                      </th>
+                      <th className="px-4 py-4 text-center text-[15px] font-semibold text-[#111827]">
+                        Төлөв
+                      </th>
+                      <th className="px-5 py-4 text-right text-[15px] font-semibold text-[#111827]">
+                        Үйлдэл
+                      </th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="bg-white">
                     {filtered.map((session) => (
                       <tr
                         key={session.student_id}
-                        className="border-b last:border-0 hover:bg-muted/30"
+                        className="border-b border-[#F0F0F0] transition-colors hover:bg-[#FAFAFA]"
                       >
-                        <td className="px-4 py-3">
+                        <td className="px-5 py-4">
                           <StudentIdentity
                             name={session.student_name}
                             email={session.student_email}
@@ -578,14 +560,14 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
                             size="sm"
                           />
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-4 text-[15px] text-[#374151]">
                           <div className="flex flex-wrap gap-1">
                             {session.groups.length > 0 ? (
                               session.groups.map((group) => (
                                 <Badge
                                   key={group.id}
                                   variant="outline"
-                                  className="text-xs"
+                                  className="h-auto rounded-full border-none bg-transparent px-0 py-0 text-[15px] font-medium text-[#374151] shadow-none"
                                 >
                                   {group.name}
                                 </Badge>
@@ -595,28 +577,24 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-right font-mono">
-                          {getScoreText(session.total_score, session.max_score)}
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono font-medium">
+                        <td className="px-4 py-4 text-[15px] font-medium text-[#374151]">
                           {session.percentage === null ? "—" : `${session.percentage}%`}
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-4 py-4 text-center">
                           {session.percentage === null ? (
                             <span className="text-muted-foreground">—</span>
                           ) : (
-                            <Badge
-                              variant={session.passed ? "secondary" : "outline"}
-                            >
-                              {session.passed ? "Тэнцсэн" : "Тэнцээгүй"}
-                            </Badge>
+                            getResultBadge(session.passed)
                           )}
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-4 py-4 text-center">
                           <div className="flex flex-col items-center gap-1">
                             {getStatusBadge(session.status, session.status_label)}
                             {session.has_retake_override && (
-                              <Badge variant="outline" className="text-xs">
+                              <Badge
+                                variant="outline"
+                                className="h-auto rounded-full border-[#E5D4FF] bg-[#F8F3FF] px-3 py-1 text-xs text-[#7E5DB0]"
+                              >
                                 Нөхөн эрхтэй
                               </Badge>
                             )}
@@ -632,7 +610,7 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-5 py-4">
                           <div className="flex justify-end">
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
@@ -640,7 +618,7 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
                                   type="button"
                                   variant="outline"
                                   size="sm"
-                                  className="rounded-full"
+                                  className="rounded-full border-[#E5E7EB] bg-white px-4 text-[#374151] hover:bg-[#F8FAFC]"
                                 >
                                   Үйлдэл
                                   <ChevronDown className="ml-2 h-4 w-4" />
@@ -752,20 +730,6 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
             </Card>
           )}
         </div>
-
-        <ResultsInsightsPanel
-          scopeLabel={scopeLabel}
-          passingScore={exam.passing_score}
-          totalCount={displayStats.total}
-          attemptedCount={displayStats.attempted}
-          questionCount={questions.length}
-          metrics={insights.metrics}
-          scoreDistribution={insights.scoreDistribution}
-          questionPerformance={insights.questionPerformance}
-          hardestQuestion={insights.hardestQuestion}
-          easiestQuestion={insights.easiestQuestion}
-          fullyMasteredQuestions={insights.fullyMasteredQuestions}
-        />
       </div>
     </div>
   );

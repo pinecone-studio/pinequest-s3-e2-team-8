@@ -190,7 +190,7 @@ export default async function EducatorDashboard() {
   const dateLabel = `${Number(month)} сарын ${Number(day)}`;
 
   return (
-    <div className="flex flex-col gap-7.5">
+    <div className="flex flex-col gap-7.5 mb-18">
       <div className="grid gap-4 py-2 md:grid-cols-3">
         <StatCard
           label="Нийт жишиг даалгаврууд"

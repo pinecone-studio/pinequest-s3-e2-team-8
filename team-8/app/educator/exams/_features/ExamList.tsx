@@ -314,14 +314,14 @@ export default function ExamList({ exams }: Props) {
             return (
               <section
                 key={columnKey}
-                className="rounded-[28px] border border-[#E6EDF7] bg-[linear-gradient(180deg,#FDFEFF_0%,#F7FAFF_100%)] p-3.5 shadow-[0_16px_34px_rgba(146,166,194,0.18)]"
+                className="rounded-[28px] border border-[#E6EDF7] bg-[linear-gradient(180deg,#FDFEFF_0%,#F7FAFF_100%)] p-4 "
               >
-                <div className="flex items-center gap-2 px-2 pb-3">
+                <div className="flex items-center gap-2 px-2 pb-4">
                   <span
                     aria-hidden="true"
                     className={`h-2.5 w-2.5 rounded-full ${meta.dotClassName}`}
                   />
-                  <h3 className="text-[14px] font-semibold leading-none text-[#2C3444]">
+                  <h3 className="text-[15px] font-semibold leading-none text-[#2C3444]">
                     {meta.title}
                     <span className="ml-1 font-medium text-[#75829B]">
                       ({items.length})
@@ -329,7 +329,7 @@ export default function ExamList({ exams }: Props) {
                   </h3>
                 </div>
 
-                <div className="space-y-3 xl:max-h-[840px] xl:overflow-y-auto xl:pr-1">
+                <div className="space-y-4 xl:max-h-[840px] xl:overflow-y-auto xl:pr-1">
                   {items.length === 0 ? (
                     <div className="rounded-[22px] border border-dashed border-[#D9E3F2] bg-white/75 px-4 py-10 text-center text-[13px] text-[#8A95A8]">
                       {meta.emptyMessage}
@@ -346,7 +346,7 @@ export default function ExamList({ exams }: Props) {
                       return (
                         <article
                           key={exam.id}
-                          className="group relative rounded-[22px] border border-[#E6EDF7] bg-white px-4 py-3.5 shadow-[0_10px_24px_rgba(143,164,195,0.16)]"
+                          className="group relative rounded-[22px] border border-[#E6EDF7] bg-white px-4 py-3.5 shadow-sm"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <span
@@ -426,7 +426,7 @@ export default function ExamList({ exams }: Props) {
                             </DropdownMenu>
                           </div>
 
-                          <Link href={cardHref} className="mt-3 block">
+                          <Link href={cardHref} className="mt-2 block">
                             <h4 className="line-clamp-2 text-[15px] font-semibold leading-[1.45] text-[#232B39] transition-colors hover:text-[#3B82F6]">
                               {exam.title}
                             </h4>
@@ -440,10 +440,10 @@ export default function ExamList({ exams }: Props) {
                             <div className="mt-4">
                               <Link
                                 href={cardHref}
-                                className="inline-flex h-7 items-center gap-1.5 rounded-full border border-[#E3E7EF] bg-[#FAFBFD] px-3 text-[11px] font-medium text-[#313C4D] shadow-[0_4px_12px_rgba(162,175,194,0.14)] transition hover:bg-white"
+                                className="inline-flex h-7 items-center gap-1.5 rounded-full border border-[#BDBDBD] bg-[#FAFAFA] px-3 py-2 text-[12px] font-medium text-[#313C4D] shadow-[0_4px_12px_rgba(162,175,194,0.14)] transition hover:bg-white"
                               >
                                 <Eye className="h-3.5 w-3.5" />
-                                Үзэх
+                                Дүнгийн мэдээлэл
                               </Link>
                             </div>
                           ) : null}
@@ -452,7 +452,7 @@ export default function ExamList({ exams }: Props) {
                             <div className="mt-4">
                               <Link
                                 href={cardHref}
-                                className="inline-flex h-7 items-center rounded-full bg-[#66C36D] px-3.5 text-[11px] font-semibold text-white shadow-[0_8px_16px_rgba(102,195,109,0.26)] transition hover:bg-[#57B95E]"
+                                className="inline-flex h-7 items-center rounded-full bg-[#66C36D] px-5.5 py-2 text-[12px] font-semibold text-white shadow-[0_8px_16px_rgba(102,195,109,0.26)] transition hover:bg-[#57B95E]"
                               >
                                 Ашиглах
                               </Link>
@@ -460,7 +460,7 @@ export default function ExamList({ exams }: Props) {
                           ) : null}
 
                           {columnKey === "pending" ? (
-                            <p className="mt-3 text-[11px] font-medium text-[#8693A7]">
+                            <p className="mt-2 text-[11px] font-medium text-[#8693A7]">
                               {lifecycle.label || STATUS_LABELS.published}
                             </p>
                           ) : null}

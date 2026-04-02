@@ -38,20 +38,22 @@ export default function Header({ profile }: { profile: Profile }) {
   const subjectId = searchParams.get("subjectId");
 
   const isExamsPage = pathname === "/educator/exams";
+  const isExamResultsPage =
+    pathname?.startsWith("/educator/exams/") && pathname?.endsWith("/results");
   const isExamBuilderPage =
     pathname === "/educator/create-exam" ||
     (pathname?.startsWith("/educator/exams/") && pathname?.endsWith("/edit"));
-  const hideEntireHeader =
-    pathname?.startsWith("/educator/exams/") && pathname?.endsWith("/results");
 
   const hideGreeting =
     isExamsPage ||
+    isExamResultsPage ||
     isExamBuilderPage ||
     pathname === "/educator/groups" ||
     pathname?.startsWith("/educator/question-bank") ||
     pathname?.startsWith("/educator/grading");
 
   const showGroupsBackLink = pathname?.startsWith("/educator/groups/");
+  const showExamResultsBackLink = isExamResultsPage;
   const showDashboardBackLink =
     pathname?.startsWith("/educator/grading") ||
     pathname === "/educator/question-bank/ai-create";
@@ -62,10 +64,6 @@ export default function Header({ profile }: { profile: Profile }) {
   )
     ? "/educator/question-bank/private"
     : "/educator/question-bank";
-
-  if (hideEntireHeader) {
-    return null;
-  }
 
   const headerHeightClass = isExamBuilderPage
     ? "h-[40px] py-0"
@@ -78,10 +76,12 @@ export default function Header({ profile }: { profile: Profile }) {
       className={`flex flex-col gap-5 sm:flex-row sm:items-center ${headerHeightClass} ${
         hideGreeting &&
         !showGroupsBackLink &&
+        !showExamResultsBackLink &&
         !showQuestionBankBackLink &&
         !showDashboardBackLink
           ? "sm:justify-end"
           : showGroupsBackLink ||
+              showExamResultsBackLink ||
               showQuestionBankBackLink ||
               showDashboardBackLink
             ? "sm:justify-start"
@@ -96,6 +96,16 @@ export default function Header({ profile }: { profile: Profile }) {
           <div className="flex items-center gap-1 text-[#030217]">
             <ArrowLeft size={16} />
             Ангиуд руу буцах
+          </div>
+        </Link>
+      ) : showExamResultsBackLink ? (
+        <Link
+          href="/educator/exams"
+          className="text-[15px] font-medium text-[#111111] hover:text-[#1f2937]"
+        >
+          <div className="flex items-center gap-1 text-[#030217]">
+            <ArrowLeft size={16} />
+            Шалгалтууд руу буцах
           </div>
         </Link>
       ) : showDashboardBackLink ? (
@@ -131,7 +141,10 @@ export default function Header({ profile }: { profile: Profile }) {
 
       <div
         className={`flex h-[40px] w-[100px] items-center justify-end gap-[20px] self-end sm:self-auto ${
-          showGroupsBackLink || showQuestionBankBackLink || showDashboardBackLink
+          showGroupsBackLink ||
+          showExamResultsBackLink ||
+          showQuestionBankBackLink ||
+          showDashboardBackLink
             ? "sm:ml-auto"
             : ""
         }`}

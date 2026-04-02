@@ -19,7 +19,7 @@ export default async function EducatorLayout({
     <div className="min-h-screen bg-zinc-50 text-zinc-900">
       <div className="flex min-h-screen">
         <Sidebar />
-        <EducatorShell profile={profile}>{children}</EducatorShell>
+        <EducatorShell profile={profile} >{children}</EducatorShell>
       </div>
     </div>
   );
