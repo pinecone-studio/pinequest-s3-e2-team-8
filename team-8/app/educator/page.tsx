@@ -124,14 +124,17 @@ function CreateQuestionPreview() {
 
 function GradeAnswerPreview() {
   return (
-    <div className="relative mt-4 h-[253px] w-full overflow-hidden rounded-[18px] bg-[#eaf3ff] p-4">
-      <Image
-        src="/rate.svg"
-        alt="Rate"
-        fill
-        className="object-contain"
-        priority
-      />
+    <div className="relative mt-4 h-[253px] w-full overflow-hidden rounded-[18px] bg-gradient-to-b from-[#eaf3ff] via-[#fafafa] to-white flex justify-center items-center">
+     <div className="relative w-111 h-70">
+  <Image
+    src="/pen-dash.svg"
+    alt="Rate"
+    fill
+    className="object-contain"
+    priority
+  />
+</div>
+     
       <QuickActionButton
         href="/educator/grading"
         label="Шалгалт засаж эхлэх"
