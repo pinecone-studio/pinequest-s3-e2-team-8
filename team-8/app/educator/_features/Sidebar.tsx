@@ -88,26 +88,43 @@ const allNavItems: NavItem[] = [
 export default function Sidebar() {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const widthClass = isCollapsed ? "w-[70px]" : "w-[260px]";
+
+  const isExamBuilderRoute =
+    pathname === "/educator/create-exam" ||
+    (pathname?.startsWith("/educator/exams/") && pathname?.endsWith("/edit"));
+  const collapsed = isCollapsed || isExamBuilderRoute;
+  const widthClass = isExamBuilderRoute
+    ? "w-[54px]"
+    : collapsed
+      ? "w-[70px]"
+      : "w-[260px]";
 
   return (
     <>
       <div className={`shrink-0 transition-all duration-200 ${widthClass}`} />
       <aside
         className={`fixed inset-y-0 left-0 z-30 flex h-screen flex-col justify-between overflow-y-auto bg-white pt-6 shadow-xl transition-all duration-200 ${
-          isCollapsed ? "px-2" : "px-4"
+          isExamBuilderRoute ? "px-1.5" : collapsed ? "px-2" : "px-4"
         } ${widthClass}`}
       >
         <div className="flex flex-col gap-6">
-          <div className="flex items-start justify-between">
-            {!isCollapsed ? <Logo /> : <div className="h-6 w-6" />}
+          <div
+            className={`flex items-start ${
+              collapsed ? "justify-center" : "justify-between"
+            }`}
+          >
+            {!collapsed ? <Logo /> : null}
             <button
               type="button"
-              aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              onClick={() => setIsCollapsed((prev) => !prev)}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={() => {
+                if (!isExamBuilderRoute) {
+                  setIsCollapsed((prev) => !prev);
+                }
+              }}
               className="rounded-lg p-1 text-gray-600 transition-colors hover:text-brand"
             >
-              {isCollapsed ? (
+              {collapsed ? (
                 <ChevronLeft size={28} className="rotate-180" />
               ) : (
                 <CloseNavIcon className="h-[18px] w-[18px] text-[#3f3f3f]" />
@@ -125,11 +142,12 @@ export default function Sidebar() {
                 <Link
                   key={item.href}
                   href={item.href}
+                  title={collapsed ? item.label : undefined}
                   className={`group flex min-h-[48px] items-center rounded-[12px] px-[16px] py-[11px] text-[15px] font-medium transition-all duration-200 ${
                     isActive
                       ? "border-2 border-[#4A80D8] bg-[#EDF4FF] text-[#4A80D8]"
                       : "text-[#757575] hover:bg-[#F7F9FC] hover:text-[#4A80D8]"
-                  } ${isCollapsed ? "justify-center gap-0 px-3" : "gap-[14px]"}`}
+                  } ${collapsed ? "justify-center gap-0 px-3" : "gap-[14px]"}`}
                 >
                   <SidebarItemIcon
                     iconPath={item.iconPath}
@@ -139,7 +157,7 @@ export default function Sidebar() {
                         : "text-[#666666] group-hover:text-[#4A80D8]"
                     }`}
                   />
-                  {!isCollapsed && <span>{item.label}</span>}
+                  {!collapsed && <span>{item.label}</span>}
                 </Link>
               );
             })}
@@ -151,12 +169,13 @@ export default function Sidebar() {
             <button
               type="submit"
               className={`group flex cursor-pointer items-center gap-3 rounded-md transition-colors hover:text-brand ${
-                isCollapsed ? "justify-center pl-4 pb-4" : "pl-3"
+                collapsed ? "justify-center pl-4 pb-4" : "pl-3"
               }`}
               aria-label="Гарах"
+              title={collapsed ? "Гарах" : undefined}
             >
               <LogOut className="h-7 w-7" />
-              {!isCollapsed && (
+              {!collapsed && (
                 <p className="text-[15px] font-semibold text-[#7F7F7F] group-hover:text-brand">
                   Гарах
                 </p>
@@ -164,7 +183,7 @@ export default function Sidebar() {
             </button>
           </form>
 
-          {!isCollapsed && <SideBarImage />}
+          {!collapsed && <SideBarImage />}
         </div>
       </aside>
     </>

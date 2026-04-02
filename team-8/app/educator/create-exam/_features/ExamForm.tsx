@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -9,9 +10,9 @@ import {
   BookOpen,
   CalendarDays,
   Check,
-  ChevronRight,
+  ChevronDown,
+  NotebookPen,
   Settings,
-  Users,
 } from "lucide-react";
 import { createExam, updateExam } from "@/lib/exam/actions";
 import {
@@ -29,6 +30,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { parseUlaanbaatarDateTime } from "@/lib/utils/date";
 import { cn } from "@/lib/utils";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -78,14 +84,26 @@ interface ExamFormProps {
   initialError?: string | null;
 }
 
-const steps: Array<{
+type VisualStep = {
   title: string;
   icon: LucideIcon;
-}> = [
-  { title: "Үндсэн мэдээлэл", icon: BookOpen },
-  { title: "Хуваарь", icon: CalendarDays },
-  { title: "Тохиргоо", icon: Settings },
+  interactive: boolean;
+};
+
+const visualSteps: VisualStep[] = [
+  { title: "Үндсэн мэдээлэл", icon: BookOpen, interactive: true },
+  { title: "Хуваарь", icon: CalendarDays, interactive: true },
+  { title: "Тохиргоо", icon: Settings, interactive: true },
+  { title: "Асуулт нэмэх", icon: NotebookPen, interactive: false },
 ];
+
+const tagColors = [
+  { id: "red", className: "bg-[#F44E3B]" },
+  { id: "green", className: "bg-[#4CAF50]" },
+  { id: "yellow", className: "bg-[#F9B233]" },
+  { id: "blue", className: "bg-[#38A3FF]" },
+  { id: "gray", className: "bg-[#9CA3AF]" },
+] as const;
 
 function formatGroupTypeLabel(groupType: string) {
   if (groupType === "class") return "Анги";
@@ -94,7 +112,7 @@ function formatGroupTypeLabel(groupType: string) {
   return groupType;
 }
 
-function Stepper({
+function StepRail({
   currentStep,
   onStepClick,
 }: {
@@ -102,54 +120,146 @@ function Stepper({
   onStepClick: (stepIndex: number) => void;
 }) {
   return (
-    <div className="mb-8 flex flex-wrap items-center gap-y-4">
-      {steps.map((step, index) => {
-        const Icon = step.icon;
-        const active = currentStep === index;
-        const completed = currentStep > index;
+    <div className="relative w-full max-w-[187px] pt-1">
+      <div className="absolute bottom-[18px] left-[15px] top-[18px] w-px bg-[#C7D3E5]" />
 
-        return (
-          <Fragment key={step.title}>
+      <div className="flex flex-col gap-[56px]">
+        {visualSteps.map((step, index) => {
+          const active = currentStep === index;
+          const completed = currentStep > index;
+          const clickable = step.interactive;
+
+          return (
             <button
+              key={step.title}
               type="button"
-              onClick={() => onStepClick(index)}
-              className="flex items-center gap-3 text-left"
+              onClick={() => clickable && onStepClick(index)}
+              disabled={!clickable}
+              className={cn(
+                "relative flex w-full items-center gap-4 text-left",
+                clickable ? "cursor-pointer" : "cursor-default",
+              )}
             >
               <span
                 className={cn(
-                  "flex h-12 w-12 items-center justify-center rounded-full border transition-colors",
-                  active
-                    ? "border-zinc-950 bg-zinc-950 text-white"
-                    : completed
-                      ? "border-zinc-950 bg-white text-zinc-950"
-                      : "border-zinc-300 bg-white text-zinc-400"
+                  "relative z-10 flex h-[31px] w-[31px] shrink-0 items-center justify-center rounded-full border transition-colors",
+                  active || completed
+                    ? "border-[#3F4F97] bg-[#3F4F97] text-white"
+                    : "border-[#D7E1F0] bg-white text-[#7C8BA4]",
                 )}
               >
-                {completed ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                  <Icon className="h-4 w-4" />
-                )}
+                <Check className="h-4 w-4" strokeWidth={2.8} />
               </span>
+
               <span
                 className={cn(
-                  "text-sm font-medium",
-                  active || completed ? "text-zinc-950" : "text-zinc-500"
+                  "text-[14px] font-medium whitespace-nowrap",
+                  active || completed ? "text-[#111827]" : "text-[#6B7280]",
                 )}
               >
                 {step.title}
               </span>
             </button>
-
-            {index < steps.length - 1 ? (
-              <div className="mx-4 hidden items-center text-zinc-300 md:flex">
-                <ChevronRight className="h-5 w-5" />
-              </div>
-            ) : null}
-          </Fragment>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
+  );
+}
+
+function GroupMultiSelectField({
+  subjectId,
+  availableGroups,
+  selectedGroupIds,
+  onToggleGroup,
+}: {
+  subjectId: string;
+  availableGroups: GroupOption[];
+  selectedGroupIds: string[];
+  onToggleGroup: (groupId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const selectedGroups = availableGroups.filter((group) =>
+    selectedGroupIds.includes(group.id),
+  );
+
+  const triggerText =
+    subjectId === "__none"
+      ? "Эхлээд хичээлээ сонгоод дараа нь анги бүлгээ сонгоно уу."
+      : selectedGroups.length > 0
+        ? selectedGroups.map((group) => group.name).join(", ")
+        : "Эхлээд хичээлээ сонгоод дараа нь анги бүлгээ сонгоно уу.";
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="flex h-[48px] w-full items-center justify-between rounded-[16px] border border-[#E2E8F0] bg-white px-4 text-left text-[14px] text-[#111827] shadow-[0_1px_2px_rgba(15,23,42,0.02)] outline-none transition focus-visible:ring-2 focus-visible:ring-[#B7D4FF]"
+        >
+          <span
+            className={cn(
+              "truncate",
+              selectedGroups.length === 0 ? "text-[#9CA3AF]" : "text-[#111827]",
+            )}
+          >
+            {triggerText}
+          </span>
+          <ChevronDown className="h-4 w-4 text-[#6B7280]" />
+        </button>
+      </PopoverTrigger>
+
+      <PopoverContent
+        align="start"
+        className="w-[640px] max-w-[90vw] rounded-[18px] border border-[#E2E8F0] p-2 shadow-[0_16px_30px_rgba(148,163,184,0.18)]"
+      >
+        {availableGroups.length === 0 ? (
+          <div className="rounded-[14px] px-4 py-5 text-[14px] text-[#6B7280]">
+            Энэ хичээлд тохирох бүлэг одоогоор алга байна.
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            {availableGroups.map((group) => {
+              const selected = selectedGroupIds.includes(group.id);
+
+              return (
+                <button
+                  key={group.id}
+                  type="button"
+                  onClick={() => onToggleGroup(group.id)}
+                  className={cn(
+                    "flex items-center justify-between rounded-[14px] border px-4 py-3 text-left transition",
+                    selected
+                      ? "border-[#4D97F8] bg-[#EDF5FF]"
+                      : "border-[#E5E7EB] bg-white hover:border-[#C7D2E3] hover:bg-[#FAFCFF]",
+                  )}
+                >
+                  <div>
+                    <p className="text-[14px] font-medium text-[#111827]">
+                      {group.name}
+                    </p>
+                    <p className="mt-1 text-[12px] text-[#6B7280]">
+                      {formatGroupTypeLabel(group.group_type)}
+                    </p>
+                  </div>
+                  <span
+                    className={cn(
+                      "flex h-5 w-5 items-center justify-center rounded-full border",
+                      selected
+                        ? "border-[#4D97F8] bg-[#4D97F8] text-white"
+                        : "border-[#D1D5DB] bg-white text-transparent",
+                    )}
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -164,6 +274,8 @@ function BasicInfoSection({
   onTitleChange,
   descriptionValue,
   onDescriptionChange,
+  tagColor,
+  onTagColorChange,
 }: {
   subjects: SubjectOption[];
   subjectId: string;
@@ -175,12 +287,17 @@ function BasicInfoSection({
   onTitleChange: (value: string) => void;
   descriptionValue: string;
   onDescriptionChange: (value: string) => void;
+  tagColor: (typeof tagColors)[number]["id"];
+  onTagColorChange: (value: (typeof tagColors)[number]["id"]) => void;
 }) {
   return (
-    <div className="rounded-[28px] border border-zinc-100 bg-white p-6 shadow-[0_12px_40px_-18px_rgba(15,23,42,0.16)] md:p-8">
-      <div className="space-y-6">
-        <div className="space-y-2.5">
-          <Label htmlFor="title" className="text-sm font-semibold text-zinc-950">
+    <div className="h-full rounded-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_16px_30px_rgba(148,163,184,0.15)] sm:p-5">
+      <div className="flex h-full flex-col justify-between space-y-4">
+        <div className="space-y-2">
+          <Label
+            htmlFor="title"
+            className="text-[14px] font-semibold text-[#111827]"
+          >
             Шалгалтын нэр
           </Label>
           <Input
@@ -189,17 +306,19 @@ function BasicInfoSection({
             value={titleValue}
             onChange={(event) => onTitleChange(event.target.value)}
             placeholder="Жишээ: Математик - Хагас жилийн шалгалт"
-            className="h-12 rounded-2xl border-zinc-200 bg-white px-4 text-sm shadow-none placeholder:text-zinc-400 focus-visible:ring-zinc-200"
+            className="h-[48px] rounded-[16px] border-[#E2E8F0] bg-white px-4 text-[14px] shadow-none placeholder:text-[#9CA3AF] focus-visible:ring-[#B7D4FF]"
           />
         </div>
 
-        <div className="space-y-2.5">
-          <Label className="text-sm font-semibold text-zinc-950">Хичээл</Label>
+        <div className="space-y-2">
+          <Label className="text-[14px] font-semibold text-[#111827]">
+            Хичээл
+          </Label>
           <Select value={subjectId} onValueChange={onSubjectChange}>
-            <SelectTrigger className="h-12 w-full rounded-2xl border-zinc-200 bg-white px-4 text-sm shadow-none focus-visible:ring-zinc-200">
-              <SelectValue placeholder="Хичээл сонгох" />
+            <SelectTrigger className="h-[48px] w-full rounded-[16px] border-[#E2E8F0] bg-white px-4 text-[14px] shadow-none focus-visible:ring-[#B7D4FF]">
+              <SelectValue placeholder="Сонгоогүй" />
             </SelectTrigger>
-            <SelectContent className="rounded-2xl border border-zinc-200 bg-white shadow-xl shadow-black/8">
+            <SelectContent className="rounded-[16px] border border-[#E2E8F0] bg-white shadow-[0_16px_30px_rgba(148,163,184,0.18)]">
               <SelectItem value="__none">Сонгоогүй</SelectItem>
               {subjects.map((subject) => (
                 <SelectItem key={subject.id} value={subject.id}>
@@ -215,66 +334,74 @@ function BasicInfoSection({
           />
         </div>
 
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 text-zinc-950">
-            <Users className="h-4 w-4" />
-            <Label className="text-sm font-semibold">Оноох анги / бүлгүүд</Label>
-          </div>
+        <div className="space-y-2">
+          <Label className="text-[14px] font-semibold text-[#111827]">
+            Оноох анги/Бүлгүүд
+          </Label>
 
           {selectedGroupIds.map((groupId) => (
             <input key={groupId} type="hidden" name="group_ids" value={groupId} />
           ))}
 
-          {subjectId === "__none" ? (
-            <div className="rounded-2xl border border-dashed border-zinc-300 px-4 py-4 text-sm text-zinc-500">
-              Эхлээд хичээлээ сонгоод, дараа нь анги бүлгээ сонгоно уу.
-            </div>
-          ) : availableGroups.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-zinc-300 px-4 py-4 text-sm text-zinc-500">
-              Энэ хичээлд тохирох бүлэг одоогоор алга байна.
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-3">
-              {availableGroups.map((group) => {
-                const selected = selectedGroupIds.includes(group.id);
-
-                return (
-                  <button
-                    key={group.id}
-                    type="button"
-                    onClick={() => onToggleGroup(group.id)}
-                    className={cn(
-                      "rounded-2xl border px-4 py-2.5 text-sm transition-colors",
-                      selected
-                        ? "border-zinc-950 bg-zinc-950 text-white"
-                        : "border-zinc-200 bg-white text-zinc-950 hover:border-zinc-400 hover:bg-zinc-50"
-                    )}
-                    title={formatGroupTypeLabel(group.group_type)}
-                  >
-                    {group.name}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <GroupMultiSelectField
+            subjectId={subjectId}
+            availableGroups={availableGroups}
+            selectedGroupIds={selectedGroupIds}
+            onToggleGroup={onToggleGroup}
+          />
         </div>
 
-        <div className="space-y-2.5">
+        <div className="space-y-2">
           <Label
             htmlFor="description"
-            className="text-sm font-semibold text-zinc-950"
+            className="text-[14px] font-semibold text-[#111827]"
           >
-            Тайлбар (заавал биш)
+            Тайлбар (заавал биш )
           </Label>
           <Textarea
             id="description"
             name="description"
             value={descriptionValue}
             onChange={(event) => onDescriptionChange(event.target.value)}
-            placeholder="Шалгалтын тухай товч тайлбар..."
-            rows={4}
-            className="rounded-2xl border-zinc-200 bg-white px-4 py-3 text-sm shadow-none placeholder:text-zinc-400 focus-visible:ring-zinc-200"
+            placeholder="Шалгалтын тухай товч тайлбар"
+            rows={3}
+            className="min-h-[64px] rounded-[16px] border-[#E2E8F0] bg-white px-4 py-3 text-[14px] shadow-none placeholder:text-[#9CA3AF] focus-visible:ring-[#B7D4FF]"
           />
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-[14px] font-semibold text-[#111827]">
+            Шошгоны өнгө
+          </Label>
+          <input type="hidden" name="accent_color" value={tagColor} />
+          <div className="flex justify-end gap-2.5">
+            {tagColors.map((color) => {
+              const active = color.id === tagColor;
+
+              return (
+                <button
+                  key={color.id}
+                  type="button"
+                  onClick={() => onTagColorChange(color.id)}
+                  aria-label={`${color.id} өнгө`}
+                  className="relative"
+                >
+                  <span
+                    className={cn(
+                      "block h-4 w-4 rounded-full transition-transform",
+                      color.className,
+                      active ? "scale-110" : "",
+                    )}
+                  />
+                  {active ? (
+                    <span className="absolute inset-0 flex items-center justify-center text-white">
+                      <Check className="h-3 w-3" strokeWidth={3} />
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
@@ -309,18 +436,22 @@ export default function ExamForm({
 }: ExamFormProps) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
+  const allowFinalSubmitRef = useRef(false);
   const [error, setError] = useState<string | null>(initialError);
   const [loading, setLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(
-    Math.min(Math.max(initialStep, 0), steps.length - 1)
+    Math.min(Math.max(initialStep, 0), 2),
   );
   const [subjectId, setSubjectId] = useState(initialSubjectId ?? "__none");
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(
-    initialGroupIds
+    initialGroupIds,
   );
   const [titleValue, setTitleValue] = useState(initialTitle);
   const [descriptionValue, setDescriptionValue] = useState(initialDescription);
-  const isFinalStep = currentStep === steps.length - 1;
+  const [tagColor, setTagColor] =
+    useState<(typeof tagColors)[number]["id"]>("yellow");
+
+  const isFinalStep = currentStep === 2;
 
   useEffect(() => {
     setError(initialError);
@@ -331,7 +462,7 @@ export default function ExamForm({
     return groups.filter(
       (group) =>
         group.allowed_subject_ids.length === 0 ||
-        group.allowed_subject_ids.includes(nextSubjectId)
+        group.allowed_subject_ids.includes(nextSubjectId),
     );
   }
 
@@ -341,7 +472,7 @@ export default function ExamForm({
     const nextGroups = getGroupsForSubject(nextSubjectId);
     setSubjectId(nextSubjectId);
     setSelectedGroupIds((prev) =>
-      prev.filter((groupId) => nextGroups.some((group) => group.id === groupId))
+      prev.filter((groupId) => nextGroups.some((group) => group.id === groupId)),
     );
   }
 
@@ -349,8 +480,21 @@ export default function ExamForm({
     setSelectedGroupIds((prev) =>
       prev.includes(groupId)
         ? prev.filter((id) => id !== groupId)
-        : [...prev, groupId]
+        : [...prev, groupId],
     );
+  }
+
+  function handleScheduleChange({
+    isValid,
+  }: {
+    startTime: string;
+    endTime: string;
+    durationMinutes: string;
+    isValid: boolean;
+  }) {
+    if (!isValid || currentStep !== 1 || !error) return;
+
+    setError(null);
   }
 
   function getFieldValue(name: string) {
@@ -386,8 +530,10 @@ export default function ExamForm({
         return false;
       }
 
-      const startMs = parseUlaanbaatarDateTime(startTime)?.getTime() ?? Number.NaN;
-      const endMs = parseUlaanbaatarDateTime(endTime)?.getTime() ?? Number.NaN;
+      const startMs =
+        parseUlaanbaatarDateTime(startTime)?.getTime() ?? Number.NaN;
+      const endMs =
+        parseUlaanbaatarDateTime(endTime)?.getTime() ?? Number.NaN;
 
       if (Number.isNaN(startMs) || Number.isNaN(endMs) || startMs >= endMs) {
         setError("Хаагдах хугацаа нээгдэх хугацаанаас хойш байх ёстой.");
@@ -410,13 +556,21 @@ export default function ExamForm({
       return;
     }
 
-    for (let stepIndex = currentStep; stepIndex < targetStep; stepIndex += 1) {
+    const safeTarget = Math.min(targetStep, 2);
+    for (let stepIndex = currentStep; stepIndex < safeTarget; stepIndex += 1) {
       if (!validateStep(stepIndex)) {
         return;
       }
     }
 
-    setCurrentStep(targetStep);
+    setCurrentStep(safeTarget);
+  }
+
+  function submitFinalStep() {
+    if (loading) return;
+
+    allowFinalSubmitRef.current = true;
+    formRef.current?.requestSubmit();
   }
 
   async function handleSubmit(formData: FormData) {
@@ -440,42 +594,52 @@ export default function ExamForm({
     }
   }
 
-  const pageTitle =
-    mode === "edit" ? "Шалгалтын мэдээлэл" : "Шалгалт үүсгэх";
-  const pageDescription =
-    mode === "edit"
-      ? "Шалгалтын мэдээллээ шинэчлэнэ үү"
-      : "Шинэ шалгалтын тохиргоог оруулна уу";
-  const finalButtonLabel =
-    mode === "edit" ? "Хадгалаад буцах" : "Асуулт нэмэх";
-  const finalLoadingText =
-    mode === "edit" ? "Хадгалж байна..." : "Үүсгэж байна...";
+  const pageTitle = "Шалгалтын мэдээлэл";
+  const finalButtonLabel = "Үргэлжлүүлэх";
+  const finalLoadingText = "Шилжүүлж байна...";
 
   return (
-    <div className="mx-auto max-w-5xl px-2 md:px-4">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold tracking-tight text-zinc-950 md:text-3xl">
-          {pageTitle}
-        </h1>
-        <p className="mt-2 text-sm text-zinc-500 md:text-base">
-          {pageDescription}
-        </p>
+    <div className="flex w-full max-w-[1240px] flex-col gap-[30px] lg:h-[714px]">
+      <div className="shrink-0">
+        <Link
+          href="/educator/exams"
+          className="inline-flex items-center gap-2 text-[13px] font-medium text-[#334155] transition hover:text-[#111827]"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Шалгалтууд руу буцах
+        </Link>
       </div>
 
-      <Stepper currentStep={currentStep} onStepClick={moveToStep} />
+      <h1 className="shrink-0 text-[18px] font-semibold text-[#111827] md:text-[20px]">
+        {pageTitle}
+      </h1>
+
+      {error ? (
+        <div className="-mt-3 rounded-[16px] border border-[#F6C8CF] bg-[#FFF5F6] px-4 py-3 text-sm text-[#A33C48]">
+          {error}
+        </div>
+      ) : null}
 
       <form
         ref={formRef}
         action={handleSubmit}
-        className="space-y-8"
+        className="flex min-h-0 flex-1 flex-col lg:h-[587px] lg:flex-none"
         onSubmit={(event) => {
           if (!isFinalStep) {
             event.preventDefault();
             moveToStep(currentStep + 1);
+            return;
           }
+
+          if (!allowFinalSubmitRef.current) {
+            event.preventDefault();
+            return;
+          }
+
+          allowFinalSubmitRef.current = false;
         }}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && currentStep < steps.length - 1) {
+          if (event.key === "Enter" && currentStep < 2) {
             const target = event.target as HTMLElement;
             if (target.tagName !== "TEXTAREA") {
               event.preventDefault();
@@ -483,87 +647,91 @@ export default function ExamForm({
           }
         }}
       >
-        {error ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
+        <div className="grid min-h-0 flex-1 gap-6 lg:h-[587px] lg:grid-cols-[187px_1029px] lg:items-start">
+          <div className="self-start lg:w-[187px]">
+            <StepRail currentStep={currentStep} onStepClick={moveToStep} />
           </div>
-        ) : null}
 
-        <div className={currentStep === 0 ? "block" : "hidden"}>
-          <BasicInfoSection
-            subjects={subjects}
-            subjectId={subjectId}
-            onSubjectChange={handleSubjectChange}
-            availableGroups={availableGroups}
-            selectedGroupIds={selectedGroupIds}
-            onToggleGroup={toggleGroup}
-            titleValue={titleValue}
-            onTitleChange={setTitleValue}
-            descriptionValue={descriptionValue}
-            onDescriptionChange={setDescriptionValue}
-          />
-        </div>
+          <div className="flex min-h-0 h-full flex-col gap-[18px]">
+            <div className={currentStep === 0 ? "h-[488px]" : "hidden"}>
+              <BasicInfoSection
+                subjects={subjects}
+                subjectId={subjectId}
+                onSubjectChange={handleSubjectChange}
+                availableGroups={availableGroups}
+                selectedGroupIds={selectedGroupIds}
+                onToggleGroup={toggleGroup}
+                titleValue={titleValue}
+                onTitleChange={setTitleValue}
+                descriptionValue={descriptionValue}
+                onDescriptionChange={setDescriptionValue}
+                tagColor={tagColor}
+                onTagColorChange={setTagColor}
+              />
+            </div>
 
-        <div className={currentStep === 1 ? "block" : "hidden"}>
-          <ExamScheduleSection
-            initialStartTime={initialStartTime}
-            initialEndTime={initialEndTime}
-            initialDurationMinutes={initialDurationMinutes}
-          />
-        </div>
+            <div className={currentStep === 1 ? "shrink-0" : "hidden"}>
+              <ExamScheduleSection
+                initialStartTime={initialStartTime}
+                initialEndTime={initialEndTime}
+                initialDurationMinutes={initialDurationMinutes}
+                onChange={handleScheduleChange}
+              />
+            </div>
 
-        <div className={currentStep === 2 ? "block" : "hidden"}>
-          <ExamSettingsSection
-            initialPassingScore={initialPassingScore}
-            initialMaxAttempts={initialMaxAttempts}
-            initialShuffleQuestions={initialShuffleQuestions}
-            initialShuffleOptions={initialShuffleOptions}
-            initialProctoringMode={initialProctoringMode}
-            initialRequireFullscreen={initialRequireFullscreen}
-            initialRequireCamera={initialRequireCamera}
-            initialIdentityVerification={initialIdentityVerification}
-            initialEvidenceMode={initialEvidenceMode}
-            initialPostExamSimilarityEnabled={initialPostExamSimilarityEnabled}
-            initialDevicePolicy={initialDevicePolicy}
-          />
-        </div>
+            <div className={currentStep === 2 ? "shrink-0" : "hidden"}>
+              <ExamSettingsSection
+                initialPassingScore={initialPassingScore}
+                initialMaxAttempts={initialMaxAttempts}
+                initialShuffleQuestions={initialShuffleQuestions}
+                initialShuffleOptions={initialShuffleOptions}
+                initialProctoringMode={initialProctoringMode}
+                initialRequireFullscreen={initialRequireFullscreen}
+                initialRequireCamera={initialRequireCamera}
+                initialIdentityVerification={initialIdentityVerification}
+                initialEvidenceMode={initialEvidenceMode}
+                initialPostExamSimilarityEnabled={initialPostExamSimilarityEnabled}
+                initialDevicePolicy={initialDevicePolicy}
+              />
+            </div>
 
-        <div className="flex items-center justify-between">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => moveToStep(Math.max(0, currentStep - 1))}
-            disabled={currentStep === 0}
-            className="h-auto px-0 text-sm font-medium text-zinc-950 hover:translate-y-0 hover:bg-transparent hover:text-zinc-700 hover:shadow-none disabled:opacity-0"
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Буцах
-          </Button>
+            <div className="flex h-[46px] items-center justify-between">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => moveToStep(Math.max(0, currentStep - 1))}
+                disabled={currentStep === 0}
+                aria-label="Буцах"
+                className="gap-0 rounded-full border-0 bg-[#F3F4F6] p-0 text-[0px] shadow-none hover:bg-[#F3F4F6] hover:shadow-none disabled:opacity-0"
+              >
+                <ArrowLeft className="h-[13px] w-[13px] shrink-0 text-[#111827]" />
+                Буцах
+              </Button>
 
-          {!isFinalStep ? (
-            <Button
-              key={`continue-step-${currentStep}`}
-              type="button"
-              size="lg"
-              onClick={() => moveToStep(currentStep + 1)}
-              className="h-11 rounded-2xl bg-zinc-950 px-5 text-sm font-medium text-white hover:translate-y-0 hover:bg-zinc-800 hover:shadow-none"
-            >
-              Үргэлжлүүлэх
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
-          ) : (
-            <Button
-              key="submit-final-step"
-              type="submit"
-              size="lg"
-              loading={loading}
-              loadingText={finalLoadingText}
-              className="h-11 rounded-2xl bg-zinc-950 px-5 text-sm font-medium text-white hover:translate-y-0 hover:bg-zinc-800 hover:shadow-none"
-            >
-              {finalButtonLabel}
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
-          )}
+              {!isFinalStep ? (
+                <Button
+                  type="button"
+                  onClick={() => moveToStep(currentStep + 1)}
+                  className="h-[46px] rounded-[10px] bg-[#4D97F8] px-5 text-[13px] font-semibold text-white shadow-[0_16px_32px_rgba(77,151,248,0.28)] hover:bg-[#3F88E8] hover:shadow-[0_16px_32px_rgba(77,151,248,0.28)]"
+                >
+                  Үргэлжлүүлэх
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  onClick={submitFinalStep}
+                  loading={loading}
+                  loadingText={finalLoadingText}
+                  className="h-[46px] rounded-[10px] bg-[#4D97F8] px-5 text-[13px] font-semibold text-white shadow-[0_16px_32px_rgba(77,151,248,0.28)] hover:bg-[#3F88E8] hover:shadow-[0_16px_32px_rgba(77,151,248,0.28)]"
+                >
+                  {finalButtonLabel}
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       </form>
     </div>

@@ -36,14 +36,21 @@ export default function Header({ profile }: { profile: Profile }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const subjectId = searchParams.get("subjectId");
+
   const isExamsPage = pathname === "/educator/exams";
-  const hideEntireHeader = pathname?.startsWith("/educator/exams/") &&
-    pathname?.endsWith("/results");
+  const isExamBuilderPage =
+    pathname === "/educator/create-exam" ||
+    (pathname?.startsWith("/educator/exams/") && pathname?.endsWith("/edit"));
+  const hideEntireHeader =
+    pathname?.startsWith("/educator/exams/") && pathname?.endsWith("/results");
+
   const hideGreeting =
     isExamsPage ||
+    isExamBuilderPage ||
     pathname === "/educator/groups" ||
     pathname?.startsWith("/educator/question-bank") ||
     pathname?.startsWith("/educator/grading");
+
   const showGroupsBackLink = pathname?.startsWith("/educator/groups/");
   const showDashboardBackLink = pathname?.startsWith("/educator/grading");
   const showQuestionBankBackLink =
@@ -58,11 +65,15 @@ export default function Header({ profile }: { profile: Profile }) {
     return null;
   }
 
+  const headerHeightClass = isExamBuilderPage
+    ? "h-[40px] py-0"
+    : isExamsPage
+      ? "min-h-[72px] py-4"
+      : "h-30.5 py-2";
+
   return (
     <header
-      className={`flex flex-col gap-5 sm:flex-row sm:items-center ${
-        isExamsPage ? "min-h-[72px] py-4" : "h-30.5 py-2"
-      } ${
+      className={`flex flex-col gap-5 sm:flex-row sm:items-center ${headerHeightClass} ${
         hideGreeting &&
         !showGroupsBackLink &&
         !showQuestionBankBackLink &&
@@ -130,7 +141,7 @@ export default function Header({ profile }: { profile: Profile }) {
           aria-label="Профайл руу очих"
           className="rounded-full transition-transform duration-200 hover:scale-[1.02]"
         >
-          <Avatar className="h-10 w-10 overflow-hidden  bg-[#f7d9b5] shadow-[0_10px_24px_rgba(122,103,72,0.14)]">
+          <Avatar className="h-10 w-10 overflow-hidden bg-[#f7d9b5] shadow-[0_10px_24px_rgba(122,103,72,0.14)]">
             {profile.avatar_url ? (
               <AvatarImage
                 src={profile.avatar_url}

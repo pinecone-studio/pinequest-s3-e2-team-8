@@ -1,14 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { mn } from "date-fns/locale";
 import {
+  Camera,
   CalendarDays,
-  ChevronDown,
   Clock3,
+  Monitor,
   RefreshCw,
-  ShieldCheck,
   Trophy,
 } from "lucide-react";
 import type {
@@ -20,6 +20,13 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Popover,
   PopoverContent,
@@ -35,6 +42,12 @@ type ExamScheduleSectionProps = {
   initialStartTime?: string | null;
   initialEndTime?: string | null;
   initialDurationMinutes?: number | null;
+  onChange?: (payload: {
+    startTime: string;
+    endTime: string;
+    durationMinutes: string;
+    isValid: boolean;
+  }) => void;
 };
 
 type ExamSettingsSectionProps = {
@@ -62,11 +75,13 @@ const durationPresets = [
   { minutes: 120, label: "2 цаг" },
 ];
 
+const passingScoreOptions = [50, 60, 70, 80, 90, 100];
+
 const timeHours = Array.from({ length: 24 }, (_, index) =>
-  String(index).padStart(2, "0")
+  String(index).padStart(2, "0"),
 );
 const timeMinutes = Array.from({ length: 12 }, (_, index) =>
-  String(index * 5).padStart(2, "0")
+  String(index * 5).padStart(2, "0"),
 );
 
 function joinDateTime(date: string, time: string) {
@@ -144,7 +159,7 @@ function DatePickerField({
           variant="outline"
           className={cn(
             "h-12 w-full justify-between rounded-[20px] border-zinc-200 bg-zinc-50/80 px-4 text-left text-sm font-medium text-zinc-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition-colors hover:translate-y-0 hover:border-zinc-300 hover:bg-white hover:shadow-none focus-visible:border-zinc-300 focus-visible:ring-zinc-200/70",
-            !selectedDate && "text-zinc-500"
+            !selectedDate && "text-zinc-500",
           )}
         >
           <span>
@@ -164,6 +179,10 @@ function DatePickerField({
           selected={selectedDate}
           defaultMonth={selectedDate ?? new Date()}
           locale={mn}
+          classNames={{
+            selected:
+              "[&>button]:!rounded-full [&>button]:!bg-[#4D97F8] [&>button]:!text-white [&>button]:font-semibold [&>button]:hover:!bg-[#3F88E8] [&>button]:hover:!text-white",
+          }}
           onSelect={(date) => {
             if (!date) return;
             onChange(format(date, "yyyy-MM-dd"));
@@ -199,7 +218,7 @@ function TimePickerField({
           variant="outline"
           className={cn(
             "h-12 w-full justify-between rounded-[22px] border-zinc-200 bg-zinc-50/80 px-4 text-left text-sm font-medium text-zinc-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition-colors hover:translate-y-0 hover:border-zinc-300 hover:bg-white hover:shadow-none focus-visible:border-zinc-300 focus-visible:ring-zinc-200/70",
-            !displayValue && "text-zinc-500"
+            !displayValue && "text-zinc-500",
           )}
         >
           <span>{displayValue || placeholder}</span>
@@ -256,8 +275,8 @@ function TimePickerColumn({
             className={cn(
               "flex h-9 w-full items-center justify-center rounded-[8px] text-[0.95rem] font-medium transition-colors",
               isActive
-                ? "bg-zinc-950 text-white"
-                : "bg-transparent text-zinc-950 hover:bg-zinc-100"
+                ? "bg-[#4D97F8] text-white"
+                : "bg-transparent text-zinc-950 hover:bg-zinc-100",
             )}
           >
             {entry}
@@ -310,6 +329,78 @@ function DateTimeCard({
   );
 }
 
+function SettingsSelectField({
+  value,
+  onChange,
+  options,
+  getLabel,
+  widthClass = "w-[96px]",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: readonly string[];
+  getLabel?: (value: string) => string;
+  widthClass?: string;
+}) {
+  return (
+    <div className={widthClass}>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger
+          size="sm"
+          className="relative h-9 w-full justify-center rounded-[12px] border border-[#E6EAF2] bg-white px-3 pr-8 text-[13px] font-medium text-[#111827] shadow-none transition focus:border-[#C7D3E5] focus:ring-0 [&>svg]:absolute [&>svg]:right-3 [&>svg]:top-1/2 [&>svg]:-translate-y-1/2 [&_[data-slot=select-value]]:w-full [&_[data-slot=select-value]]:justify-center [&_[data-slot=select-value]]:text-center"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent
+          position="popper"
+          align="center"
+          className="min-w-[var(--radix-select-trigger-width)] rounded-[12px] border border-[#D7E3F4] bg-white p-1 shadow-[0_16px_30px_rgba(148,163,184,0.18)]"
+        >
+          {options.map((option) => (
+            <SelectItem
+              key={option}
+              value={option}
+              className="justify-center rounded-[10px] px-3 py-2 text-center text-[13px] font-medium text-[#111827] focus:bg-[#4D97F8] focus:text-white data-[state=checked]:bg-[#4D97F8] data-[state=checked]:text-white [&>span:first-child]:hidden [&>span:last-child]:text-inherit focus:[&>span:last-child]:text-white data-[state=checked]:[&>span:last-child]:text-white"
+            >
+              {getLabel ? getLabel(option) : option}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function SettingsToggle({
+  checked,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onCheckedChange(!checked)}
+      className={cn(
+        "relative h-6 w-11 rounded-full border transition-colors",
+        checked
+          ? "border-[#4D97F8] bg-[#4D97F8]"
+          : "border-[#DFE6F1] bg-[#EEF2F7]",
+      )}
+    >
+      <span
+        className={cn(
+          "absolute top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-white shadow-[0_2px_6px_rgba(15,23,42,0.16)] transition-all",
+          checked ? "left-[21px]" : "left-0.5",
+        )}
+      />
+    </button>
+  );
+}
+
 function SettingsRow({
   icon: Icon,
   title,
@@ -322,14 +413,14 @@ function SettingsRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-center gap-4">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-700">
-          <Icon className="h-5 w-5" />
+    <div className="flex items-center justify-between gap-4 rounded-[16px] border border-[#E9EEF5] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-[#F6F8FB] text-[#111827]">
+          <Icon className="h-4 w-4" />
         </div>
-        <div>
-          <p className="text-base font-semibold text-zinc-950">{title}</p>
-          <p className="text-sm text-zinc-500">{description}</p>
+        <div className="min-w-0">
+          <p className="text-[13px] font-semibold text-[#111827]">{title}</p>
+          <p className="text-[11px] text-[#8A94A6]">{description}</p>
         </div>
       </div>
       {children}
@@ -341,21 +432,22 @@ export function ExamScheduleSection({
   initialStartTime,
   initialEndTime,
   initialDurationMinutes,
+  onChange,
 }: ExamScheduleSectionProps) {
   const [startDate, setStartDate] = useState(
-    splitDateTimeForUlaanbaatar(initialStartTime).date
+    splitDateTimeForUlaanbaatar(initialStartTime).date,
   );
   const [startClock, setStartClock] = useState(
-    splitDateTimeForUlaanbaatar(initialStartTime).time
+    splitDateTimeForUlaanbaatar(initialStartTime).time,
   );
   const [endDate, setEndDate] = useState(
-    splitDateTimeForUlaanbaatar(initialEndTime).date
+    splitDateTimeForUlaanbaatar(initialEndTime).date,
   );
   const [endClock, setEndClock] = useState(
-    splitDateTimeForUlaanbaatar(initialEndTime).time
+    splitDateTimeForUlaanbaatar(initialEndTime).time,
   );
   const [durationMinutes, setDurationMinutes] = useState(
-    initialDurationMinutes ? String(initialDurationMinutes) : ""
+    initialDurationMinutes ? String(initialDurationMinutes) : "",
   );
   const hasCustomDuration = durationMinutes.trim().length > 0;
 
@@ -364,7 +456,7 @@ export function ExamScheduleSection({
 
   const durationSummary = useMemo(() => {
     if (!startTime || !endTime) {
-      return "Нээгдэх болон хаагдах цагаа 24 цагийн форматаар тохируулна уу.";
+      return "Нээх болон хаах цагаа 24 цагийн форматаар тохируулна уу.";
     }
 
     const start = parseUlaanbaatarDateTime(startTime);
@@ -381,6 +473,27 @@ export function ExamScheduleSection({
 
     return "Хуваарь амжилттай тохируулагдлаа. Нийтлэгдсэний дараа яг энэ цаг 24 форматаар харагдана.";
   }, [endTime, startTime]);
+
+  useEffect(() => {
+    const startMs =
+      parseUlaanbaatarDateTime(startTime)?.getTime() ?? Number.NaN;
+    const endMs = parseUlaanbaatarDateTime(endTime)?.getTime() ?? Number.NaN;
+    const isValid =
+      Boolean(startTime) &&
+      Boolean(endTime) &&
+      Boolean(durationMinutes.trim()) &&
+      !Number.isNaN(startMs) &&
+      !Number.isNaN(endMs) &&
+      startMs < endMs &&
+      Number(durationMinutes) > 0;
+
+    onChange?.({
+      startTime,
+      endTime,
+      durationMinutes,
+      isValid,
+    });
+  }, [durationMinutes, endTime, onChange, startTime]);
 
   return (
     <div className="rounded-[28px] border border-zinc-100 bg-white p-6 shadow-[0_12px_40px_-18px_rgba(15,23,42,0.16)] md:p-8">
@@ -432,8 +545,8 @@ export function ExamScheduleSection({
                 className={cn(
                   "h-10 rounded-2xl border-zinc-200 px-4 text-sm hover:translate-y-0 hover:shadow-none",
                   active
-                    ? "border-zinc-950 bg-zinc-950 text-white hover:bg-zinc-900 hover:text-white"
-                    : "bg-white text-zinc-950 hover:bg-zinc-50"
+                    ? "border-[#4D97F8] bg-[#4D97F8] text-white shadow-[0_12px_24px_rgba(77,151,248,0.22)] hover:bg-[#3F88E8] hover:text-white"
+                    : "bg-white text-zinc-950 hover:bg-zinc-50",
                 )}
               >
                 {preset.label}
@@ -455,7 +568,7 @@ export function ExamScheduleSection({
               placeholder="Минут оруулах"
               className={cn(
                 "h-10 w-36 rounded-2xl border-zinc-200 px-3 text-center text-sm focus-visible:ring-zinc-200",
-                hasCustomDuration ? "pr-12" : "pr-3"
+                hasCustomDuration ? "pr-12" : "pr-3",
               )}
             />
             {hasCustomDuration ? (
@@ -475,32 +588,58 @@ export function ExamScheduleSection({
 export function ExamSettingsSection({
   initialPassingScore,
   initialMaxAttempts,
+  initialProctoringMode,
+  initialRequireFullscreen,
+  initialRequireCamera,
+  initialDevicePolicy,
 }: ExamSettingsSectionProps) {
+  const [passingScore, setPassingScore] = useState(
+    String(initialPassingScore ?? 70),
+  );
   const [attempts, setAttempts] = useState(String(initialMaxAttempts ?? 1));
+  const [requireCamera, setRequireCamera] = useState(
+    initialProctoringMode === "strict"
+      ? true
+      : Boolean(initialRequireCamera),
+  );
+  const [desktopOnly, setDesktopOnly] = useState(
+    initialProctoringMode === "strict"
+      ? true
+      : Boolean(initialRequireFullscreen) ||
+          initialDevicePolicy === "desktop_only",
+  );
+  const proctoringMode = requireCamera || desktopOnly ? "standard" : "off";
 
   return (
-    <div className="rounded-[28px] border border-zinc-100 bg-white p-6 shadow-[0_12px_40px_-18px_rgba(15,23,42,0.16)] md:p-8">
+    <div className="rounded-[22px] border border-[#E2E8F0] bg-white p-5 shadow-[0_16px_30px_rgba(148,163,184,0.15)]">
+      <input type="hidden" name="passing_score" value={passingScore} />
+      <input type="hidden" name="max_attempts" value={attempts} />
       <input type="hidden" name="shuffle_questions" value="on" />
-      <div className="divide-y divide-zinc-200">
+      <input type="hidden" name="proctoring_mode" value={proctoringMode} />
+      <input
+        type="hidden"
+        name="device_policy"
+        value={desktopOnly ? "desktop_only" : "mobile_preferred"}
+      />
+      {desktopOnly ? (
+        <input type="hidden" name="require_fullscreen" value="on" />
+      ) : null}
+      {requireCamera ? (
+        <input type="hidden" name="require_camera" value="on" />
+      ) : null}
+
+      <div className="space-y-4">
         <SettingsRow
           icon={Trophy}
           title="Тэнцэх оноо"
           description="Дундаж шаардлага"
         >
-          <div className="relative">
-            <Input
-              id="passing_score"
-              name="passing_score"
-              type="number"
-              min="0"
-              max="100"
-              defaultValue={initialPassingScore ?? 60}
-              className="h-11 w-28 rounded-[20px] border-zinc-200 px-4 pr-9 text-center text-sm focus-visible:ring-zinc-200"
-            />
-            <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm text-zinc-500">
-              %
-            </span>
-          </div>
+          <SettingsSelectField
+            value={passingScore}
+            onChange={setPassingScore}
+            options={passingScoreOptions.map(String)}
+            widthClass="w-[92px]"
+          />
         </SettingsRow>
 
         <SettingsRow
@@ -508,36 +647,38 @@ export function ExamSettingsSection({
           title="Оролдлогын тоо"
           description="Дахин өгөх боломж"
         >
-          <div className="relative">
-            <select
-              value={attempts}
-              onChange={(event) => setAttempts(event.target.value)}
-              className="h-11 min-w-28 appearance-none rounded-[20px] border border-zinc-200 bg-white px-4 pr-10 text-sm text-zinc-950 outline-none focus:border-zinc-300"
-            >
-              {Array.from({ length: 10 }, (_, index) => index + 1).map(
-                (value) => (
-                  <option key={value} value={value}>
-                    {value} удаа
-                  </option>
-                )
-              )}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-400" />
-            <input type="hidden" name="max_attempts" value={attempts} />
-          </div>
+          <SettingsSelectField
+            value={attempts}
+            onChange={setAttempts}
+            options={Array.from({ length: 10 }, (_, index) =>
+              String(index + 1),
+            )}
+            getLabel={(value) => `${value} удаа`}
+            widthClass="w-[110px]"
+          />
         </SettingsRow>
 
         <SettingsRow
-          icon={ShieldCheck}
-          title="Integrity profile"
-          description="Шалгалтын anti-cheat түвшин"
+          icon={Camera}
+          title="Камер шаардлага"
+          description="Camera/presence monitoring ашиглах эсэх"
         >
-          <input type="hidden" name="proctoring_mode" value="strict" />
-          <span className="flex h-11 items-center rounded-[20px] bg-zinc-950 px-5 text-sm font-medium text-white">
-            Strict
-          </span>
+          <SettingsToggle
+            checked={requireCamera}
+            onCheckedChange={setRequireCamera}
+          />
         </SettingsRow>
 
+        <SettingsRow
+          icon={Monitor}
+          title="Сурагчийн төхөөрөмжийн бодлого"
+          description="Mobile-centered эсвэл desktop горим сонгоно."
+        >
+          <SettingsToggle
+            checked={desktopOnly}
+            onCheckedChange={setDesktopOnly}
+          />
+        </SettingsRow>
       </div>
     </div>
   );
