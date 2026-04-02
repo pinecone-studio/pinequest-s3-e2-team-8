@@ -257,7 +257,15 @@ export default function NotificationBell({
         <button
           type="button"
           aria-label="Мэдэгдэл"
-          className="relative flex h-10 w-10 items-center justify-center rounded-full border border-[#d7cec5] bg-[#faf7f3] transition-colors hover:bg-[#f5efe8]"
+          className="relative flex items-center justify-center transition-colors"
+          style={{
+            width: "40px",
+            height: "40px",
+            background: "rgba(255,255,255,0.8)",
+            border: "1px solid #D1D1D1",
+            borderRadius: "60px",
+            flexShrink: 0,
+          }}
         >
           <Image
             src="/educator-icons/notifications.png"

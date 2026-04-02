@@ -7,7 +7,6 @@ import { logout } from "@/lib/auth/actions";
 import {
   ChevronLeft,
   GraduationCap,
-  FileText,
   HomeIcon,
   ListCheck,
   LogOut,
@@ -24,20 +23,17 @@ interface NavItem {
 
 const allNavItems: NavItem[] = [
   { href: "/student", label: "Нүүр хуудас", icon: HomeIcon },
-  { href: "/student/exams", label: "Шалгалт өгөх", icon: FileText },
   { href: "/student/results", label: "Миний шалгалтууд", icon: ListCheck },
   { href: "/student/learning", label: "Learning Hub", icon: GraduationCap },
 ];
 export default function Sidebar() {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const widthClass = isCollapsed ? "w-[70px]" : "w-[260px]";
+  const widthClass = isCollapsed ? "w-[72px]" : "w-[260px]";
 
   return (
-    <>
-      <div className={`shrink-0 transition-all duration-200 ${widthClass}`} />
       <aside
-        className={`fixed inset-y-0 left-0 z-30 flex h-[100dvh] flex-col justify-between overflow-y-auto bg-white pt-6 shadow-xl transition-all duration-200 ${
+        className={`sticky top-0 flex h-dvh flex-col justify-between overflow-y-auto border-r border-black/6 bg-white pt-6 shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition-all duration-200 ${
           isCollapsed ? "px-2" : "px-4"
         } ${widthClass}`}
       >
@@ -113,6 +109,5 @@ export default function Sidebar() {
           {!isCollapsed && <Tsunh />}
         </div>
       </aside>
-    </>
   );
 }

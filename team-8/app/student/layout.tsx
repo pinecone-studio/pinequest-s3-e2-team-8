@@ -5,6 +5,7 @@ import Header from "./_features/Header";
 import MobileHeader from "./_features/MobileHeader";
 import MobileBottomNav from "./_features/MobileBottomNav";
 import StudentShell from "./_features/StudentShell";
+import { getStudentProfileDisplay } from "./_features/profile-display";
 
 export default async function StudentLayout({
   children,
@@ -18,11 +19,13 @@ export default async function StudentLayout({
     redirect(profile.role === "teacher" ? "/educator" : "/admin");
   }
 
+  const profileDisplay = getStudentProfileDisplay(profile);
+
   return (
     <StudentShell
       sidebar={<Sidebar />}
-      header={<Header />}
-      mobileHeader={<MobileHeader />}
+      header={<Header profile={profileDisplay} />}
+      mobileHeader={<MobileHeader profile={profileDisplay} />}
       bottomNav={<MobileBottomNav />}
     >
       {children}
