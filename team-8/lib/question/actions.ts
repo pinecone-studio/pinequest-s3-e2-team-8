@@ -1890,6 +1890,11 @@ export async function createPrivateBankEntryFromImage(formData: FormData) {
   return { success: true };
 }
 
+const PRIVATE_TEXT_QUESTION_TYPES: QuestionType[] = [
+  "multiple_choice",
+  "essay",
+];
+
 export async function createPrivateBankEntryFromText(formData: FormData) {
   const supabase = await createClient();
   const {
@@ -1913,6 +1918,42 @@ export async function createPrivateBankEntryFromText(formData: FormData) {
   }
   const content_html = String(formData.get("content_html") ?? "").trim() || null;
 
+  const questionTypeRaw = String(formData.get("question_type") ?? "essay").trim();
+  const type: QuestionType = PRIVATE_TEXT_QUESTION_TYPES.includes(
+    questionTypeRaw as QuestionType,
+  )
+    ? (questionTypeRaw as QuestionType)
+    : "essay";
+
+  const pointsParsed = parseFloat(String(formData.get("points") ?? "1"));
+  const points =
+    Number.isFinite(pointsParsed) && pointsParsed > 0
+      ? Math.min(100, Math.round(pointsParsed * 100) / 100)
+      : 1;
+
+  const diffParsed = parseInt(String(formData.get("difficulty_level") ?? "2"), 10);
+  const difficulty_level: DifficultyLevel = [1, 2, 3].includes(diffParsed)
+    ? (diffParsed as DifficultyLevel)
+    : 2;
+  const difficulty: Difficulty =
+    difficulty_level === 1 ? "easy" : difficulty_level === 3 ? "hard" : "medium";
+
+  let options: string[] | null = null;
+  let correct_answer: string | null = null;
+
+  if (type === "multiple_choice") {
+    const optionsJson = String(formData.get("options_json") ?? "[]");
+    const correctRaw = String(formData.get("correct_answer") ?? "").trim();
+    const payload = buildQuestionPayload(
+      "multiple_choice",
+      optionsJson,
+      correctRaw || null,
+    );
+    if ("error" in payload) return { error: payload.error };
+    options = payload.options;
+    correct_answer = payload.correctAnswer;
+  }
+
   const context = await getQuestionBankAccessContext(supabase, user.id);
   if (!context.isAdmin) {
     if (!subjectId) {
@@ -1933,15 +1974,15 @@ export async function createPrivateBankEntryFromText(formData: FormData) {
     subject_id: subjectId || null,
     created_by: user.id,
     visibility: "private",
-    type: "essay",
+    type,
     content,
     content_html,
     image_url: null,
-    options: null,
-    correct_answer: null,
-    points: 1,
-    difficulty: "medium",
-    difficulty_level: 2,
+    options,
+    correct_answer,
+    points,
+    difficulty,
+    difficulty_level,
     tags,
     subtopic,
     grade_level,

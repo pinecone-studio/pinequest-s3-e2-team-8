@@ -1,25 +1,24 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useRef, useState, type ComponentProps } from "react";
 import {
   ChevronDown,
   FileText,
   ImagePlus,
   Loader2,
-  Upload,
+  XIcon,
 } from "lucide-react";
 import {
   createPrivateBankEntryFromImage,
   createPrivateBankEntryFromText,
-  extractPrivateBankTextFromFile,
 } from "@/lib/question/actions";
 import type { Subject } from "@/types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -31,11 +30,44 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 interface PrivateBankAddMaterialProps {
   subjects: Subject[];
   viewerIsAdmin?: boolean;
+}
+
+const textMaterialSelectClass =
+  "h-[39px] w-full cursor-pointer appearance-none rounded-lg border border-border bg-transparent px-3 pr-9 text-sm text-foreground shadow-none outline-none focus-visible:ring-2 focus-visible:ring-[#3B6CB0]/25 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-transparent";
+
+function TextMaterialSelect({
+  id,
+  name,
+  className,
+  children,
+  ...props
+}: Omit<ComponentProps<"select">, "className"> & {
+  id: string;
+  name: string;
+  className?: string;
+}) {
+  return (
+    <div className="relative w-full">
+      <select
+        id={id}
+        name={name}
+        className={cn(textMaterialSelectClass, className)}
+        {...props}
+      >
+        {children}
+      </select>
+      <ChevronDown
+        className="pointer-events-none absolute right-3 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground"
+        strokeWidth={2}
+        aria-hidden
+      />
+    </div>
+  );
 }
 
 export default function PrivateBankAddMaterial({
@@ -45,14 +77,19 @@ export default function PrivateBankAddMaterial({
   const router = useRouter();
   const [textOpen, setTextOpen] = useState(false);
   const [imageOpen, setImageOpen] = useState(false);
+  const imageFileInputRef = useRef<HTMLInputElement>(null);
+  const [imageFileLabel, setImageFileLabel] = useState<string | null>(null);
+  const [imageDropActive, setImageDropActive] = useState(false);
   const [pendingImage, setPendingImage] = useState(false);
   const [pendingText, setPendingText] = useState(false);
   const [errorImage, setErrorImage] = useState<string | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
-  const [textContent, setTextContent] = useState("");
-  const [fileImportError, setFileImportError] = useState<string | null>(null);
-  const [fileImportPending, setFileImportPending] = useState(false);
-  const materialFileInputRef = useRef<HTMLInputElement>(null);
+  const [questionContent, setQuestionContent] = useState("");
+  const [mcOptions, setMcOptions] = useState(["", "", "", ""]);
+  const [correctOptionIndex, setCorrectOptionIndex] = useState(0);
+  const [textQuestionType, setTextQuestionType] = useState<
+    "multiple_choice" | "essay"
+  >("multiple_choice");
 
   const sortedSubjects = [...subjects].sort((a, b) =>
     a.name.localeCompare(b.name, "mn"),
@@ -61,29 +98,6 @@ export default function PrivateBankAddMaterial({
   const subjectRequired = !viewerIsAdmin && sortedSubjects.length > 0;
   const subjectDisabled = sortedSubjects.length === 0 && !viewerIsAdmin;
   const submitDisabled = !viewerIsAdmin && sortedSubjects.length === 0;
-
-  async function handleReadMaterialFile() {
-    setFileImportError(null);
-    const input = materialFileInputRef.current;
-    const picked = input?.files?.[0];
-    if (!picked) {
-      setFileImportError("Эхлээд тестийн материалын файлаа сонгоно уу.");
-      return;
-    }
-    setFileImportPending(true);
-    const formData = new FormData();
-    formData.set("file", picked);
-    const result = await extractPrivateBankTextFromFile(formData);
-    setFileImportPending(false);
-
-    if (result && "error" in result && result.error) {
-      setFileImportError(result.error);
-      return;
-    }
-    if (result && "success" in result && result.success && "text" in result) {
-      setTextContent(result.text);
-    }
-  }
 
   async function handleImageSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -108,16 +122,34 @@ export default function PrivateBankAddMaterial({
   async function handleTextSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorText(null);
-    if (!textContent.trim()) {
-      setErrorText(
-        "Материалын текстээ бичнэ эсвэл тестийн файлаас уншуулна уу.",
-      );
+    if (!questionContent.trim()) {
+      setErrorText("Асуултаа оруулна уу.");
       return;
     }
     const form = event.currentTarget;
-    setPendingText(true);
+    const type = textQuestionType;
+
     const formData = new FormData(form);
-    formData.set("content", textContent.trim());
+    formData.set("content", questionContent.trim());
+    formData.set("question_type", type);
+
+    if (type === "multiple_choice") {
+      const slots = mcOptions.map((o) => o.trim());
+      const opts = slots.filter(Boolean);
+      if (opts.length < 2) {
+        setErrorText("Дор хаяж 2 хариулт бөглөнө үү.");
+        return;
+      }
+      const correct = slots[correctOptionIndex]?.trim();
+      if (!correct || !opts.includes(correct)) {
+        setErrorText("Зөв хариултаа бөглөж, түүнийгээ радио товчоор сонгоно уу.");
+        return;
+      }
+      formData.set("options_json", JSON.stringify(opts));
+      formData.set("correct_answer", correct);
+    }
+
+    setPendingText(true);
     const result = await createPrivateBankEntryFromText(formData);
     setPendingText(false);
 
@@ -127,41 +159,38 @@ export default function PrivateBankAddMaterial({
     }
 
     form.reset();
-    setTextContent("");
+    setQuestionContent("");
+    setMcOptions(["", "", "", ""]);
+    setCorrectOptionIndex(0);
+    setTextQuestionType("multiple_choice");
     setTextOpen(false);
     setErrorText(null);
     router.refresh();
   }
 
+  const textFieldClass =
+    "h-[39px] w-full rounded-lg border border-border bg-[#f4f4f5] px-3 text-sm text-foreground shadow-none ring-0 placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-[#3B6CB0]/25";
+  const textLabelClass =
+    "text-xs font-medium leading-snug text-[#364153] [font-family:Inter,ui-sans-serif,system-ui,sans-serif]";
+
   return (
-    <div className="ml-auto flex shrink-0 items-center justify-end ">
+    <div className="flex h-[45px] shrink-0 items-center max-sm:ml-auto">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <div className="flex w-full justify-end">
-            <Button
-              type="button"
-              className="h-9 gap-2 rounded-full bg-[#3B6CB0] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#355FA0]"
-            >
-              <span>Шинэ материал оруулах</span>
-              <ChevronDown className="h-4 w-4 opacity-90" aria-hidden />
-            </Button>
-          </div>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuItem
-            className="gap-2"
-            onSelect={() => {
-              setTextContent("");
-              setFileImportError(null);
-              setErrorText(null);
-              setTextOpen(true);
-            }}
+          <Button
+            type="button"
+            className="box-border flex h-[39px] w-[243px] shrink-0 items-center justify-center gap-[10px] rounded-[8px] bg-[#5199F6] px-[16px] py-[10px] text-sm font-semibold text-white shadow-sm transition hover:bg-[#3d87f0]"
           >
-            <FileText className="h-4 w-4" />
-            Текстээр
-          </DropdownMenuItem>
+            <span>Шинэ материал оруулах</span>
+            <ChevronDown className="h-4 w-4 opacity-90" aria-hidden />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="flex h-[69px] w-[167px] min-w-[167px] max-w-[167px] flex-col divide-y divide-border overflow-hidden p-0"
+        >
           <DropdownMenuItem
-            className="gap-2"
+            className="min-h-0 flex-1 gap-2 rounded-none px-3 py-0"
             onSelect={() => {
               setErrorImage(null);
               setImageOpen(true);
@@ -170,6 +199,20 @@ export default function PrivateBankAddMaterial({
             <ImagePlus className="h-4 w-4" />
             Зурагаар
           </DropdownMenuItem>
+          <DropdownMenuItem
+            className="min-h-0 flex-1 gap-2 rounded-none px-3 py-0"
+            onSelect={() => {
+              setQuestionContent("");
+              setMcOptions(["", "", "", ""]);
+              setCorrectOptionIndex(0);
+              setTextQuestionType("multiple_choice");
+              setErrorText(null);
+              setTextOpen(true);
+            }}
+          >
+            <FileText className="h-4 w-4" />
+            Текстээр
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -177,183 +220,205 @@ export default function PrivateBankAddMaterial({
         open={textOpen}
         onOpenChange={(open) => {
           if (open) {
-            setTextContent("");
-            setFileImportError(null);
+            setQuestionContent("");
+            setMcOptions(["", "", "", ""]);
+            setCorrectOptionIndex(0);
+            setTextQuestionType("multiple_choice");
             setErrorText(null);
           }
           setTextOpen(open);
         }}
       >
         <DialogContent
-          className="max-h-[min(90vh,640px)] gap-0 overflow-y-auto sm:max-w-xl"
-          showCloseButton
+          className="flex h-[min(716px,90vh)] w-[min(430px,calc(100vw-2rem))] max-w-[430px] flex-col gap-0 overflow-hidden rounded-[8px] border border-border bg-white p-0 shadow-lg"
+          showCloseButton={false}
         >
-          <DialogHeader>
-            <DialogTitle>Текстээр материал нэмэх</DialogTitle>
-            <DialogDescription>
-              Хувийн санд хадгална. Сонголттой асуулт бол хадгалсны дараа
-              жагсаалтаас <strong>Засах</strong> дарна уу.
-            </DialogDescription>
-          </DialogHeader>
+          <div className="shrink-0 bg-white px-[16px] pt-[16px] pb-0">
+            <div className="mx-auto box-border flex h-[56.74px] w-full max-w-[398px] min-w-0 items-center justify-between rounded-[8px] bg-[#f4f4f5] px-[16px] py-0">
+              <DialogTitle
+                className="m-0 h-[19px] w-[205px] max-w-[205px] shrink-0 truncate text-[16px] leading-[19px] font-medium text-[#0A0A0A]"
+                style={{
+                  fontFamily:
+                    'Inter, ui-sans-serif, system-ui, -apple-system, sans-serif',
+                }}
+              >
+                Текстээр материал нэмэх
+              </DialogTitle>
+              <DialogClose asChild>
+                <button
+                  type="button"
+                  className="flex size-8 shrink-0 items-center justify-center rounded-md text-[#0A0A0A] transition-colors hover:bg-black/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3B6CB0]/30"
+                  aria-label="Хаах"
+                >
+                  <XIcon className="size-4" strokeWidth={2} aria-hidden />
+                </button>
+              </DialogClose>
+            </div>
+          </div>
           <form
             onSubmit={handleTextSubmit}
-            className="space-y-4 border-t bg-background/50 px-1 py-4"
+            className="flex min-h-0 flex-1 flex-col gap-[16px] overflow-y-auto px-[16px] pt-[16px] pb-[2px]"
           >
-            <div className="space-y-2">
-              <Label htmlFor="pb-t-batch">Багц нэр (заавал биш)</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="pb-t-batch" className={textLabelClass}>
+                Багцын нэр (Заавал биш)
+              </Label>
               <Input
                 id="pb-t-batch"
                 name="batch_label"
-                placeholder="Жишээ: ЭЕШ 2023 · Хувилбар A"
+                placeholder="Жишээ: ЭЕШ 2026"
+                className={textFieldClass}
               />
-              <p className="text-xs text-muted-foreground">
-                Нэг дор оруулсан материалуудаа дараа нь багцаар нь шүүж/устгахад
-                тусална.
-              </p>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="pb-t-subject">
-                  Хичээл {subjectRequired ? "*" : ""}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="pb-t-subject" className={textLabelClass}>
+                  Хичээл{subjectRequired ? " *" : ""}
                 </Label>
-                <select
+                <TextMaterialSelect
                   id="pb-t-subject"
                   name="subject_id"
                   required={subjectRequired}
                   disabled={subjectDisabled}
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                   defaultValue=""
                 >
                   <option value="">
-                    {viewerIsAdmin ? "— (заавал биш)" : "Сонгох"}
+                    {viewerIsAdmin ? "Сонгох (заавал биш)" : "Сонгох"}
                   </option>
                   {sortedSubjects.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
                     </option>
                   ))}
-                </select>
+                </TextMaterialSelect>
                 {sortedSubjects.length === 0 && !viewerIsAdmin ? (
                   <p className="text-xs text-amber-700">
                     Танд хичээл оноогдоогүй байна. Админтай холбогдоно уу.
                   </p>
                 ) : null}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="pb-t-grade">Анги (заавал биш)</Label>
-                <select
-                  id="pb-t-grade"
-                  name="grade_level"
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  defaultValue=""
+              <div className="space-y-1.5">
+                <Label htmlFor="pb-t-type" className={textLabelClass}>
+                  Төрөл
+                </Label>
+                <TextMaterialSelect
+                  id="pb-t-type"
+                  name="question_type"
+                  value={textQuestionType}
+                  onChange={(e) =>
+                    setTextQuestionType(
+                      e.target.value === "essay"
+                        ? "essay"
+                        : "multiple_choice",
+                    )
+                  }
                 >
-                  <option value="">—</option>
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((g) => (
-                    <option key={g} value={String(g)}>
-                      {g}-р анги
-                    </option>
-                  ))}
-                </select>
+                  <option value="multiple_choice">Олон сонголттой</option>
+                  <option value="essay">Нээлттэй</option>
+                </TextMaterialSelect>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="pb-t-subtopic">Дэд сэдэв (заавал биш)</Label>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="pb-t-difficulty" className={textLabelClass}>
+                  Түвшин
+                </Label>
+                <TextMaterialSelect
+                  id="pb-t-difficulty"
+                  name="difficulty_level"
+                  defaultValue="2"
+                >
+                  <option value="1">Амархан</option>
+                  <option value="2">Дунд</option>
+                  <option value="3">Хүнд</option>
+                </TextMaterialSelect>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pb-t-points" className={textLabelClass}>
+                  Оноо
+                </Label>
+                <TextMaterialSelect
+                  id="pb-t-points"
+                  name="points"
+                  defaultValue="1"
+                >
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="5">5</option>
+                  <option value="10">10</option>
+                </TextMaterialSelect>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="pb-t-content" className={textLabelClass}>
+                Асуултаа бичнэ үү.
+              </Label>
               <Input
-                id="pb-t-subtopic"
-                name="subtopic"
-                placeholder="Жишээ: Функцийн уламжлал"
-              />
-            </div>
-
-            <div className="space-y-3 rounded-lg border border-dashed border-muted-foreground/25 bg-muted/30 p-4">
-              <div>
-                <p className="text-sm font-medium text-foreground">
-                  Тестийн материал файл оруулах
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Word (.docx), Excel (.xlsx, .xls), текст (.txt) эсвэл .csv.
-                  Файлаа сонгоод <strong>Унших</strong> дарвал доорх талбарт
-                  оруулна — гараар засаад хадгална.
-                </p>
-              </div>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <Input
-                  ref={materialFileInputRef}
-                  type="file"
-                  accept=".txt,.csv,.docx,.xlsx,.xls,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,text/csv,text/plain"
-                  className="cursor-pointer sm:min-w-0 sm:flex-1"
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="shrink-0 gap-2"
-                  disabled={fileImportPending}
-                  onClick={() => void handleReadMaterialFile()}
-                >
-                  {fileImportPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  ) : (
-                    <Upload className="h-4 w-4" aria-hidden />
-                  )}
-                  Унших
-                </Button>
-              </div>
-              {fileImportError ? (
-                <p className="text-xs text-red-600">{fileImportError}</p>
-              ) : null}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="pb-t-content">Материалын текст *</Label>
-              <Textarea
                 id="pb-t-content"
-                rows={8}
-                value={textContent}
-                onChange={(e) => setTextContent(e.target.value)}
-                placeholder="Энд бичих эсвэл дээрх файлаас уншуулна. Жишээ: 1. Дараах..."
-                className="min-h-[140px] resize-y"
+                value={questionContent}
+                onChange={(e) => setQuestionContent(e.target.value)}
+                placeholder="Жишээ: Монголын эзэнт гүрэн"
+                className={textFieldClass}
+                autoComplete="off"
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="pb-t-html">HTML (заавал биш)</Label>
-              <Textarea
-                id="pb-t-html"
-                name="content_html"
-                rows={3}
-                placeholder="LaTeX/томьёо — хоосон бол зөвхөн текст харуулна."
-                className="resize-y font-mono text-sm"
-              />
-            </div>
+            {textQuestionType === "multiple_choice" ? (
+              <div className="space-y-2">
+                <p className={cn(textLabelClass, "block")}>
+                  Хариултын тохиргоо
+                </p>
+                <div className="space-y-2 rounded-lg border border-border bg-background p-3">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="flex items-center gap-3">
+                      <input
+                        type="radio"
+                        name="mc-correct-visual"
+                        checked={correctOptionIndex === i}
+                        onChange={() => setCorrectOptionIndex(i)}
+                        className="size-4 shrink-0 border-slate-300 accent-[#5199F6]"
+                        aria-label={`Зөв хариулт: ${i + 1}`}
+                      />
+                      <Input
+                        value={mcOptions[i]}
+                        onChange={(e) => {
+                          const next = [...mcOptions];
+                          next[i] = e.target.value;
+                          setMcOptions(next);
+                        }}
+                        placeholder={`Хариулт ${i + 1}`}
+                        className={cn(textFieldClass, "min-w-0 flex-1")}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             {errorText ? (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
                 {errorText}
               </div>
             ) : null}
 
-            <div className="flex flex-wrap justify-end gap-2 pt-1">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setTextOpen(false)}
-                disabled={pendingText}
-              >
-                Болих
-              </Button>
-              <Button type="submit" disabled={pendingText || submitDisabled}>
-                {pendingText ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Хадгалж байна...
-                  </>
-                ) : (
-                  "Хадгалах"
-                )}
-              </Button>
-            </div>
+            <Button
+              type="submit"
+              disabled={pendingText || submitDisabled}
+              className="h-11 w-full rounded-lg bg-[#5199F6] text-sm font-semibold text-white shadow-sm hover:bg-[#3d87f0] disabled:opacity-60"
+            >
+              {pendingText ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Хадгалж байна...
+                </>
+              ) : (
+                "Хадгалах"
+              )}
+            </Button>
           </form>
         </DialogContent>
       </Dialog>
@@ -362,153 +427,213 @@ export default function PrivateBankAddMaterial({
         open={imageOpen}
         onOpenChange={(open) => {
           setImageOpen(open);
-          if (!open) setErrorImage(null);
+          if (!open) {
+            setErrorImage(null);
+            setImageFileLabel(null);
+            setImageDropActive(false);
+          }
         }}
       >
         <DialogContent
-          className="max-h-[min(90vh,640px)] gap-0 overflow-y-auto sm:max-w-xl"
-          showCloseButton
+          className="flex max-h-[min(90vh,720px)] w-[min(430px,calc(100vw-2rem))] max-w-[430px] flex-col gap-0 overflow-hidden rounded-[8px] border border-[#E5E7EB] bg-white p-0 shadow-lg"
+          showCloseButton={false}
         >
-          <DialogHeader>
-            <DialogTitle>Зурагаар материал нэмэх</DialogTitle>
-            <DialogDescription>
-              JPG / PNG / WEBP / GIF, 5MB хүртэл. Хүссэн бол AI-аар текст
-              уншуулна. Дараа нь <strong>Засах</strong> товчоор төрөл
-              тохируулна.
-            </DialogDescription>
-          </DialogHeader>
+          <div className="shrink-0 bg-white px-[16px] pt-[16px] pb-0">
+            <div className="flex h-14 w-full items-center justify-between rounded-[8px] bg-[#F9FAFB] px-[16px]">
+              <DialogTitle
+                className="m-0 text-base font-semibold text-[#111827]"
+                style={{
+                  fontFamily:
+                    'Inter, ui-sans-serif, system-ui, -apple-system, sans-serif',
+                }}
+              >
+                Зурагаар материал нэмэх
+              </DialogTitle>
+              <DialogClose asChild>
+                <button
+                  type="button"
+                  className="flex size-8 shrink-0 items-center justify-center rounded-lg text-[#374151] transition-colors hover:bg-black/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3B6CB0]/30"
+                  aria-label="Хаах"
+                >
+                  <XIcon className="size-4" strokeWidth={2} aria-hidden />
+                </button>
+              </DialogClose>
+            </div>
+          </div>
           <form
             onSubmit={handleImageSubmit}
-            className="space-y-4 border-t bg-background/50 px-1 py-4"
+            className="flex min-h-0 flex-1 flex-col gap-[16px] overflow-y-auto px-[16px] py-[16px]"
           >
-            <div className="space-y-2">
-              <Label htmlFor="pb-img-batch">Багц нэр (заавал биш)</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="pb-img-batch" className={textLabelClass}>
+                Багцын нэр (Заавал биш)
+              </Label>
               <Input
                 id="pb-img-batch"
                 name="batch_label"
-                placeholder="Жишээ: 10-р анги · Сорил 2"
+                placeholder="Жишээ: ЭЕШ 2026"
+                className={textFieldClass}
               />
-              <p className="text-xs text-muted-foreground">
-                Олон бодлого салгаж хадгалсан ч нэг багцад байлгах нэр.
-              </p>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="pb-img-subject">
-                  Хичээл {subjectRequired ? "*" : ""}
+            <div className="grid grid-cols-1 gap-[16px] sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="pb-img-subject" className={textLabelClass}>
+                  Хичээл{subjectRequired ? " *" : ""}
                 </Label>
-                <select
+                <TextMaterialSelect
                   id="pb-img-subject"
                   name="subject_id"
                   required={subjectRequired}
-                  disabled={sortedSubjects.length === 0 && !viewerIsAdmin}
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  disabled={subjectDisabled}
                   defaultValue=""
+                  className="bg-white"
                 >
                   <option value="">
-                    {viewerIsAdmin ? "— (заавал биш)" : "Сонгох"}
+                    {viewerIsAdmin ? "Сонгох (заавал биш)" : "Сонгох"}
                   </option>
                   {sortedSubjects.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
                     </option>
                   ))}
-                </select>
+                </TextMaterialSelect>
                 {sortedSubjects.length === 0 && !viewerIsAdmin ? (
                   <p className="text-xs text-amber-700">
                     Танд хичээл оноогдоогүй байна. Админтай холбогдоно уу.
                   </p>
                 ) : null}
-                {sortedSubjects.length === 0 && viewerIsAdmin ? (
-                  <p className="text-xs text-muted-foreground">
-                    Хичээл сонголгүй хадгалж болно.
-                  </p>
-                ) : null}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="pb-img-grade">Анги (заавал биш)</Label>
-                <select
-                  id="pb-img-grade"
-                  name="grade_level"
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  defaultValue=""
+              <div className="space-y-1.5">
+                <Label htmlFor="pb-img-type-visual" className={textLabelClass}>
+                  Төрөл
+                </Label>
+                <TextMaterialSelect
+                  id="pb-img-type-visual"
+                  name="pb_image_type_ui"
+                  disabled
+                  value="image"
+                  onChange={() => {}}
+                  className="cursor-not-allowed bg-white opacity-100"
+                  aria-readonly
                 >
-                  <option value="">—</option>
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((g) => (
-                    <option key={g} value={String(g)}>
-                      {g}-р анги
-                    </option>
-                  ))}
-                </select>
+                  <option value="image">Зурагт суурилсан</option>
+                </TextMaterialSelect>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="pb-img-subtopic">Дэд сэдэв (заавал биш)</Label>
-              <Input
-                id="pb-img-subtopic"
-                name="subtopic"
-                placeholder="Жишээ: Квадрат тэгшитгэл"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="pb-image">Зураг *</Label>
-              <Input
+            <div className="space-y-1.5">
+              <Label htmlFor="pb-image" className={textLabelClass}>
+                Зураг
+              </Label>
+              <input
+                ref={imageFileInputRef}
                 id="pb-image"
                 name="image"
                 type="file"
                 accept="image/jpeg,image/png,image/webp,image/gif"
                 required
-                className="cursor-pointer"
+                className="sr-only"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  setImageFileLabel(f?.name ?? null);
+                }}
               />
+              <button
+                type="button"
+                onClick={() => imageFileInputRef.current?.click()}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  setImageDropActive(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                    setImageDropActive(false);
+                  }
+                }}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setImageDropActive(false);
+                  const file = e.dataTransfer.files?.[0];
+                  if (!file) return;
+                  const ok =
+                    file.type === "image/jpeg" ||
+                    file.type === "image/png" ||
+                    file.type === "image/webp" ||
+                    file.type === "image/gif";
+                  if (!ok) return;
+                  const input = imageFileInputRef.current;
+                  if (!input) return;
+                  const dt = new DataTransfer();
+                  dt.items.add(file);
+                  input.files = dt.files;
+                  setImageFileLabel(file.name);
+                }}
+                className={cn(
+                  "mx-auto flex h-[192px] w-[396px] max-w-full flex-col items-center justify-center gap-[8px] rounded-[8px] border-2 border-dashed p-[16px] transition-colors",
+                  imageDropActive
+                    ? "border-[#4A80C4] bg-[#F0F6FC]"
+                    : "border-[#93C5FD] bg-white",
+                )}
+              >
+                <span className="flex size-12 items-center justify-center rounded-full bg-[#DBEAFE] text-[#2563EB]">
+                  <ImagePlus className="size-6" strokeWidth={1.75} />
+                </span>
+                <span className="text-sm font-medium text-[#1E40AF]">
+                  {imageFileLabel ?? "Drop your image here"}
+                </span>
+                <span className="text-center text-xs text-[#64748B]">
+                  PNG, JPG, WEBP эсвэл GIF (макс. 5MB)
+                </span>
+              </button>
             </div>
 
-            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-dashed p-3 text-sm">
+            <div className="flex gap-[16px] rounded-[8px]">
               <input
                 type="checkbox"
                 name="use_ai"
+                id="pb-img-use-ai"
                 defaultChecked
-                className="mt-1 h-4 w-4"
+                className="mt-0.5 size-4 shrink-0 rounded border-[#CBD5E1] accent-[#4A80C4]"
               />
-              <span>
-                <span className="font-medium text-foreground">
+              <label htmlFor="pb-img-use-ai" className="cursor-pointer">
+                <span
+                  className={cn(
+                    textLabelClass,
+                    "block text-sm font-medium text-[#364153]",
+                  )}
+                >
                   Зургийн текстийг AI-аар уншуулах
                 </span>
-                <span className="block text-muted-foreground">
-                  Идэвхгүй бол зургийг л холбоно; текстийг &quot;Засах&quot;-аар
+                <span className="mt-1 block text-xs leading-relaxed text-[#6B7280]">
+                  Идэвхгүй бол зургийг л холбоно, текстийг &quot;Засах&quot;-аар
                   нэмнэ.
                 </span>
-              </span>
-            </label>
+              </label>
+            </div>
 
             {errorImage ? (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              <div className="rounded-[8px] border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
                 {errorImage}
               </div>
             ) : null}
 
-            <div className="flex flex-wrap justify-end gap-2 pt-1">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setImageOpen(false)}
-                disabled={pendingImage}
-              >
-                Болих
-              </Button>
-              <Button type="submit" disabled={pendingImage || submitDisabled}>
-                {pendingImage ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Хадгалж байна...
-                  </>
-                ) : (
-                  "Хадгалах"
-                )}
-              </Button>
-            </div>
+            <Button
+              type="submit"
+              disabled={pendingImage || submitDisabled}
+              className="h-11 w-full rounded-[8px] bg-[#4A80C4] text-sm font-semibold text-white shadow-sm hover:bg-[#3d6dad] disabled:opacity-60"
+            >
+              {pendingImage ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Хадгалж байна...
+                </>
+              ) : (
+                "Хадгалах"
+              )}
+            </Button>
           </form>
         </DialogContent>
       </Dialog>
