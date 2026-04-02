@@ -73,14 +73,6 @@ export default async function PrivateQuestionBankPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Хувийн сан</h2>
-        <p className="text-sm text-muted-foreground">
-          Таны шалгалтын материал (зураг, текст) — энд хадгалж, &quot;Засах&quot;-аар
-          бүрэн асуулт болгож, дараа нь шалгалтад оруулна.
-        </p>
-      </div>
-
       <QuestionBankBrowser
         certifiedQuestions={certifiedQuestions}
         privateQuestions={privateQuestions}

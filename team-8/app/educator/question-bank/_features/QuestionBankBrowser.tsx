@@ -3,19 +3,29 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, Eye } from "lucide-react";
+import { ArrowRight, Eye, Pencil, Search, Trash2 } from "lucide-react";
 import {
   bulkDeleteQuestionBankItems,
+  deleteQuestionBankItem,
   importQuestionFromBank,
   importQuestionsFromBank,
   importSampleExamToExam,
 } from "@/lib/question/actions";
-import { suggestSubjectIdFromPrivateBank } from "@/lib/question/utils";
 import type { QuestionBank, SampleExam, Subject } from "@/types";
 import MathContent from "@/components/math/MathContent";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+import EditQuestionBankDialog from "./EditQuestionBankDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,18 +40,22 @@ import {
 import PrivateBankAddMaterial from "./PrivateBankAddMaterial";
 
 const typeLabels: Record<string, string> = {
-  multiple_choice: "Сонголттой",
+  multiple_choice: "Олон сонголттой",
   multiple_response: "Олон зөв",
   essay: "Нээлттэй",
-  fill_blank: "Нөхөх",
+  fill_blank: "Хоосон зай",
   matching: "Холбох",
 };
 
 const difficultyLabels: Record<number, string> = {
-  1: "Хөнгөн",
+  1: "Амархан",
   2: "Дунд",
   3: "Хүнд",
 };
+
+/** Баталгаажсан сангийн карт дээрх мета тэмдэг — хамгийн багадаа 93×28, урт текст олон мөр, px 10 / py 6, radius 12 */
+const certifiedBankMetaPillClass =
+  "inline-flex min-h-[28px] min-w-[93px] w-max max-w-full shrink-0 items-center justify-center rounded-[12px] border border-border bg-background px-[10px] py-[6px] text-center text-xs font-medium leading-snug text-foreground whitespace-normal break-words";
 
 type TabKey = "sample" | "bank" | "private";
 
@@ -88,7 +102,7 @@ export default function QuestionBankBrowser({
   const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
   const [tab, setTab] = useState<TabKey>(defaultTab);
-  const query = "";
+  const [query, setQuery] = useState("");
   const [subjectFilter, setSubjectFilter] = useState("all");
   const gradeFilter = "all";
   const subtopicFilter = "all";
@@ -116,44 +130,41 @@ export default function QuestionBankBrowser({
     null,
   );
   const [pendingSampleId, setPendingSampleId] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [singleDeletingId, setSingleDeletingId] = useState<string | null>(null);
 
   const normalizedQuery = query.trim().toLowerCase();
   const isBusy = pendingAction !== null;
-  const isSubjectFocused = subjectFilter !== "all";
+  const isSubjectFocused =
+    tab === "sample" && subjectFilter !== "all";
 
   useEffect(() => {
     const nextSubjectId = searchParams.get("subjectId");
-    if (nextSubjectId && nextSubjectId !== subjectFilter) {
+    if (nextSubjectId) {
       setSubjectFilter(nextSubjectId);
-      return;
     }
-    if (!nextSubjectId && subjectFilter !== "all") {
-      setSubjectFilter("all");
-    }
-  }, [searchParams, subjectFilter]);
+  }, [searchParams]);
 
-  const teacherSubjectIds = useMemo(
-    () => subjects.map((s) => s.id),
-    [subjects],
-  );
-  const suggestedPrivateSubjectId = useMemo(
-    () => suggestSubjectIdFromPrivateBank(teacherSubjectIds, privateQuestions),
-    [privateQuestions, teacherSubjectIds],
-  );
+  function setSubjectFilterFromUi(next: string) {
+    setSubjectFilter(next);
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "all") {
+      params.delete("subjectId");
+    } else {
+      params.set("subjectId", next);
+    }
+    const queryString = params.toString();
+    const target = queryString ? `${pathname}?${queryString}` : (pathname ?? "");
+    if (target) {
+      router.replace(target);
+    }
+  }
 
   function changeTab(next: TabKey) {
     setSelectedQuestionIds([]);
     setExpandedQuestionIds([]);
     setBatchFilter("all");
     setTab(next);
-
-    if (
-      next === "private" &&
-      subjectFilter === "all" &&
-      suggestedPrivateSubjectId
-    ) {
-      setSubjectFilter(suggestedPrivateSubjectId);
-    }
   }
 
   function pushSubjectFilter(nextSubjectId: string | null) {
@@ -266,10 +277,11 @@ export default function QuestionBankBrowser({
     );
   }, [filteredSampleExams, subjects]);
 
+  /** 1 Амархан — success (emerald); 2 Дунд — #F2B544 + цагаан текст; 3 Хүнд — улаан */
   function getDifficultyBadgeClass(level: number | null | undefined) {
-    if (level === 3) return "bg-red-500";
-    if (level === 2) return "bg-orange-400";
-    if (level === 1) return "bg-green-500";
+    if (level === 3) return "bg-[#e85b5b]";
+    if (level === 2) return "bg-[#F2B544]";
+    if (level === 1) return "bg-emerald-600";
     return "bg-gray-400";
   }
 
@@ -553,6 +565,30 @@ export default function QuestionBankBrowser({
     });
   }
 
+  function handleDeleteSinglePrivateQuestion(questionId: string) {
+    if (pendingAction || singleDeletingId) return;
+
+    setStatusMessage("neutral", null);
+    setSingleDeletingId(questionId);
+    startTransition(() => {
+      void (async () => {
+        try {
+          const result = await deleteQuestionBankItem(questionId);
+          if (result?.error) {
+            setStatusMessage("error", result.error);
+            return;
+          }
+
+          setSelectedQuestionIds((prev) => prev.filter((id) => id !== questionId));
+          setPendingDeleteId(null);
+          router.refresh();
+        } finally {
+          setSingleDeletingId(null);
+        }
+      })();
+    });
+  }
+
   function handleImportSampleExam(sampleExamId: string) {
     if (!examId || pendingAction) return;
 
@@ -581,8 +617,37 @@ export default function QuestionBankBrowser({
     });
   }
 
+  /** Radix Select trigger — нээлттэй жагсаалтыг SelectContent-оор дугуйруулна */
+  const filterSelectTriggerClass =
+    "box-border h-[39px] min-h-[39px] rounded-xl border-0 bg-[#EBEBEB] py-[10px] pl-[16px] pr-3 text-sm text-foreground shadow-none ring-0 focus:ring-2 focus:ring-[#3B6CB0]/25 focus-visible:ring-2 [&_svg]:size-[18px] [&_svg]:text-gray-500";
+
+  /** «Бүх төрөл» / «Бүх хичээл» — w-220 h-39 */
+  const typeFilterTriggerClass = cn(
+    filterSelectTriggerClass,
+    "w-[220px] min-w-[220px] max-w-[220px] shrink-0",
+  );
+
+  const batchFilterTriggerClass = cn(
+    filterSelectTriggerClass,
+    "w-full min-w-[140px] flex-1 md:max-w-[220px]",
+  );
+
+  const subjectFilterTriggerClass = typeFilterTriggerClass;
+
+  const questionBankSelectContentClass =
+    "max-h-[min(320px,var(--radix-select-content-available-height))] rounded-xl border border-gray-200/80 bg-[#EBEBEB] p-1 shadow-lg ring-1 ring-black/5 data-[side=bottom]:slide-in-from-top-2";
+
+  const isQuestionBankTab = tab === "bank" || tab === "private";
+  const batchFilterPlaceholderClass =
+    "invisible pointer-events-none box-border h-[39px] w-full min-w-[140px] flex-1 rounded-xl md:max-w-[220px]";
+  const typeFilterPlaceholderClass =
+    "invisible pointer-events-none box-border h-[39px] w-[220px] shrink-0 rounded-xl";
+  const subjectFilterPlaceholderClass = typeFilterPlaceholderClass;
+  const addMaterialPlaceholderClass =
+    "invisible ml-auto flex h-9 min-w-[min(100%,260px)] shrink-0 items-center justify-end sm:min-w-[260px]";
+
   return (
-    <div className="flex flex-col gap-5 ">
+    <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 rounded-2xl p-4 sm:p-6 md:p-8">
       {examId && examTitle ? (
         <Card>
           <CardContent className="flex flex-col gap-3 pt-4 md:flex-row md:items-center md:justify-between">
@@ -599,35 +664,36 @@ export default function QuestionBankBrowser({
         </Card>
       ) : null}
 
-      <div className="flex w-full max-w-[1440px] items-center gap-4">
+      <div className="flex w-full max-w-[1440px] flex-wrap items-center gap-4">
         {!isSubjectFocused ? (
           <div
-            className="flex h-9 items-center cursor-pointer overflow-x-auto rounded-full bg-[#F0EEEE] p-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex h-[45px] w-full max-w-[531px] shrink-0 items-stretch rounded-full bg-[#EEEEEE] p-[5px] sm:w-[531px]"
             role="tablist"
             aria-label="Асуултын сангийн орон"
           >
             <Button
               type="button"
-              // Change variant to "ghost" or "link" for inactive to remove the outline
-              variant={tab === "sample" ? "default" : "ghost"}
-              className={`shrink-0 rounded-full h-8 px-4 text-sm font-medium transition-all ${
+              variant="ghost"
+              className={cn(
+                "h-[35px] min-h-0 min-w-0 flex-1 rounded-full border-0 px-2 text-center text-[13px] font-medium leading-tight shadow-none transition-colors sm:px-3 sm:text-sm",
                 tab === "sample"
-                  ? "bg-white text-black shadow-sm" // For the white active state
-                  : "text-black hover:bg-transparent"
-              }`}
+                  ? "bg-white text-black shadow-sm hover:bg-white"
+                  : "bg-transparent text-gray-600 hover:bg-black/[0.04]",
+              )}
               onClick={() => changeTab("sample")}
             >
-              Жишиг шалгалт
+              Жишиг даалгаврууд
             </Button>
 
             <Button
               type="button"
-              variant={tab === "bank" ? "default" : "ghost"}
-              className={`shrink-0 rounded-full h-8 px-4 text-sm font-medium transition-all ${
+              variant="ghost"
+              className={cn(
+                "h-[35px] min-h-0 min-w-0 flex-1 rounded-full border-0 px-2 text-center text-[13px] font-medium leading-tight shadow-none transition-colors sm:px-3 sm:text-sm",
                 tab === "bank"
-                  ? "bg-white text-black shadow-sm" // For the white active state
-                  : "text-gray-600 hover:bg-transparent"
-              }`}
+                  ? "bg-white text-black shadow-sm hover:bg-white"
+                  : "bg-transparent text-gray-600 hover:bg-black/[0.04]",
+              )}
               onClick={() => changeTab("bank")}
             >
               Баталгаажсан сан
@@ -635,61 +701,168 @@ export default function QuestionBankBrowser({
 
             <Button
               type="button"
-              variant={tab === "private" ? "default" : "ghost"}
-              className={`shrink-0 rounded-full h-8 px-4 text-sm font-medium transition-all ${
+              variant="ghost"
+              className={cn(
+                "h-[35px] min-h-0 min-w-0 flex-1 rounded-full border-0 px-2 text-center text-[13px] font-medium leading-tight shadow-none transition-colors sm:px-3 sm:text-sm",
                 tab === "private"
-                  ? "bg-white text-black shadow-sm"
-                  : "text-gray-600 hover:bg-transparent"
-              }`}
+                  ? "bg-white text-black shadow-sm hover:bg-white"
+                  : "bg-transparent text-gray-600 hover:bg-black/[0.04]",
+              )}
               onClick={() => changeTab("private")}
             >
               Хувийн сан
             </Button>
           </div>
         ) : null}
-
-        {tab === "private" && !isSubjectFocused ? (
-          <PrivateBankAddMaterial
-            subjects={subjects}
-            viewerIsAdmin={viewerIsAdmin}
-          />
-        ) : null}
       </div>
 
       {!isSubjectFocused ? (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {tab === "private" ? (
-            <select
-              value={batchFilter}
-              onChange={(event) => setBatchFilter(event.target.value)}
-              className="h-10 rounded-md border bg-background px-3 text-sm"
-            >
-              <option value="all">Бүх багц</option>
-              {batchOptions.hasNone ? (
-                <option value="__none">Багцгүй</option>
-              ) : null}
-              {batchOptions.items.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          ) : null}
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="relative w-full max-w-[229px] shrink-0">
+            <Search
+              className="pointer-events-none absolute left-[16px] top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Хайх"
+              className="box-border h-[39px] w-full rounded-xl border-0 bg-[#EBEBEB] py-[10px] pl-[40px] pr-[16px] text-sm shadow-none ring-0 placeholder:text-muted-foreground/80 focus-visible:ring-2 focus-visible:ring-[#3B6CB0]/25"
+              aria-label="Хайх"
+            />
+          </div>
 
-          {tab === "bank" || tab === "private" ? (
-            <select
-              value={typeFilter}
-              onChange={(event) => setTypeFilter(event.target.value)}
-              className="h-10 rounded-md border bg-background px-3 text-sm"
-            >
-              <option value="all">Бүх төрөл</option>
-              <option value="multiple_choice">Сонголттой</option>
-              <option value="multiple_response">Олон зөв</option>
-              <option value="essay">Нээлттэй</option>
-              <option value="fill_blank">Нөхөх</option>
-              <option value="matching">Холбох</option>
-            </select>
-          ) : null}
+          {isQuestionBankTab ? (
+            <div className="relative h-[39px] w-[220px] shrink-0">
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger
+                  className={typeFilterTriggerClass}
+                  aria-label="Төрлөөр шүүх"
+                >
+                  <SelectValue placeholder="Бүх төрөл" />
+                </SelectTrigger>
+                <SelectContent
+                  position="popper"
+                  align="start"
+                  sideOffset={6}
+                  className={questionBankSelectContentClass}
+                >
+                  <SelectItem value="all" className="rounded-lg">
+                    Бүх төрөл
+                  </SelectItem>
+                  <SelectItem value="multiple_choice" className="rounded-lg">
+                    {typeLabels.multiple_choice}
+                  </SelectItem>
+                  <SelectItem value="multiple_response" className="rounded-lg">
+                    {typeLabels.multiple_response}
+                  </SelectItem>
+                  <SelectItem value="essay" className="rounded-lg">
+                    {typeLabels.essay}
+                  </SelectItem>
+                  <SelectItem value="fill_blank" className="rounded-lg">
+                    {typeLabels.fill_blank}
+                  </SelectItem>
+                  <SelectItem value="matching" className="rounded-lg">
+                    {typeLabels.matching}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <div className="relative h-[39px] w-[220px] shrink-0">
+              <div className={typeFilterPlaceholderClass} aria-hidden />
+            </div>
+          )}
+
+          {isQuestionBankTab ? (
+            <div className="relative h-[39px] w-[220px] shrink-0">
+              <Select
+                value={subjectFilter}
+                onValueChange={setSubjectFilterFromUi}
+              >
+                <SelectTrigger
+                  className={subjectFilterTriggerClass}
+                  aria-label="Хичээлээр шүүх"
+                >
+                  <SelectValue placeholder="Бүх хичээл" />
+                </SelectTrigger>
+                <SelectContent
+                  position="popper"
+                  align="start"
+                  sideOffset={6}
+                  className={questionBankSelectContentClass}
+                >
+                  <SelectItem value="all" className="rounded-lg">
+                    Бүх хичээл
+                  </SelectItem>
+                  {subjects.map((subject) => (
+                    <SelectItem
+                      key={subject.id}
+                      value={subject.id}
+                      className="rounded-lg"
+                    >
+                      {subject.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <div className="relative h-[39px] w-[220px] shrink-0">
+              <div className={subjectFilterPlaceholderClass} aria-hidden />
+            </div>
+          )}
+
+          {tab === "private" ? (
+            <div className="relative min-w-[140px] flex-1 md:max-w-[220px]">
+              <Select value={batchFilter} onValueChange={setBatchFilter}>
+                <SelectTrigger
+                  className={batchFilterTriggerClass}
+                  aria-label="Багцаар шүүх"
+                >
+                  <SelectValue placeholder="Бүх багц" />
+                </SelectTrigger>
+                <SelectContent
+                  position="popper"
+                  align="start"
+                  sideOffset={6}
+                  className={questionBankSelectContentClass}
+                >
+                  <SelectItem value="all" className="rounded-lg">
+                    Бүх багц
+                  </SelectItem>
+                  {batchOptions.hasNone ? (
+                    <SelectItem value="__none" className="rounded-lg">
+                      Багцгүй
+                    </SelectItem>
+                  ) : null}
+                  {batchOptions.items.map((item) => (
+                    <SelectItem
+                      key={item.id}
+                      value={item.id}
+                      className="rounded-lg"
+                    >
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <div className="relative min-w-[140px] flex-1 md:max-w-[220px]">
+              <div className={batchFilterPlaceholderClass} aria-hidden />
+            </div>
+          )}
+
+          {tab === "private" ? (
+            <PrivateBankAddMaterial
+              subjects={subjects}
+              viewerIsAdmin={viewerIsAdmin}
+            />
+          ) : (
+            <div className={addMaterialPlaceholderClass} aria-hidden />
+          )}
         </div>
       ) : null}
 
@@ -712,7 +885,7 @@ export default function QuestionBankBrowser({
       {tab === "sample" ? (
         groupedSampleExams.length === 0 ? (
           <div className="rounded-lg border border-dashed text-center text-sm text-muted-foreground">
-            Жишиг шалгалт олдсонгүй.
+            Жишиг даалгаврууд олдсонгүй.
           </div>
         ) : (
           <div className="space-y-10">
@@ -848,7 +1021,10 @@ export default function QuestionBankBrowser({
                                             </Badge>
                                           ) : null}
                                           {item.question_bank?.points ? (
-                                            <Badge variant="outline">
+                                            <Badge
+                                              variant="outline"
+                                              className="bg-gray-100"
+                                            >
                                               {item.question_bank.points} оноо
                                             </Badge>
                                           ) : null}
@@ -917,7 +1093,7 @@ export default function QuestionBankBrowser({
         </div>
       ) : (
         <div className="space-y-3">
-          {examId || tab === "private" ? (
+          {examId && (tab === "bank" || tab === "private") ? (
             <Card
               className={
                 tab === "private"
@@ -1043,7 +1219,7 @@ export default function QuestionBankBrowser({
             </Card>
           ) : null}
 
-          {activeFilteredBankQuestions.map((question) => {
+          {activeFilteredBankQuestions.map((question, cardIndex) => {
             const hasSubjectMismatch = Boolean(
               targetExamSubjectId &&
               question.subject_id &&
@@ -1058,77 +1234,204 @@ export default function QuestionBankBrowser({
                 ? formatInlineChoicesAsList(question.content)
                 : question.content;
 
-            return (
-              <Card key={question.id}>
-                <CardContent
-                  className={
-                    tab === "private" ? "space-y-2 py-3" : "space-y-3 pt-4"
-                  }
+            const difficultyLevel = question.difficulty_level ?? 2;
+            const difficultyLabel =
+              difficultyLabels[difficultyLevel] ?? difficultyLabels[2];
+
+            if (tab === "private") {
+              return (
+                <Card
+                  key={question.id}
+                  className="border-0 bg-white shadow-[0_2px_16px_rgba(15,23,42,0.07)] rounded-2xl"
                 >
-                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                    {tab === "private" ? (
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                          <span className="font-medium text-foreground">
-                            {question.subjects?.name ?? "Хичээл сонгоогүй"}
-                          </span>
-                          <span className="text-muted-foreground">·</span>
-                          <span className="text-muted-foreground">
-                            {typeLabels[question.type] ?? question.type}
-                          </span>
-                          <span className="text-muted-foreground">·</span>
-                          <span className="text-muted-foreground">
-                            {difficultyLabels[question.difficulty_level]}
-                          </span>
-                          <span className="text-muted-foreground">·</span>
-                          <span className="text-muted-foreground">
-                            {question.points} оноо
-                          </span>
-                          {question.grade_level ? (
-                            <>
-                              <span className="text-muted-foreground">·</span>
-                              <span className="text-muted-foreground">
-                                {question.grade_level}-р анги
-                              </span>
-                            </>
-                          ) : null}
-                          {question.subtopic ? (
-                            <>
-                              <span className="text-muted-foreground">·</span>
-                              <span className="text-muted-foreground">
-                                {question.subtopic}
-                              </span>
-                            </>
-                          ) : null}
+                  <CardContent className="space-y-4 p-5 md:p-6">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-gray-300 bg-white px-3 py-1 text-sm text-foreground">
+                          {typeLabels[question.type] ?? question.type}
+                        </span>
+                        <span
+                          className={cn(
+                            "rounded-full px-3 py-1 text-sm font-medium text-white",
+                            getDifficultyBadgeClass(difficultyLevel),
+                          )}
+                        >
+                          {difficultyLabel}
+                        </span>
+                        <span className="rounded-full bg-gray-100 px-3 py-1 text-sm font-medium text-foreground">
+                          {question.points} оноо
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-end gap-1">
+                        {examId ? (
+                          <>
+                            <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
+                              <input
+                                type="checkbox"
+                                checked={selectedQuestionIds.includes(
+                                  question.id,
+                                )}
+                                onChange={() =>
+                                  toggleQuestionSelection(question.id)
+                                }
+                                disabled={isBusy || hasSubjectMismatch}
+                                className="h-3.5 w-3.5 rounded border-gray-300"
+                              />
+                              Сонгох
+                            </label>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => handleImportQuestion(question.id)}
+                              disabled={isBusy || hasSubjectMismatch}
+                              variant={
+                                hasSubjectMismatch ? "outline" : "default"
+                              }
+                              className="h-8 rounded-full text-xs"
+                            >
+                              {lastImportedQuestionId === question.id
+                                ? "Оруулсан"
+                                : hasSubjectMismatch
+                                  ? "Таарахгүй"
+                                  : pendingAction === "import-single" &&
+                                      pendingQuestionId === question.id
+                                    ? "..."
+                                    : "Шалгалтад нэмэх"}
+                            </Button>
+                          </>
+                        ) : null}
+                        <EditQuestionBankDialog
+                          question={question}
+                          subjects={subjects}
+                          canAdminCurate={viewerIsAdmin}
+                          trigger={
+                            <button
+                              type="button"
+                              className="rounded-full p-2 text-gray-600 transition hover:bg-black/[0.04]"
+                              aria-label="Засах"
+                            >
+                              <Pencil className="h-4 w-4" strokeWidth={2} />
+                            </button>
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="rounded-full p-2 text-[#e85b5b] transition hover:bg-red-50"
+                          aria-label="Устгах"
+                          onClick={() => setPendingDeleteId(question.id)}
+                          disabled={singleDeletingId === question.id || isBusy}
+                        >
+                          <Trash2 className="h-4 w-4" strokeWidth={2} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div
+                        className={cn(
+                          "min-w-0",
+                          !isExpanded && isLong && "max-h-24 overflow-hidden",
+                        )}
+                      >
+                        <div className="flex flex-wrap items-baseline gap-x-1.5 font-bold text-foreground">
+                          <span className="shrink-0">{cardIndex + 1}.</span>
+                          <MathContent
+                            html={question.content_html}
+                            text={displayText}
+                            className="prose prose-sm max-w-none min-w-0 font-bold text-foreground [&_*]:leading-snug [&_p]:my-0"
+                          />
                         </div>
                       </div>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        {question.subjects?.name ? (
-                          <Badge variant="outline">
-                            {question.subjects.name}
-                          </Badge>
-                        ) : null}
-                        {question.grade_level ? (
-                          <Badge variant="outline">
-                            {question.grade_level}-р анги
-                          </Badge>
-                        ) : null}
-                        {question.subtopic ? (
-                          <Badge variant="outline">{question.subtopic}</Badge>
-                        ) : null}
-                        <Badge variant="outline">
-                          {typeLabels[question.type] ?? question.type}
-                        </Badge>
-                        <Badge variant="secondary">
-                          {difficultyLabels[question.difficulty_level]}
-                        </Badge>
-                        <Badge variant="outline">{question.points} оноо</Badge>
-                      </div>
-                    )}
+                      {isLong ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleQuestionExpanded(question.id)}
+                          className="text-xs font-medium text-muted-foreground underline-offset-4 hover:underline"
+                        >
+                          {isExpanded ? "Хураах" : "Дэлгэрэнгүй"}
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {question.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={question.image_url}
+                        alt="Асуултын зураг"
+                        className="max-h-56 rounded-xl border border-gray-100"
+                      />
+                    ) : null}
+                  </CardContent>
+                </Card>
+              );
+            }
+
+            return (
+              <Card key={question.id} className="pt-[16px] pb-[16px] gap-19">
+                <CardContent className="space-y-5 pt-0">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="flex flex-wrap gap-2">
+                      {question.subjects?.name ? (
+                        <span
+                          className={certifiedBankMetaPillClass}
+                          title={question.subjects.name}
+                        >
+                          {question.subjects.name}
+                        </span>
+                      ) : null}
+                      {question.grade_level ? (
+                        <span
+                          className={certifiedBankMetaPillClass}
+                          title={`${question.grade_level}-р анги`}
+                        >
+                          {question.grade_level}-р анги
+                        </span>
+                      ) : null}
+                      {question.subtopic ? (
+                        <span
+                          className={certifiedBankMetaPillClass}
+                          title={question.subtopic}
+                        >
+                          {question.subtopic}
+                        </span>
+                      ) : null}
+                      <span
+                        className={certifiedBankMetaPillClass}
+                        title={
+                          typeLabels[question.type] ?? question.type ?? undefined
+                        }
+                      >
+                        {typeLabels[question.type] ?? question.type}
+                      </span>
+                      <span
+                        className={cn(
+                          certifiedBankMetaPillClass,
+                          getDifficultyBadgeClass(
+                            question.difficulty_level ?? 2,
+                          ),
+                          "border-transparent text-white",
+                        )}
+                        title={
+                          difficultyLabels[question.difficulty_level ?? 2] ??
+                          difficultyLabels[2]
+                        }
+                      >
+                        {difficultyLabels[question.difficulty_level ?? 2] ??
+                          difficultyLabels[2]}
+                      </span>
+                      <span
+                        className={cn(
+                          certifiedBankMetaPillClass,
+                          "bg-gray-100",
+                        )}
+                        title={`${question.points} оноо`}
+                      >
+                        {question.points} оноо
+                      </span>
+                    </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                      {examId || tab === "private" ? (
+                      {examId && (tab === "bank" || tab === "private") ? (
                         <>
                           <label className="inline-flex items-center gap-2 rounded-full border border-muted-foreground/30 bg-background/80 px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-muted-foreground/50 hover:bg-muted/60">
                             <input
@@ -1171,32 +1474,11 @@ export default function QuestionBankBrowser({
                   </div>
 
                   <div className="space-y-1">
-                    <div
-                      className={
-                        tab === "private" && !isExpanded
-                          ? "max-h-24 overflow-hidden"
-                          : undefined
-                      }
-                    >
-                      <MathContent
-                        html={question.content_html}
-                        text={displayText}
-                        className={
-                          tab === "private"
-                            ? "prose prose-sm max-w-none text-foreground [&_*]:leading-snug"
-                            : "prose prose-sm max-w-none text-foreground"
-                        }
-                      />
-                    </div>
-                    {tab === "private" && isLong ? (
-                      <button
-                        type="button"
-                        onClick={() => toggleQuestionExpanded(question.id)}
-                        className="text-xs font-medium text-muted-foreground underline-offset-4 hover:underline"
-                      >
-                        {isExpanded ? "Хураах" : "Дэлгэрэнгүй"}
-                      </button>
-                    ) : null}
+                    <MathContent
+                      html={question.content_html}
+                      text={displayText}
+                      className="prose prose-sm max-w-none text-foreground"
+                    />
                   </div>
 
                   {question.image_url ? (
@@ -1213,6 +1495,36 @@ export default function QuestionBankBrowser({
           })}
         </div>
       )}
+
+      <AlertDialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteId(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Материалыг устгах уу?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Энэ бичлэгийг хувийн сангаас бүрмөсөн устгана. Дахин сэргээх боломжгүй.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Болих</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                if (pendingDeleteId) {
+                  handleDeleteSinglePrivateQuestion(pendingDeleteId);
+                }
+              }}
+              disabled={singleDeletingId !== null}
+            >
+              {singleDeletingId ? "Устгаж байна..." : "Устгах"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

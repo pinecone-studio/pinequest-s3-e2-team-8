@@ -3,10 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import {
+  ChevronDown,
   FileText,
   ImagePlus,
   Loader2,
-  Plus,
   Upload,
 } from "lucide-react";
 import {
@@ -142,8 +142,8 @@ export default function PrivateBankAddMaterial({
               type="button"
               className="h-9 gap-2 rounded-full bg-[#3B6CB0] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#355FA0]"
             >
-              <Plus className="h-4 w-4" />
-              <span>Асуулт нэмэх</span>
+              <span>Шинэ материал оруулах</span>
+              <ChevronDown className="h-4 w-4 opacity-90" aria-hidden />
             </Button>
           </div>
         </DropdownMenuTrigger>
