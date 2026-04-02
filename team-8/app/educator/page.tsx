@@ -104,7 +104,7 @@ function CreateQuestionPreview() {
         return (
           <div
             key={tile.title}
-            className={`rounded-[14px] border border-dashed border-[#d6d6d6] bg-white px-4 py-4 shadow-[0_4px_10px_rgba(0,0,0,0.04)] ${
+            className={`rounded-2xl border border-dashed border-[#d6d6d6] bg-white px-4 py-4 shadow-[0_4px_10px_rgba(0,0,0,0.04)] ${
               index === 2 ? "md:col-span-1" : ""
             }`}
           >
@@ -124,14 +124,17 @@ function CreateQuestionPreview() {
 
 function GradeAnswerPreview() {
   return (
-    <div className="relative mt-4 h-[253px] w-full overflow-hidden rounded-[18px] bg-[#eaf3ff] p-4">
-      <Image
-        src="/rate.svg"
-        alt="Rate"
-        fill
-        className="object-contain"
-        priority
-      />
+    <div className="relative mt-4 h-[253px] w-full overflow-hidden rounded-[18px] bg-gradient-to-b from-[#eaf3ff] via-[#fafafa] to-white flex justify-center items-center">
+     <div className="relative w-111 h-70">
+  <Image
+    src="/pen-dash.svg"
+    alt="Rate"
+    fill
+    className="object-contain"
+    priority
+  />
+</div>
+     
       <QuickActionButton
         href="/educator/grading"
         label="Шалгалт засаж эхлэх"
@@ -157,7 +160,7 @@ function QuickActionCard({
   badgeLabel?: string;
 }) {
   return (
-    <article className="flex h-[350px] flex-col rounded-[18px] border border-[#dedede] bg-white p-4 shadow-[0_10px_28px_rgba(124,144,171,0.08)]">
+    <article className="flex h-[350px] flex-col rounded-2xl border border-[#dedede] bg-white p-4 shadow-[0_10px_28px_rgba(124,144,171,0.08)]">
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h3 className="text-[18px] font-medium  text-[#111111]">{title}</h3>

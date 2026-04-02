@@ -77,12 +77,6 @@ const allNavItems: NavItem[] = [
     iconPath: "/educator-icons/exams.png",
     iconClassName: "h-5 w-4",
   },
-  {
-    href: "/educator/groups",
-    label: "Ангиуд",
-    iconPath: "/educator-icons/classes.png",
-    iconClassName: "h-5 w-5",
-  },
 ];
 
 export default function Sidebar() {
