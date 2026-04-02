@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getStudentPracticeExamForTake } from "@/lib/student-learning/actions";
 import PracticeExamTaker from "../../_features/PracticeExamTaker";
+import PracticeBuildStatus from "../../_features/PracticeBuildStatus";
 
 export default async function StudentPracticeExamPage({
   params,
@@ -12,6 +13,18 @@ export default async function StudentPracticeExamPage({
 
   if (!data) {
     redirect("/student/learning");
+  }
+
+  if (data.exam.status === "building" || data.exam.status === "failed") {
+    return (
+      <PracticeBuildStatus
+        practiceExamId={id}
+        title={data.exam.title}
+        subjectName={data.exam.subject_name}
+        status={data.exam.status}
+        error={data.exam.build_error}
+      />
+    );
   }
 
   if (data.questions.length === 0 || !data.attempt) {
@@ -28,6 +41,7 @@ export default async function StudentPracticeExamPage({
       examTitle={data.exam.title}
       subjectName={data.exam.subject_name}
       questions={data.questions}
+      savedAnswers={data.savedAnswers}
     />
   );
 }

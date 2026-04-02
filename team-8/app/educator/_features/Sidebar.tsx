@@ -136,9 +136,7 @@ export default function Sidebar() {
             {allNavItems.map((item) => {
               const isActive =
                 pathname === item.href ||
-                (item.href !== "/educator" && pathname.startsWith(item.href)) ||
-                (item.href === "/educator" &&
-                  pathname.startsWith("/educator/grading"));
+                (item.href !== "/educator" && pathname.startsWith(item.href));
 
               return (
                 <Link

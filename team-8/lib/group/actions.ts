@@ -3,6 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
+  getAttemptPercentage,
+  pickBestAttempt,
+  pickLatestAttempt,
+} from "@/lib/exam-attempt-utils";
+import {
   getPublishedAssignedExamIdsForGroup,
   syncExamRecipients,
   syncExamRecipientsForExams,
@@ -15,6 +20,22 @@ import {
 import { assignExamToGroupRecord } from "@/lib/exam-assignments";
 import { notifyStudentsOfNewExam } from "@/lib/notification/actions";
 import { getAllowedGroupIds, getAllTeachingGroupIds, isAdminUser } from "@/lib/teacher/permissions";
+
+type GroupScoreOverviewRow = {
+  student_id: string;
+  student_name: string;
+  student_email: string;
+  student_avatar_url: string | null;
+  joined_at: string;
+  score: number | null;
+  status: "passed" | "failed" | "not_taken";
+  status_label: string;
+  attempted_exam_count: number;
+  assigned_exam_count: number;
+  latest_exam_title: string | null;
+  latest_submitted_at: string | null;
+  passing_threshold: number;
+};
 
 async function notifyStudentAboutPublishedExamsInGroup(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -285,6 +306,155 @@ export async function getGroupMembers(groupId: string) {
     .order("joined_at", { ascending: false });
 
   return data ?? [];
+}
+
+export async function getGroupScoreOverview(groupId: string) {
+  const supabase = await createClient();
+
+  const [membersResult, assignmentsResult] = await Promise.all([
+    supabase
+      .from("student_group_members")
+      .select(
+        "student_id, joined_at, profiles!student_group_members_student_id_fkey(id, email, full_name, avatar_url)",
+      )
+      .eq("group_id", groupId)
+      .order("joined_at", { ascending: true }),
+    supabase
+      .from("exam_assignments")
+      .select("exam_id, exams(id, title, passing_score, is_published)")
+      .eq("group_id", groupId),
+  ]);
+
+  const members = membersResult.data ?? [];
+  const publishedExams = (assignmentsResult.data ?? []).flatMap((assignment) => {
+    const exam = Array.isArray(assignment.exams)
+      ? assignment.exams[0] ?? null
+      : assignment.exams;
+
+    return exam && exam.is_published
+      ? [
+          {
+            id: String(exam.id),
+            title: String(exam.title ?? "Шалгалт"),
+            passing_score: Number(exam.passing_score ?? 60),
+          },
+        ]
+      : [];
+  });
+
+  const examById = new Map(publishedExams.map((exam) => [exam.id, exam] as const));
+  const examIds = publishedExams.map((exam) => exam.id);
+  const studentIds = members.map((member) => String(member.student_id));
+
+  const sessions =
+    examIds.length > 0 && studentIds.length > 0
+      ? (
+          await supabase
+            .from("exam_sessions")
+            .select(
+              "id, exam_id, user_id, status, total_score, max_score, attempt_number, submitted_at, started_at",
+            )
+            .in("exam_id", examIds)
+            .in("user_id", studentIds)
+            .in("status", ["submitted", "graded", "timed_out"])
+        ).data ?? []
+      : [];
+
+  const sessionsByStudent = new Map<string, typeof sessions>();
+  for (const session of sessions) {
+    const existing = sessionsByStudent.get(String(session.user_id)) ?? [];
+    existing.push(session);
+    sessionsByStudent.set(String(session.user_id), existing);
+  }
+
+  const rows: GroupScoreOverviewRow[] = members.map((member) => {
+    const studentId = String(member.student_id);
+    const studentSessions = sessionsByStudent.get(studentId) ?? [];
+    const attemptsByExam = new Map<string, typeof studentSessions>();
+
+    for (const session of studentSessions) {
+      const examAttempts = attemptsByExam.get(String(session.exam_id)) ?? [];
+      examAttempts.push(session);
+      attemptsByExam.set(String(session.exam_id), examAttempts);
+    }
+
+    const bestAttempts = Array.from(attemptsByExam.entries())
+      .map(([examId, examAttempts]) => {
+        const bestAttempt = pickBestAttempt(examAttempts);
+        return bestAttempt ? { ...bestAttempt, exam_id: examId } : null;
+      })
+      .filter(
+        (
+          attempt,
+        ): attempt is NonNullable<typeof attempt> => Boolean(attempt),
+      );
+
+    const latestAttempt = pickLatestAttempt(studentSessions);
+    const latestExam = latestAttempt
+      ? examById.get(String(latestAttempt.exam_id))
+      : null;
+    const score =
+      bestAttempts.length > 0
+        ? Math.round(
+            bestAttempts.reduce(
+              (sum, attempt) => sum + getAttemptPercentage(attempt),
+              0,
+            ) / bestAttempts.length,
+          )
+        : null;
+    const passingThreshold =
+      bestAttempts.length > 0
+        ? Math.round(
+            bestAttempts.reduce(
+              (sum, attempt) =>
+                sum + Number(examById.get(String(attempt.exam_id))?.passing_score ?? 60),
+              0,
+            ) / bestAttempts.length,
+          )
+        : 60;
+
+    const status =
+      score === null
+        ? "not_taken"
+        : score >= passingThreshold
+          ? "passed"
+          : "failed";
+
+    const profile = Array.isArray(member.profiles)
+      ? member.profiles[0] ?? null
+      : member.profiles;
+
+    return {
+      student_id: studentId,
+      student_name:
+        String(profile?.full_name ?? "").trim() ||
+        String(profile?.email ?? "").trim() ||
+        "Нэргүй сурагч",
+      student_email: String(profile?.email ?? "").trim() || "Имэйлгүй",
+      student_avatar_url: profile?.avatar_url ?? null,
+      joined_at: String(member.joined_at),
+      score,
+      status,
+      status_label:
+        status === "passed"
+          ? "Тэнцсэн"
+          : status === "failed"
+            ? "Тэнцээгүй"
+            : "Шалгалт өгөөгүй",
+      attempted_exam_count: bestAttempts.length,
+      assigned_exam_count: publishedExams.length,
+      latest_exam_title: latestExam?.title ?? null,
+      latest_submitted_at:
+        String(latestAttempt?.submitted_at ?? latestAttempt?.started_at ?? "").trim() ||
+        null,
+      passing_threshold: passingThreshold,
+    };
+  });
+
+  return {
+    rows,
+    assigned_exam_count: publishedExams.length,
+  };
 }
 
 export async function addMemberToGroup(groupId: string, studentEmail: string) {

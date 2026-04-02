@@ -36,8 +36,48 @@ const NOTIFICATION_ICONS: Record<string, typeof Bell> = {
   exam_reminder_1hour: BellRing,
   ai_grading_complete: Bot,
   new_exam_assigned: Sparkles,
+  essay_review_resolved: GraduationCap,
   general: Bell,
 };
+
+const UNREAD_COUNT_CACHE_TTL_MS = 15_000;
+
+let unreadCountCache:
+  | {
+      value: number;
+      fetchedAt: number;
+    }
+  | null = null;
+let unreadCountRequest: Promise<number> | null = null;
+
+async function loadUnreadCount(force = false) {
+  const now = Date.now();
+  if (
+    !force &&
+    unreadCountCache &&
+    now - unreadCountCache.fetchedAt < UNREAD_COUNT_CACHE_TTL_MS
+  ) {
+    return unreadCountCache.value;
+  }
+
+  if (unreadCountRequest) {
+    return unreadCountRequest;
+  }
+
+  unreadCountRequest = getUnreadCount()
+    .then((count) => {
+      unreadCountCache = {
+        value: count,
+        fetchedAt: Date.now(),
+      };
+      return count;
+    })
+    .finally(() => {
+      unreadCountRequest = null;
+    });
+
+  return unreadCountRequest;
+}
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -64,35 +104,88 @@ export default function NotificationBell({
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isPending, startTransition] = useTransition();
-  const [loaded, setLoaded] = useState(false);
 
-  useEffect(() => {
+  function refreshNotifications(forceUnreadCount = false) {
     startTransition(async () => {
-      const count = await getUnreadCount();
+      const [data, count] = await Promise.all([
+        getNotifications(),
+        loadUnreadCount(forceUnreadCount),
+      ]);
+      setNotifications(data);
       setUnreadCount(count);
     });
+  }
+
+  useEffect(() => {
+    let isActive = true;
+
+    const syncUnreadCount = (force = false) => {
+      void loadUnreadCount(force).then((count) => {
+        if (!isActive) {
+          return;
+        }
+
+        setUnreadCount((currentCount) => {
+          if (open && currentCount !== count) {
+            startTransition(async () => {
+              const data = await getNotifications();
+              if (isActive) {
+                setNotifications(data);
+              }
+            });
+          }
+          return count;
+        });
+      });
+    };
+
+    syncUnreadCount();
 
     const interval = setInterval(() => {
-      void getUnreadCount().then(setUnreadCount);
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      void loadUnreadCount(true).then((count) => {
+        if (isActive) {
+          setUnreadCount(count);
+        }
+      });
     }, 30000);
 
-    return () => clearInterval(interval);
-  }, []);
+    const handleFocus = () => {
+      void loadUnreadCount(true).then((count) => {
+        if (isActive) {
+          setUnreadCount(count);
+        }
+      });
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
+  }, [open, startTransition]);
 
   function handleOpen(isOpen: boolean) {
     setOpen(isOpen);
-    if (isOpen && !loaded) {
-      startTransition(async () => {
-        const data = await getNotifications();
-        setNotifications(data);
-        setLoaded(true);
-      });
+    if (isOpen) {
+      refreshNotifications(true);
     }
   }
 
   async function handleMarkRead(notification: Notification) {
     if (!notification.is_read) {
       await markAsRead(notification.id);
+      unreadCountCache = {
+        value: Math.max(0, unreadCount - 1),
+        fetchedAt: Date.now(),
+      };
       setNotifications((prev) =>
         prev.map((n) =>
           n.id === notification.id ? { ...n, is_read: true } : n
@@ -110,6 +203,10 @@ export default function NotificationBell({
   async function handleMarkAllRead() {
     await markAllAsRead();
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    unreadCountCache = {
+      value: 0,
+      fetchedAt: Date.now(),
+    };
     setUnreadCount(0);
   }
 

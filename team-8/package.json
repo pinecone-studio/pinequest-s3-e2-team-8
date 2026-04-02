@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
+    "dev:turbo": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "clean:next": "rm -rf .next",
     "stress:setup": "node scripts/stress/setup-dataset.mjs",
     "stress:sessions": "node scripts/stress/create-session-cache.mjs",
     "stress:cleanup": "node scripts/stress/cleanup-dataset.mjs",

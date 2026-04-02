@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import MathContent from "@/components/math/MathContent";
+import { requestEssayReview } from "@/lib/student/actions";
 
 function parseStringArray(value: unknown) {
   try {
@@ -245,15 +248,16 @@ function renderCorrectAnswer(question: Record<string, unknown>) {
 interface QuestionStepperProps {
   answers: unknown[];
   canViewDetailedFeedback: boolean;
-  isFinalized: boolean;
 }
 
 export default function QuestionStepper({
   answers,
   canViewDetailedFeedback,
-  isFinalized,
 }: QuestionStepperProps) {
+  const router = useRouter();
   const [activeIndex, setActiveIndex] = useState(0);
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [isPending, startTransition] = useTransition();
   const items = (answers ?? []) as Record<string, unknown>[];
 
   if (!canViewDetailedFeedback || items.length === 0) {
@@ -276,8 +280,42 @@ export default function QuestionStepper({
   const isCorrect: boolean | null = (ans.derivedIsCorrect ?? ans.is_correct ?? null) as boolean | null;
   const score: number = Number((ans as Record<string, unknown>).derivedScore ?? (ans as Record<string, unknown>).score ?? 0);
   const points: number = Number(q.points ?? 0);
+  const scoreSource = String(ans.score_source ?? "objective");
+  const aiFeedback = String(ans.ai_feedback ?? "").trim();
+  const reviewStatus = String(ans.review_status ?? "none");
+  const reviewRequestedAt = String(ans.review_requested_at ?? "");
+  const canRequestReview = Boolean(ans.can_request_review);
   const isChoiceList =
     q.type === "multiple_choice" || q.type === "multiple_response";
+
+  const handleRequestReview = () => {
+    startTransition(async () => {
+      let result: Awaited<ReturnType<typeof requestEssayReview>> | null = null;
+
+      try {
+        result = await requestEssayReview(
+          String(ans.id),
+          reviewNotes[String(ans.id)] ?? "",
+        );
+      } catch (error) {
+        console.warn("[QuestionStepper] requestEssayReview failed", error);
+        alert("Review request илгээх үед алдаа гарлаа. Дахин оролдоно уу.");
+        return;
+      }
+
+      if (!result) {
+        alert("Review request илгээх үед алдаа гарлаа. Дахин оролдоно уу.");
+        return;
+      }
+
+      if (result.error) {
+        alert(result.error);
+        return;
+      }
+
+      router.refresh();
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -334,7 +372,38 @@ export default function QuestionStepper({
               <MathContent text={String(q.explanation)} />
             </div>
           )}
-          {isEssay && Boolean(ans.feedback) && (
+          {isEssay && scoreSource === "ai" && reviewStatus === "none" && (
+            <Badge variant="outline" className="text-xs text-purple-700">
+              AI үнэлсэн
+            </Badge>
+          )}
+          {isEssay && reviewStatus === "requested" && (
+            <Badge variant="outline" className="text-xs text-amber-700">
+              Багшийн review хүлээгдэж байна
+            </Badge>
+          )}
+          {isEssay && scoreSource === "teacher" && (
+            <Badge variant="outline" className="text-xs text-green-700">
+              Багш хянаж шийдвэрлэсэн
+            </Badge>
+          )}
+          {isEssay && reviewStatus === "requested" && Boolean(ans.review_reason) && (
+            <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
+              <span className="font-medium text-amber-700">
+                Илгээсэн тайлбар:
+              </span>{" "}
+              <span>{String(ans.review_reason)}</span>
+            </div>
+          )}
+          {isEssay && aiFeedback && (
+            <div className="rounded border border-purple-200 bg-purple-50 px-3 py-2 text-sm">
+              <span className="font-medium text-purple-700">
+                AI тайлбар:
+              </span>{" "}
+              <span>{aiFeedback}</span>
+            </div>
+          )}
+          {isEssay && scoreSource === "teacher" && Boolean(ans.feedback) && (
             <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
               <span className="font-medium text-blue-700">
                 Багшийн тайлбар:{" "}
@@ -342,10 +411,37 @@ export default function QuestionStepper({
               <span>{String((ans as Record<string, unknown>).feedback)}</span>
             </div>
           )}
-          {isEssay && !isFinalized && (
-            <Badge variant="outline" className="text-xs text-blue-600">
-              Багш шалгах хүлээгдэж байна
-            </Badge>
+          {isEssay && canRequestReview && (
+            <div className="rounded border bg-muted/40 px-3 py-3 text-sm">
+              <p className="font-medium text-foreground">
+                AI оноотой санал нийлэхгүй бол багшид хянахаар илгээнэ.
+              </p>
+              <div className="mt-3 space-y-2">
+                <Textarea
+                  placeholder="Тайлбар optional..."
+                  value={reviewNotes[String(ans.id)] ?? ""}
+                  onChange={(event) =>
+                    setReviewNotes((prev) => ({
+                      ...prev,
+                      [String(ans.id)]: event.target.value,
+                    }))
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleRequestReview}
+                  disabled={isPending}
+                >
+                  {isPending ? "Илгээж байна..." : "Review request илгээх"}
+                </Button>
+              </div>
+            </div>
+          )}
+          {isEssay && reviewStatus === "requested" && reviewRequestedAt && (
+            <p className="text-xs text-muted-foreground">
+              Request илгээсэн: {new Date(reviewRequestedAt).toLocaleString("mn-MN")}
+            </p>
           )}
           <div className="flex gap-2">
             <Button

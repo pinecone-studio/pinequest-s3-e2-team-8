@@ -47,6 +47,7 @@ export default async function TakeExamRunnerPage({
       exam={payload.exam}
       questions={payload.questions}
       sessionId={payload.sessionId}
+      runtimeToken={payload.runtimeToken}
       savedAnswers={payload.savedAnswers}
       answerAnalytics={payload.answerAnalytics}
       initialTimeLeftSeconds={payload.initialTimeLeftSeconds ?? 0}

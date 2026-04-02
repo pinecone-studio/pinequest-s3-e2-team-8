@@ -1,106 +1,53 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import MathContent from "@/components/math/MathContent";
-import { submitStudentPracticeExam } from "@/lib/student-learning/actions";
+import {
+  saveStudentPracticeDraft,
+  submitStudentPracticeExam,
+} from "@/lib/student-learning/actions";
+import {
+  isPracticeQuestionAnswered,
+  normalizeDraftAnswersForQuestions,
+  parseMatchingOptions,
+  parseStoredArray,
+} from "@/lib/student-learning/practice-utils";
 import type { StudentPracticeQuestionForTake } from "@/types";
-
-function parseStoredArray(value: string | undefined) {
-  if (!value) return [];
-
-  try {
-    const parsed = JSON.parse(value) as string[];
-    return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseMatchingOptions(options: string[] | null | undefined) {
-  return (options ?? [])
-    .map((option) => {
-      const [left, ...rightParts] = String(option).split("|||");
-      const right = rightParts.join("|||");
-      if (!left || !right) return null;
-      return { left, right };
-    })
-    .filter((item): item is { left: string; right: string } => Boolean(item));
-}
-
-function normalizeDraftAnswer(questionType: string, answer: string) {
-  if (questionType === "multiple_choice") {
-    return answer.trim() ? answer : null;
-  }
-
-  if (questionType === "essay" || questionType === "fill_blank") {
-    return answer.trim() ? answer : null;
-  }
-
-  if (questionType === "multiple_response") {
-    const nextAnswers = parseStoredArray(answer).filter((item) => item.trim());
-    return nextAnswers.length > 0 ? JSON.stringify(nextAnswers) : null;
-  }
-
-  if (questionType === "matching") {
-    try {
-      const parsed = JSON.parse(answer) as Record<string, string>;
-      const filteredEntries = Object.entries(parsed).filter(
-        ([, value]) => String(value ?? "").trim() !== ""
-      );
-
-      return filteredEntries.length > 0
-        ? JSON.stringify(Object.fromEntries(filteredEntries))
-        : null;
-    } catch {
-      return null;
-    }
-  }
-
-  return answer.trim() ? answer : null;
-}
-
-function isQuestionAnswered(
-  question: StudentPracticeQuestionForTake,
-  answer: string | undefined
-) {
-  return normalizeDraftAnswer(question.type, answer ?? "") !== null;
-}
 
 export default function PracticeExamTaker({
   practiceExamId,
   examTitle,
   subjectName,
   questions,
+  savedAnswers,
 }: {
   practiceExamId: string;
   examTitle: string;
   subjectName: string;
   questions: StudentPracticeQuestionForTake[];
+  savedAnswers: Record<string, string>;
 }) {
   const router = useRouter();
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string>>(() => {
-    if (typeof window === "undefined") return {};
-
-    const saved = window.localStorage.getItem(`student-practice:${practiceExamId}:draft`);
-    if (!saved) return {};
-
-    try {
-      return JSON.parse(saved) as Record<string, string>;
-    } catch {
-      window.localStorage.removeItem(`student-practice:${practiceExamId}:draft`);
-      return {};
-    }
-  });
+  const [answers, setAnswers] = useState<Record<string, string>>(savedAnswers);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-
-  const storageKey = `student-practice:${practiceExamId}:draft`;
+  const [draftStatus, setDraftStatus] = useState<"idle" | "saving" | "saved" | "error">(
+    Object.keys(savedAnswers).length > 0 ? "saved" : "idle"
+  );
+  const draftTimerRef = useRef<number | null>(null);
+  const getSerializedDraftSnapshot = useCallback(
+    (nextAnswers: Record<string, string>) =>
+      JSON.stringify(normalizeDraftAnswersForQuestions(questions, nextAnswers)),
+    [questions]
+  );
+  const lastSavedSnapshotRef = useRef(getSerializedDraftSnapshot(savedAnswers));
+  const savePromiseRef = useRef<Promise<void> | null>(null);
   const currentQuestion = questions[currentIndex] ?? questions[0] ?? null;
   const currentQuestionId = currentQuestion?.id ?? "";
   const currentMultiAnswer = parseStoredArray(answers[currentQuestionId]);
@@ -114,19 +61,95 @@ export default function PracticeExamTaker({
   })();
 
   const answeredCount = useMemo(
-    () => questions.filter((question) => isQuestionAnswered(question, answers[question.id])).length,
+    () =>
+      questions.filter((question) => isPracticeQuestionAnswered(question, answers[question.id]))
+        .length,
     [answers, questions]
   );
 
+  const persistDraft = useCallback(async (nextAnswers: Record<string, string>) => {
+    const normalizedAnswers = normalizeDraftAnswersForQuestions(questions, nextAnswers);
+    const serializedSnapshot = JSON.stringify(normalizedAnswers);
+    if (serializedSnapshot === lastSavedSnapshotRef.current) {
+      setDraftStatus("saved");
+      return;
+    }
+
+    setDraftStatus("saving");
+    const previousSave = savePromiseRef.current;
+    const savePromise = (async () => {
+      if (previousSave) {
+        await previousSave;
+      }
+
+      const result = await saveStudentPracticeDraft(practiceExamId, normalizedAnswers);
+      if ("error" in result) {
+        setDraftStatus("error");
+        setError(result.error ?? "Practice draft хадгалахад алдаа гарлаа.");
+        return;
+      }
+
+      lastSavedSnapshotRef.current = serializedSnapshot;
+      setError(null);
+      setDraftStatus("saved");
+    })();
+
+    const trackedPromise = savePromise.finally(() => {
+      if (savePromiseRef.current === trackedPromise) {
+        savePromiseRef.current = null;
+      }
+    });
+    savePromiseRef.current = trackedPromise;
+
+    await trackedPromise;
+  }, [practiceExamId, questions]);
+
+  const flushDraftSave = async () => {
+    if (draftTimerRef.current) {
+      window.clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
+    }
+
+    const serializedAnswers = getSerializedDraftSnapshot(answers);
+    if (serializedAnswers !== lastSavedSnapshotRef.current) {
+      await persistDraft(answers);
+      return;
+    }
+
+    if (savePromiseRef.current) {
+      await savePromiseRef.current;
+    }
+  };
+
   useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify(answers));
-  }, [answers, storageKey]);
+    const serializedAnswers = getSerializedDraftSnapshot(answers);
+    if (serializedAnswers === lastSavedSnapshotRef.current) {
+      return;
+    }
+
+    if (draftTimerRef.current) {
+      window.clearTimeout(draftTimerRef.current);
+    }
+
+    draftTimerRef.current = window.setTimeout(() => {
+      draftTimerRef.current = null;
+      void persistDraft(answers);
+    }, 2000);
+
+    return () => {
+      if (draftTimerRef.current) {
+        window.clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+    };
+  }, [answers, getSerializedDraftSnapshot, persistDraft]);
 
   if (!currentQuestion) {
     return null;
   }
 
   const handleAnswerChange = (questionId: string, value: string) => {
+    setDraftStatus("idle");
     setAnswers((current) => ({
       ...current,
       [questionId]: value,
@@ -134,6 +157,7 @@ export default function PracticeExamTaker({
   };
 
   const handleMultipleResponseToggle = (questionId: string, option: string) => {
+    setDraftStatus("idle");
     setAnswers((current) => {
       const selected = parseStoredArray(current[questionId]);
       const next = selected.includes(option)
@@ -148,6 +172,7 @@ export default function PracticeExamTaker({
   };
 
   const handleMatchingChange = (questionId: string, leftValue: string, rightValue: string) => {
+    setDraftStatus("idle");
     setAnswers((current) => {
       let parsed: Record<string, string> = {};
       try {
@@ -173,15 +198,14 @@ export default function PracticeExamTaker({
 
     startTransition(async () => {
       setError(null);
+      await flushDraftSave();
       const result = await submitStudentPracticeExam(practiceExamId, answers);
       if ("error" in result) {
         setError(result.error ?? "Practice шалгалтыг илгээхэд алдаа гарлаа.");
         return;
       }
 
-      window.localStorage.removeItem(storageKey);
       router.push(result.redirectTo);
-      router.refresh();
     });
   };
 
@@ -198,6 +222,15 @@ export default function PracticeExamTaker({
         <div className="flex items-center gap-2">
           <Badge variant="outline">{questions.length} асуулт</Badge>
           <Badge variant="secondary">{answeredCount} хариулсан</Badge>
+          <Badge variant="outline">
+            {draftStatus === "saving"
+              ? "Хадгалж байна"
+              : draftStatus === "saved"
+                ? "Draft хадгалсан"
+                : draftStatus === "error"
+                  ? "Draft алдаатай"
+                  : "Draft бэлэн"}
+          </Badge>
         </div>
       </div>
 
@@ -214,7 +247,7 @@ export default function PracticeExamTaker({
           </CardHeader>
           <CardContent className="grid grid-cols-5 gap-2 xl:grid-cols-4">
             {questions.map((question, index) => {
-              const answered = isQuestionAnswered(question, answers[question.id]);
+              const answered = isPracticeQuestionAnswered(question, answers[question.id]);
               const active = index === currentIndex;
               return (
                 <button
@@ -247,6 +280,14 @@ export default function PracticeExamTaker({
               text={currentQuestion.content}
               className="prose prose-sm max-w-none text-zinc-900"
             />
+            {currentQuestion.image_url && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={currentQuestion.image_url}
+                alt="Practice асуултын зураг"
+                className="max-h-64 rounded-xl"
+              />
+            )}
           </CardHeader>
           <CardContent className="space-y-4">
             {currentQuestion.type === "multiple_choice" &&

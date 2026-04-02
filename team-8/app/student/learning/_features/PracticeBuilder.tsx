@@ -13,9 +13,10 @@ type PracticeHistoryItem = {
   title: string;
   question_count: number;
   created_at: string;
-  status: string;
+  status: "building" | "failed" | "in_progress" | "graded";
   submitted_at: string | null;
   percentage: number | null;
+  build_error: string | null;
 };
 
 const TIMEZONE = "Asia/Ulaanbaatar";
@@ -75,7 +76,6 @@ export default function PracticeBuilder({
       }
 
       router.push(result.redirectTo);
-      router.refresh();
     });
   };
 
@@ -175,9 +175,29 @@ export default function PracticeBuilder({
                   <p className="text-xs text-muted-foreground">
                     {item.question_count} асуулт · Үүсгэсэн: {formatDateTime(item.created_at)}
                   </p>
+                  {item.status === "failed" && item.build_error ? (
+                    <p className="text-xs text-destructive">{item.build_error}</p>
+                  ) : null}
                 </div>
 
                 <div className="flex items-center gap-3">
+                  <Badge
+                    variant={
+                      item.status === "graded"
+                        ? "secondary"
+                        : item.status === "failed"
+                          ? "outline"
+                          : "outline"
+                    }
+                  >
+                    {item.status === "building"
+                      ? "Бэлтгэж байна"
+                      : item.status === "failed"
+                        ? "Алдаатай"
+                        : item.status === "graded"
+                          ? "Дууссан"
+                          : "Үргэлжилж байна"}
+                  </Badge>
                   {item.percentage !== null && (
                     <Badge variant="secondary">{item.percentage}%</Badge>
                   )}
@@ -189,7 +209,13 @@ export default function PracticeBuilder({
                     }
                   >
                     <Button size="sm" variant="outline">
-                      {item.status === "graded" ? "Үр дүн" : "Үргэлжлүүлэх"}
+                      {item.status === "graded"
+                        ? "Үр дүн"
+                        : item.status === "failed"
+                          ? "Шалгах"
+                          : item.status === "building"
+                            ? "Төлөв харах"
+                            : "Үргэлжлүүлэх"}
                     </Button>
                   </Link>
                 </div>

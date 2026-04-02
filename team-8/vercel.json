@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/student-learning/process",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/exam-results/process",
       "schedule": "*/5 * * * *"
     },

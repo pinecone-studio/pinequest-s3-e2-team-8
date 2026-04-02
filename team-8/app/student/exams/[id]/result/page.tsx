@@ -218,17 +218,41 @@ export default async function ExamResultPage({
     maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
   const passingScore = examMeta?.passing_score ?? 60;
   const passed = percentage >= passingScore;
-  const hasEssayAnswers = derivedAnswers.some((answer) => {
-    const question = Array.isArray(answer.questions)
-      ? answer.questions[0]
-      : answer.questions;
-    return question?.type === "essay";
-  });
-  const isFinalized =
-    data.status === "graded" ||
-    (data.status === "timed_out" &&
-      canViewDetailedFeedback &&
-      !hasEssayAnswers);
+  const hasPendingReview =
+    Boolean(data.has_pending_review) ||
+    derivedAnswers.some(
+      (answer) => String(answer.review_status ?? "none") === "requested",
+    );
+  const isFinalized = data.status === "graded" || data.status === "timed_out";
+
+  if (data.grading_pending) {
+    return (
+      <div className="mx-auto mt-12 flex max-w-3xl flex-col items-center px-4">
+        <div className="w-full rounded-[28px] border bg-white p-8 shadow-sm text-center">
+          <h1 className="text-2xl font-semibold text-foreground">
+            {examMeta?.title ?? "Шалгалтын үр дүн"}
+          </h1>
+          <p className="mt-4 text-sm text-muted-foreground">
+            Үр дүн боловсруулагдаж байна. Хэсэг хугацааны дараа дахин орж шалгана уу.
+          </p>
+          <div className="mt-6 flex justify-center gap-3">
+            <Link
+              href="/student/results"
+              className="inline-flex items-center justify-center rounded-xl bg-black px-5 py-2.5 text-sm font-medium text-white"
+            >
+              Миний дүн
+            </Link>
+            <Link
+              href="/student/exams"
+              className="inline-flex items-center justify-center rounded-xl border px-5 py-2.5 text-sm font-medium text-foreground"
+            >
+              Шалгалтын жагсаалт
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex justify-center items-center mt-10">
@@ -249,7 +273,6 @@ export default async function ExamResultPage({
                 <QuestionStepper
                   answers={derivedAnswers}
                   canViewDetailedFeedback={canViewDetailedFeedback}
-                  isFinalized={isFinalized}
                 />
               </div>
             </div>
@@ -262,8 +285,8 @@ export default async function ExamResultPage({
               >
                 <div className="mx-auto text-4xl font-bold ">{percentage}%</div>
                 <p className="text-[16px] text-[#7F7F7F]">
-                  Таны <span className="font-medium">{totalScore}</span> хариулт
-                  зөв байна.
+                  Таны оноо <span className="font-medium">{totalScore}</span> /{" "}
+                  <span className="font-medium">{maxScore}</span>.
                 </p>
               </div>
 
@@ -330,10 +353,10 @@ export default async function ExamResultPage({
                   })}
                 </div>
               )}
-              {!isFinalized && (
+              {hasPendingReview && (
                 <p className="text-sm text-muted-foreground w-62.5">
-                  Нээлттэй хариулт (essay) асуултуудыг багш шалгасны дараа
-                  эцсийн оноо өөрчлөгдөж болно.
+                  Review request илгээсэн essay-ийн оноо багшийн шийдвэрийн дараа
+                  өөрчлөгдөж болно.
                 </p>
               )}
               {!canViewDetailedFeedback && (
@@ -343,9 +366,9 @@ export default async function ExamResultPage({
                   хамгийн өндөр дүнг л үзүүлж байна.
                 </p>
               )}
-              {isFinalized && (
+              {isFinalized && !hasPendingReview && (
                 <p className="text-sm font-medium text-green-600 w-62.5">
-                  ✓ Багш шалгаж дүн баталгаажсан
+                  ✓ Дүн баталгаажсан
                 </p>
               )}
               {Number(data.best_attempt_number ?? 0) > 0 && (

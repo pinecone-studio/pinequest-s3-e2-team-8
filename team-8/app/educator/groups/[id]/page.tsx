@@ -1,16 +1,13 @@
 import { notFound } from "next/navigation";
 import {
-  getGroupById,
-  getGroupMembers,
-  getGroupExamAssignments,
   getAvailableExams,
+  getGroupById,
+  getGroupExamAssignments,
+  getGroupScoreOverview,
 } from "@/lib/group/actions";
 import { createClient } from "@/lib/supabase/server";
-import { Search, Users } from "lucide-react";
-import AddMemberForm from "./_features/AddMemberForm";
-import MemberList from "./_features/MemberList";
 import AssignExamSection from "./_features/AssignExamSection";
-import { Input } from "@/components/ui/input";
+import GroupResultsBoard from "./_features/GroupResultsBoard";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -31,41 +28,24 @@ export default async function GroupDetailPage({ params }: Props) {
   const isAdmin = profile?.role === "admin";
 
   const group = await getGroupById(id);
-
   if (!group) notFound();
 
-  const [members, assignments, availableExams] = await Promise.all([
-    getGroupMembers(id),
+  const [scoreOverview, assignments, availableExams] = await Promise.all([
+    getGroupScoreOverview(id),
     getGroupExamAssignments(id),
     getAvailableExams(id),
   ]);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between">
-        <div className="flex">
-          <Search />
-          <Input />
-        </div>
-        <div className="flex items-center gap-2">
-          <div>Өгөгдөл татах</div>
-          <div>Сурагч нэмэх</div>
-        </div>
-      </div>
+    <div className="space-y-8 pb-8">
+      <GroupResultsBoard
+        groupId={id}
+        groupName={group.name}
+        canManage={isAdmin}
+        rows={scoreOverview.rows}
+      />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Гишүүд */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            <h3 className="font-semibold">Гишүүд ({members.length})</h3>
-          </div>
-          {isAdmin && <AddMemberForm groupId={id} />}
-          <MemberList members={members} groupId={id} canManage={isAdmin} />
-        </div>
-
-        {/* Шалгалт оноох */}
+      <div className="rounded-[28px] border border-[#E3EBF4] bg-white/90 p-5 shadow-[0_16px_38px_rgba(171,189,214,0.14)]">
         <AssignExamSection
           groupId={id}
           assignments={assignments}
