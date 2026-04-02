@@ -83,7 +83,7 @@ function ExamCard({
 
   return (
     <article
-      className={`relative h-[226px] w-full max-w-[340px] overflow-hidden rounded-[13px] ${bgColor} shadow-[0_2px_6px_rgba(0,0,0,0.25)]`}
+      className={`relative h-[226px] w-full overflow-hidden rounded-[13px] ${bgColor} shadow-[0_2px_6px_rgba(0,0,0,0.25)] sm:max-w-[340px]`}
     >
       <div
         className="absolute left-0 top-[68px] h-[158px] w-full bg-white shadow-[0_4px_10px_rgba(0,0,0,0.10)]"
@@ -97,11 +97,10 @@ function ExamCard({
       />
 
       <svg
-        className="pointer-events-none absolute left-0 top-[68px]"
-        width="340"
-        height="158"
+        className="pointer-events-none absolute left-0 top-[68px] h-[158px] w-full"
         viewBox="0 0 340 158"
         fill="none"
+        preserveAspectRatio="none"
       >
         <path
           d="M13 0H265.2L285.6 22H327C334.18 22 340 27.82 340 35V145C340 152.18 334.18 158 327 158H13C5.82 158 0 152.18 0 145V13C0 5.82 5.82 0 13 0Z"
@@ -111,7 +110,7 @@ function ExamCard({
         />
       </svg>
 
-      <div className="absolute left-5 top-[85px] flex h-[128px] w-[300px] flex-col items-start gap-[14px]">
+      <div className="absolute left-5 right-5 top-[85px] flex h-[128px] flex-col items-start gap-[14px]">
         <div className="flex w-full flex-col items-start gap-3">
           <div className="flex w-full flex-col items-start gap-[10px]">
             <div className="h-[45px] w-full">
@@ -222,7 +221,7 @@ export default async function StudentDashboard() {
             Одоогоор идэвхтэй шалгалт байхгүй байна.
           </p>
         ) : (
-          <div className="grid grid-cols-1 justify-items-start gap-x-[34px] gap-y-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 justify-items-stretch gap-x-[34px] gap-y-6 sm:justify-items-start lg:grid-cols-2">
             {activeExams.map((exam, index) => (
               <ExamCard
                 key={exam.id}
@@ -250,7 +249,7 @@ export default async function StudentDashboard() {
             Удахгүй болох шалгалт байхгүй байна.
           </p>
         ) : (
-          <div className="grid grid-cols-1 justify-items-start gap-x-[34px] gap-y-[22px] md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 justify-items-stretch gap-x-[34px] gap-y-[22px] sm:justify-items-start md:grid-cols-2 xl:grid-cols-3">
             {scheduledExams.map((exam, index) => (
               <ExamCard
                 key={exam.id}

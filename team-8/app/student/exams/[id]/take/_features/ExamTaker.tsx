@@ -2000,7 +2000,7 @@ export default function ExamTaker({
         <div className="relative flex h-full items-center justify-center px-6">
           {/* Camera indicator — aligned with content start */}
           {requireCamera && (
-            <div className="absolute left-[calc((100%-1220px)/2+1rem)] flex items-center gap-2">
+            <div className="absolute left-4 md:left-[calc((100%-1220px)/2+1rem)] flex items-center gap-2">
               <div className="flex items-center gap-1.5">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#DBF0DF]">
                   <svg viewBox="0 0 20 16" className="h-4 w-4 fill-[#3B8748]">
@@ -2036,7 +2036,7 @@ export default function ExamTaker({
       {/* ── Main page area ── */}
       <div className="mx-auto flex w-full max-w-[1220px] flex-col gap-[36px] px-4 pb-10 pt-24.75">
         {/* Subject + progress row */}
-        <div className="flex w-full max-w-[1090px] items-center gap-6">
+        <div className="flex w-full max-w-full flex-col items-start gap-4 md:max-w-[1090px] md:flex-row md:items-center md:gap-6">
           <div className="shrink-0">
             <h1 className="text-[20px] font-medium leading-[120%] text-black">
               {exam.title as string}
@@ -2046,7 +2046,9 @@ export default function ExamTaker({
             </p>
           </div>
 
-          <DividerLine />
+          <div className="hidden md:block">
+            <DividerLine />
+          </div>
 
           <div className="flex min-w-0 flex-1 flex-col gap-[6px]">
             <p className="text-base font-medium leading-[120%] text-black">
@@ -2063,12 +2065,12 @@ export default function ExamTaker({
 
         {/* Alert banners */}
         {!isOnline && (
-          <div className="w-full max-w-[1090px] rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm font-medium text-amber-800">
+          <div className="w-full max-w-full rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm font-medium text-amber-800 md:max-w-[1090px]">
             Сүлжээ тасарсан байна. Хариултыг төхөөрөмж дээр хадгалж, холболт сэргээхийг хүлээж байна.
           </div>
         )}
         {gazeWarningCount > 0 && !isMobileStandard && (
-          <div className="w-full max-w-[1090px] rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-center text-sm font-medium text-red-700">
+          <div className="w-full max-w-full rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-center text-sm font-medium text-red-700 md:max-w-[1090px]">
             {gazeWarningCount < 3
               ? `Анхааруулга ${gazeWarningCount}/3: Та камерын өмнө шулуун харна уу. ${3 - gazeWarningCount} анхааруулга үлдсэн.`
               : "Анхааруулга 3/3: Шалгалт дуусгагдаж байна..."}
@@ -2076,7 +2078,7 @@ export default function ExamTaker({
         )}
 
         {/* Status badges */}
-        <div className="flex w-full max-w-[1090px] flex-wrap items-center gap-2">
+        <div className="flex w-full max-w-full flex-wrap items-center gap-2 md:max-w-[1090px]">
           {!isOnline && <Badge variant="destructive">Offline</Badge>}
           {cameraStatus === "denied" && <Badge variant="destructive">Камер хаалттай</Badge>}
           {shouldEnforceFullscreen && !fullscreenActive && <Badge variant="destructive">Fullscreen off</Badge>}
@@ -2089,12 +2091,12 @@ export default function ExamTaker({
         </div>
 
         {/* Two-column content: question card + tools */}
-        <div className="flex items-start gap-[22px]">
+        <div className="flex flex-col items-start gap-[22px] lg:flex-row">
           {/* Left column — 1090px */}
-          <div className="flex w-[1090px] shrink-0 flex-col gap-[22px]">
+          <div className="flex w-full flex-col gap-[22px] lg:w-[1090px] lg:shrink-0">
 
             {/* Fixed-height question card */}
-            <div className="h-[656px] w-[1090px] overflow-y-auto rounded-[16px] bg-white shadow-[0_4px_10px_rgba(0,0,0,0.1)]">
+            <div className="w-full rounded-[16px] bg-white shadow-[0_4px_10px_rgba(0,0,0,0.1)] lg:h-[656px] lg:w-[1090px] lg:overflow-y-auto">
               <div className="mx-auto flex w-full max-w-[992px] flex-col gap-[42px] py-5">
                 <div className="flex flex-col gap-[42px]">
                   <div className="px-4 sm:px-0">
@@ -2235,7 +2237,7 @@ export default function ExamTaker({
             </div>
 
             {/* Bottom nav row — spread prev/next */}
-            <div className="flex h-10 w-[1090px] items-center justify-between">
+            <div className="hidden h-10 w-full items-center justify-between md:flex lg:w-[1090px]">
               <Button
                 variant="ghost"
                 onClick={() => setCurrentIndex((p) => Math.max(0, p - 1))}
@@ -2273,7 +2275,7 @@ export default function ExamTaker({
           </div>
 
           {/* Right tool column — 108px */}
-          <div className="flex w-[108px] shrink-0 flex-col gap-[16px]">
+          <div className="hidden w-[108px] shrink-0 flex-col gap-[16px] lg:flex">
             <ToolTile
               icon={<Calculator className="h-[18px] w-[18px]" />}
               label="Тооцоолуур"
