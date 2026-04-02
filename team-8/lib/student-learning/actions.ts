@@ -5,6 +5,8 @@ import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { redis } from "@/lib/redis";
+import { publishLearningJob } from "@/lib/aws/sqs";
+import type { LearningJob } from "@/lib/aws/jobs";
 import { getModel } from "@/lib/ai/config";
 import { pickBestAttempt } from "@/lib/exam-attempt-utils";
 import type {
@@ -256,21 +258,53 @@ const STALE_PRACTICE_BUILD_CLAIM_MS = 10 * 60 * 1000;
 const PRACTICE_SESSION_STALE_ERROR =
   "Practice асуултууд шинэчлэгдсэн байна. Хуудсыг дахин ачаалаад үргэлжлүүлнэ үү.";
 
-function scheduleStudentLearningProcessing() {
-  try {
-    after(async () => {
-      try {
-        await processPendingStudentLearningJobs({
-          masteryBatchSize: DEFAULT_MASTERY_REFRESH_BATCH_SIZE,
-          studyPlanBatchSize: 1,
-          practiceBuildBatchSize: 1,
-        });
-      } catch (error) {
-        console.error("Failed to process student learning jobs after response", error);
+function scheduleStudentLearningProcessing(job?: LearningJob | null) {
+  if (!job) {
+    try {
+      after(async () => {
+        try {
+          await processPendingStudentLearningJobs({
+            masteryBatchSize: DEFAULT_MASTERY_REFRESH_BATCH_SIZE,
+            studyPlanBatchSize: 1,
+            practiceBuildBatchSize: 1,
+          });
+        } catch (error) {
+          console.error("Failed to process student learning jobs after response", error);
+        }
+      });
+    } catch (error) {
+      console.error("Failed to schedule student learning jobs", error);
+    }
+
+    return;
+  }
+
+  const runTargetedJob = async () => {
+    const allowRevalidate = !process.env.AWS_LAMBDA_FUNCTION_NAME;
+
+    try {
+      const publishResult = await publishLearningJob(job);
+      if (publishResult.queued) {
+        return;
       }
-    });
+    } catch (error) {
+      console.error("[learning-queue] Failed to publish learning job", error);
+    }
+
+    try {
+      await processLearningQueueJob(job, {
+        allowRevalidate,
+      });
+    } catch (error) {
+      console.error("Failed to process student learning job after response", error);
+    }
+  };
+
+  try {
+    after(runTargetedJob);
   } catch (error) {
-    console.error("Failed to schedule student learning jobs", error);
+    console.error("Failed to schedule targeted student learning job", error);
+    void runTargetedJob();
   }
 }
 
@@ -684,7 +718,13 @@ export async function enqueueStudentTopicMasteryRefresh(
 ) {
   const admin = createAdminClient();
   const result = await enqueueStudentTopicMasteryRefreshInternal(admin, studentId, subjectId);
-  scheduleStudentLearningProcessing();
+  scheduleStudentLearningProcessing({
+    jobType: "mastery_refresh",
+    studentId,
+    subjectId: subjectId ?? undefined,
+    queuedAt: new Date().toISOString(),
+    triggeredBy: "enqueue_mastery_refresh",
+  });
   return result;
 }
 
@@ -1181,7 +1221,12 @@ async function ensureStudentTopicMasteryAvailable(
   if ((data?.length ?? 0) === 0) {
     if (!isRefreshing) {
       await enqueueStudentTopicMasteryRefreshInternal(admin, studentId);
-      scheduleStudentLearningProcessing();
+      scheduleStudentLearningProcessing({
+        jobType: "mastery_refresh",
+        studentId,
+        queuedAt: new Date().toISOString(),
+        triggeredBy: "enqueue_mastery_refresh",
+      });
     }
 
     return {
@@ -1876,7 +1921,13 @@ export async function refreshStudentSubjectStudyPlan(subjectId: string) {
 
   revalidatePath("/student");
   revalidatePath("/student/learning");
-  scheduleStudentLearningProcessing();
+  scheduleStudentLearningProcessing({
+    jobType: "study_plan",
+    studentId: context.userId,
+    subjectId,
+    queuedAt: new Date().toISOString(),
+    triggeredBy: "study_plan_request",
+  });
 
   return { success: true };
 }
@@ -2422,7 +2473,14 @@ export async function createStudentPracticeExam(input: {
 
   revalidatePath("/student");
   revalidatePath("/student/learning");
-  scheduleStudentLearningProcessing();
+  scheduleStudentLearningProcessing({
+    jobType: "practice_build",
+    studentId: context.userId,
+    subjectId: input.subjectId,
+    practiceExamId: String(practiceExam.id),
+    queuedAt: new Date().toISOString(),
+    triggeredBy: "practice_build_request",
+  });
 
   return {
     success: true,
@@ -2841,6 +2899,155 @@ export async function processPendingStudentLearningJobs(options?: {
   };
 }
 
+export async function processLearningQueueJob(
+  job: LearningJob,
+  options?: {
+    allowRevalidate?: boolean;
+  }
+): Promise<ProcessCurrentStudentLearningWorkResult> {
+  const admin = createAdminClient();
+
+  try {
+    if (job.jobType === "practice_build") {
+      if (!job.practiceExamId) {
+        return {
+          processed: false,
+          kind: "practice_build",
+          status: "error",
+          error: "practice_exam_id_required",
+        };
+      }
+
+      const practiceCandidates = await listStudentPracticeBuildCandidates(
+        admin,
+        job.studentId,
+        job.practiceExamId
+      );
+
+      for (const practiceCandidate of practiceCandidates) {
+        const claimed = await claimPendingPracticeBuild(admin, practiceCandidate);
+        if (!claimed) {
+          continue;
+        }
+
+        const result = await processClaimedPracticeBuildJob(admin, practiceCandidate);
+        if (options?.allowRevalidate !== false) {
+          revalidateStudentLearningViews(practiceCandidate.id);
+        }
+
+        return result.success
+          ? {
+              processed: true,
+              kind: "practice_build",
+              status: "processed",
+            }
+          : {
+              processed: false,
+              kind: "practice_build",
+              status: "error",
+              error: result.error,
+            };
+      }
+
+      return {
+        processed: false,
+        kind: "practice_build",
+        status: practiceCandidates.length > 0 ? "claimed_elsewhere" : "idle",
+      };
+    }
+
+    if (job.jobType === "mastery_refresh") {
+      const masteryCandidates = await listStudentMasteryRefreshCandidates(
+        admin,
+        job.studentId,
+        job.subjectId ?? undefined
+      );
+
+      for (const masteryCandidate of masteryCandidates) {
+        const claimed = await claimStudentMasteryRefreshJob(admin, masteryCandidate);
+        if (!claimed) {
+          continue;
+        }
+
+        const result = await processClaimedMasteryRefreshJob(admin, claimed);
+        if (options?.allowRevalidate !== false) {
+          revalidateStudentLearningViews();
+        }
+
+        return result.success
+          ? {
+              processed: true,
+              kind: "mastery",
+              status: "processed",
+            }
+          : {
+              processed: false,
+              kind: "mastery",
+              status: "error",
+              error: result.error,
+            };
+      }
+
+      return {
+        processed: false,
+        kind: "mastery",
+        status: masteryCandidates.length > 0 ? "claimed_elsewhere" : "idle",
+      };
+    }
+
+    const studyPlanCandidates = await listStudentStudyPlanCandidates(
+      admin,
+      job.studentId,
+      job.subjectId ?? undefined
+    );
+
+    for (const studyPlanCandidate of studyPlanCandidates) {
+      const claimed = await claimPendingStudyPlanJob(admin, studyPlanCandidate);
+      if (!claimed) {
+        continue;
+      }
+
+      const result = await processClaimedStudyPlanJob(admin, studyPlanCandidate);
+      if (options?.allowRevalidate !== false) {
+        revalidateStudentLearningViews();
+      }
+
+      return result.success
+        ? {
+            processed: true,
+            kind: "study_plan",
+            status: "processed",
+          }
+        : {
+            processed: false,
+            kind: "study_plan",
+            status: "error",
+            error: result.error,
+          };
+    }
+
+    return {
+      processed: false,
+      kind: "study_plan",
+      status: studyPlanCandidates.length > 0 ? "claimed_elsewhere" : "idle",
+    };
+  } catch (error) {
+    const fallbackKind =
+      job.jobType === "practice_build"
+        ? "practice_build"
+        : job.jobType === "mastery_refresh"
+          ? "mastery"
+          : "study_plan";
+
+    return {
+      processed: false,
+      kind: fallbackKind,
+      status: "error",
+      error: error instanceof Error ? error.message : "unknown_error",
+    };
+  }
+}
+
 function revalidateStudentLearningViews(practiceExamId?: string) {
   revalidatePath("/student");
   revalidatePath("/student/learning");
@@ -2932,120 +3139,59 @@ export async function processCurrentStudentLearningWork(input: {
     };
   }
 
-  const admin = createAdminClient();
-
   try {
     if (input.practiceExamId) {
-      const practiceCandidates = await listStudentPracticeBuildCandidates(
-        admin,
-        context.userId,
-        input.practiceExamId
+      const practiceResult = await processLearningQueueJob(
+        {
+          jobType: "practice_build",
+          studentId: context.userId,
+          subjectId: input.subjectId,
+          practiceExamId: input.practiceExamId,
+          queuedAt: new Date().toISOString(),
+          triggeredBy: "student_page_poller",
+        },
+        {
+          allowRevalidate: true,
+        }
       );
 
-      for (const practiceCandidate of practiceCandidates) {
-        const claimed = await claimPendingPracticeBuild(admin, practiceCandidate);
-        if (!claimed) {
-          continue;
-        }
-
-        const result = await processClaimedPracticeBuildJob(admin, practiceCandidate);
-        revalidateStudentLearningViews(practiceCandidate.id);
-
-        return result.success
-          ? {
-              processed: true,
-              kind: "practice_build",
-              status: "processed",
-            }
-          : {
-              processed: false,
-              kind: "practice_build",
-              status: "error",
-              error: result.error,
-            };
-      }
-
-      if (practiceCandidates.length > 0) {
-        return {
-          processed: false,
-          kind: "practice_build",
-          status: "claimed_elsewhere",
-        };
+      if (practiceResult.status !== "idle") {
+        return practiceResult;
       }
     }
 
-    const masteryCandidates = await listStudentMasteryRefreshCandidates(
-      admin,
-      context.userId,
-      input.subjectId
+    const masteryResult = await processLearningQueueJob(
+      {
+        jobType: "mastery_refresh",
+        studentId: context.userId,
+        subjectId: input.subjectId,
+        queuedAt: new Date().toISOString(),
+        triggeredBy: "student_page_poller",
+      },
+      {
+        allowRevalidate: true,
+      }
     );
 
-    for (const masteryCandidate of masteryCandidates) {
-      const claimed = await claimStudentMasteryRefreshJob(admin, masteryCandidate);
-      if (!claimed) {
-        continue;
+    if (masteryResult.status !== "idle") {
+      return masteryResult;
+    }
+
+    const studyPlanResult = await processLearningQueueJob(
+      {
+        jobType: "study_plan",
+        studentId: context.userId,
+        subjectId: input.subjectId,
+        queuedAt: new Date().toISOString(),
+        triggeredBy: "student_page_poller",
+      },
+      {
+        allowRevalidate: true,
       }
-
-      const result = await processClaimedMasteryRefreshJob(admin, claimed);
-      revalidateStudentLearningViews(input.practiceExamId);
-
-      return result.success
-        ? {
-            processed: true,
-            kind: "mastery",
-            status: "processed",
-          }
-        : {
-            processed: false,
-            kind: "mastery",
-            status: "error",
-            error: result.error,
-          };
-    }
-
-    if (masteryCandidates.length > 0) {
-      return {
-        processed: false,
-        kind: "mastery",
-        status: "claimed_elsewhere",
-      };
-    }
-
-    const studyPlanCandidates = await listStudentStudyPlanCandidates(
-      admin,
-      context.userId,
-      input.subjectId
     );
 
-    for (const studyPlanCandidate of studyPlanCandidates) {
-      const claimed = await claimPendingStudyPlanJob(admin, studyPlanCandidate);
-      if (!claimed) {
-        continue;
-      }
-
-      const result = await processClaimedStudyPlanJob(admin, studyPlanCandidate);
-      revalidateStudentLearningViews(input.practiceExamId);
-
-      return result.success
-        ? {
-            processed: true,
-            kind: "study_plan",
-            status: "processed",
-          }
-        : {
-            processed: false,
-            kind: "study_plan",
-            status: "error",
-            error: result.error,
-          };
-    }
-
-    if (studyPlanCandidates.length > 0) {
-      return {
-        processed: false,
-        kind: "study_plan",
-        status: "claimed_elsewhere",
-      };
+    if (studyPlanResult.status !== "idle") {
+      return studyPlanResult;
     }
 
     return {
@@ -3417,7 +3563,13 @@ export async function retryStudentPracticeExamBuild(practiceExamId: string) {
 
   revalidatePath("/student/learning");
   revalidatePath(`/student/learning/practice/${practiceExamId}`);
-  scheduleStudentLearningProcessing();
+  scheduleStudentLearningProcessing({
+    jobType: "practice_build",
+    studentId: context.userId,
+    practiceExamId,
+    queuedAt: new Date().toISOString(),
+    triggeredBy: "practice_build_retry",
+  });
 
   return { success: true };
 }

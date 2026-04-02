@@ -47,6 +47,13 @@ import {
   notifyTeachersOfEssayReviewRequest,
 } from "@/lib/notification/actions";
 import {
+  publishExamProcessingJob,
+} from "@/lib/aws/sqs";
+import type {
+  ActionRequiredReason,
+  ExamProcessingJob,
+} from "@/lib/aws/jobs";
+import {
   createStudentRuntimeToken,
   verifyStudentRuntimeToken,
 } from "@/lib/student-runtime-token";
@@ -1343,27 +1350,113 @@ async function mapWithConcurrency<T, R>(
   return settledResults.map((result) => (result as PromiseFulfilledResult<R>).value);
 }
 
-function scheduleSubmittedSessionProcessing(input: {
+async function scheduleSubmittedSessionProcessing(input: {
   sessionId: string;
   examId: string;
   userId: string;
+  reason: "submit" | "timeout";
+  actionRequiredReason?: ActionRequiredReason | null;
 }) {
+  const job: ExamProcessingJob = {
+    sessionId: input.sessionId,
+    examId: input.examId,
+    userId: input.userId,
+    reason: input.reason,
+    queuedAt: new Date().toISOString(),
+    triggeredBy:
+      input.reason === "timeout" ? "timeout_finalize" : "student_submit",
+    actionRequiredReason: input.actionRequiredReason ?? null,
+  };
+
+  try {
+    const publishResult = await publishExamProcessingJob(job);
+    if (publishResult.queued) {
+      return;
+    }
+  } catch (error) {
+    console.error("[exam-processing-queue] Failed to publish exam job", error);
+  }
+
   try {
     after(async () => {
       try {
-        const admin = createAdminClient();
-        await materializeSessionScoresIfNeeded(admin, {
-          sessionId: input.sessionId,
-          examId: input.examId,
-          userId: input.userId,
+        await processExamProcessingJob(job, {
+          allowRevalidate: true,
         });
       } catch (error) {
-        console.error("Failed to process submitted exam session after response", error);
+        console.error(
+          "Failed to process submitted exam session after response",
+          error,
+        );
       }
     });
   } catch (error) {
     console.error("Failed to schedule submitted exam session processing", error);
   }
+}
+
+async function loadExamProcessingNotificationContext(
+  examId: string,
+  userId: string,
+) {
+  const admin = createAdminClient();
+  const [{ data: examRow }, { data: profileRow }] = await Promise.all([
+    admin.from("exams").select("title").eq("id", examId).maybeSingle(),
+    admin.from("profiles").select("full_name").eq("id", userId).maybeSingle(),
+  ]);
+
+  return {
+    examTitle: String(examRow?.title ?? "Шалгалт"),
+    studentName: profileRow?.full_name || "Сурагч",
+  };
+}
+
+export async function processExamProcessingJob(
+  job: ExamProcessingJob,
+  options?: {
+    allowRevalidate?: boolean;
+  },
+) {
+  const admin = createAdminClient();
+  const result = await materializeSessionScoresIfNeeded(admin, {
+    sessionId: job.sessionId,
+    examId: job.examId,
+    userId: job.userId,
+    skipSideEffects: true,
+  });
+
+  if ("error" in result) {
+    throw new Error(result.error);
+  }
+
+  if (job.actionRequiredReason) {
+    const context = await loadExamProcessingNotificationContext(
+      job.examId,
+      job.userId,
+    );
+    await notifyTeachersOfActionRequiredSubmission({
+      examId: job.examId,
+      examTitle: context.examTitle,
+      studentName: context.studentName,
+      sessionId: job.sessionId,
+      reason: job.actionRequiredReason,
+    });
+  }
+
+  if (result.finalStatus === "graded" || result.finalStatus === "timed_out") {
+    await enqueueStudentTopicMasteryRefresh(job.userId, null).catch((error) => {
+      console.error(
+        "[exam-processing-queue] Failed to enqueue mastery refresh",
+        error,
+      );
+    });
+  }
+
+  if (options?.allowRevalidate !== false) {
+    revalidateStudentResultPaths(job.examId);
+  }
+
+  return result;
 }
 
 async function materializeSessionScoresIfNeeded(
@@ -1651,11 +1744,21 @@ export async function processPendingExamResults(batchSize = 10) {
     }
 
     processed += 1;
-    const result = await materializeSessionScoresIfNeeded(admin, {
-      sessionId: String(session.id),
-      examId: String(session.exam_id),
-      userId: String(session.user_id),
-    });
+    const result = await processExamProcessingJob(
+      {
+        sessionId: String(session.id),
+        examId: String(session.exam_id),
+        userId: String(session.user_id),
+        reason: session.status === "timed_out" ? "timeout" : "submit",
+        queuedAt: new Date().toISOString(),
+        triggeredBy: "manual_recovery",
+      },
+      {
+        allowRevalidate: true,
+      },
+    ).catch((error) => ({
+      error: error instanceof Error ? error.message : "unknown_error",
+    }));
 
     if ("error" in result) {
       failed += 1;
@@ -1801,6 +1904,18 @@ async function finalizeSessionAttempt(
     }
 
     const finalStatus = getClosedSessionStatus(reason, questionContext.hasEssay);
+    const hasProctorFlag = ["flagged", "escalated"].includes(
+      String(session.flag_status ?? "clear"),
+    );
+    const actionRequiredReason: ActionRequiredReason | null =
+      finalStatus === "submitted" && (questionContext.hasEssay || hasProctorFlag)
+        ? questionContext.hasEssay
+          ? hasProctorFlag
+            ? "essay_review_and_proctor_flag"
+            : "essay_review"
+          : "proctor_flag"
+        : null;
+
     const { error: updateError } = await supabase
       .from("exam_sessions")
       .update({
@@ -1833,36 +1948,13 @@ async function finalizeSessionAttempt(
     if (!skipPostFinalizeSideEffects) {
       revalidateStudentResultPaths(examId);
       revalidatePath(`/educator/exams/${examId}/results`);
-      scheduleSubmittedSessionProcessing({ sessionId, examId, userId });
-
-      const hasProctorFlag = ["flagged", "escalated"].includes(
-        String(session.flag_status ?? "clear"),
-      );
-      if (finalStatus === "submitted" && (questionContext.hasEssay || hasProctorFlag)) {
-        const reason = questionContext.hasEssay
-          ? hasProctorFlag
-            ? "essay_review_and_proctor_flag"
-            : "essay_review"
-          : "proctor_flag";
-        const [{ data: examRow }, { data: profileRow }] = await Promise.all([
-          supabase.from("exams").select("title").eq("id", examId).maybeSingle(),
-          supabase
-            .from("profiles")
-            .select("full_name")
-            .eq("id", userId)
-            .maybeSingle(),
-        ]);
-
-        if (examRow) {
-          notifyTeachersOfActionRequiredSubmission({
-            examId,
-            examTitle: String(examRow.title),
-            studentName: profileRow?.full_name || "Сурагч",
-            sessionId,
-            reason,
-          }).catch(() => {});
-        }
-      }
+      await scheduleSubmittedSessionProcessing({
+        sessionId,
+        examId,
+        userId,
+        reason,
+        actionRequiredReason,
+      });
     }
 
     return {
@@ -1872,6 +1964,7 @@ async function finalizeSessionAttempt(
       maxScore: null,
       percentage: null,
       gradingPending: true,
+      actionRequiredReason,
     };
   } finally {
     await redis.del(lockKey);
