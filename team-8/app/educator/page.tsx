@@ -219,12 +219,14 @@ export default async function EducatorDashboard() {
           <p className="text-[14px] text-[#6B6B6B] md:text-base">
             AI-ийн тусламжтай шалгалтын асуултаа хялбархан үүсгэ.
           </p>
+          <Link   href="/educator/question-bank/ai-create"
+              className="text-[14px] font-medium text-[#648de4]">
           <div className="flex  items-center justify-center text-[#4891F1] font-medium h-10 w-36.25 bg-[#ECF1F9] rounded-lg cursor-pointer hover:bg-[#d0e4f8] transition-colors">
             <div className="flex gap-1.5 items-center">
               <p>AI-аар үүсгэх</p>
               <CornerDownRight size={14} />
             </div>
-          </div>
+          </div></Link>
         </div>
         <div className="pointer-events-none absolute -bottom-15 right-6 hidden h-full w-auto scale-125 origin-bottom-right md:block">
           <Image

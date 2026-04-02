@@ -52,7 +52,9 @@ export default function Header({ profile }: { profile: Profile }) {
     pathname?.startsWith("/educator/grading");
 
   const showGroupsBackLink = pathname?.startsWith("/educator/groups/");
-  const showDashboardBackLink = pathname?.startsWith("/educator/grading");
+  const showDashboardBackLink =
+    pathname?.startsWith("/educator/grading") ||
+    pathname === "/educator/question-bank/ai-create";
   const showQuestionBankBackLink =
     pathname?.startsWith("/educator/question-bank") && Boolean(subjectId);
   const questionBankBackHref = pathname?.startsWith(
