@@ -177,39 +177,39 @@ function buildResultsInsights(
       ? clampPercent((excellenceCount / attemptedRows.length) * 100)
       : 0;
 
-  const metrics = [ {
-      key: "excellent",
-      label: "90%+",
-      value: excellenceRate,
-      suffix: "%",
-      description: `${excellenceCount} сурагч өндөр амжилттай`,
-      tone: "violet" as const,
-    },
-    {
-      key: "participation",
-      label: "Оролцоо",
-      value: participationRate,
-      suffix: "%",
-      description: `${attemptedRows.length} сурагчийн дүн бүртгэгдсэн`,
-      tone: "sky" as const,
-    }, {
-      key: "success",
-      label: "Амжилт",
-      value: passRate,
-      suffix: "%",
-      description: `${passCount} сурагч тэнцсэн`,
-      tone: "emerald" as const,
-    },
-    {
-      key: "average",
-      label: "Дундаж",
-      value: averageScore,
-      suffix: "%",
-      description: `Тэнцэх босго ${passingScore}%`,
-      tone: "amber" as const,
-    },
-   
-   
+  const metrics = [{
+    key: "excellent",
+    label: "90%+",
+    value: excellenceRate,
+    suffix: "%",
+    description: `${excellenceCount} сурагч өндөр амжилттай`,
+    tone: "violet" as const,
+  },
+  {
+    key: "participation",
+    label: "Оролцоо",
+    value: participationRate,
+    suffix: "%",
+    description: `${attemptedRows.length} сурагчийн дүн бүртгэгдсэн`,
+    tone: "sky" as const,
+  }, {
+    key: "success",
+    label: "Амжилт",
+    value: passRate,
+    suffix: "%",
+    description: `${passCount} сурагч тэнцсэн`,
+    tone: "emerald" as const,
+  },
+  {
+    key: "average",
+    label: "Дундаж",
+    value: averageScore,
+    suffix: "%",
+    description: `Тэнцэх босго ${passingScore}%`,
+    tone: "amber" as const,
+  },
+
+
   ];
 
   const scoreBands = [
@@ -431,14 +431,11 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
   const scopeLabel = activeGroup ? `${activeGroup.name} бүлэг` : "Бүх сурагч";
 
   return (
-    <div className="space-y-6 pb-6">
+    <div className="space-y-5 pb-6">
       <div className="space-y-2">
-        <h1 className="text-[26px] font-semibold tracking-[-0.04em] text-[#111827]">
-          {exam.title}
-        </h1>
-        <p className="text-[15px] text-[#6B7280]">
-          {exam.subject?.name ?? "Хичээл тодорхойгүй"} · Тэнцэх босго{" "}
-          {exam.passing_score}% · {displayStats.total} сурагч
+        <p className="text-[22px] font-medium text-[#111827] flex gap-1">
+          <p className="font-semibold"> {exam.subject?.name ?? "Хичээл тодорхойгүй"}</p>
+          хичээлийн  <p className="font-semibold">{exam.title}</p> дүнгийн мэдээлэл
         </p>
       </div>
 
@@ -448,9 +445,9 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
             <Link href={`/educator/exams/${examId}/results`}>
               <Badge
                 variant="outline"
-                className={`h-auto cursor-pointer rounded-full border-none px-5 py-2 text-base transition-all ${!groupFilter
-                    ? "bg-white text-black shadow-sm"
-                    : "bg-transparent text-muted-foreground hover:bg-slate-200/50"
+                className={`h-auto cursor-pointer rounded-full border-none px-5 py-1.5 text-base transition-all ${!groupFilter
+                  ? "bg-white text-black shadow-sm"
+                  : "bg-transparent text-muted-foreground hover:bg-slate-200/50"
                   }`}
               >
                 Бүгд ({sessions.length})
@@ -471,9 +468,9 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
                 >
                   <Badge
                     variant="outline"
-                    className={`h-auto cursor-pointer rounded-full border-none px-5 py-2 text-base transition-all ${isActive
-                        ? "bg-white text-black shadow-sm"
-                        : "bg-transparent text-muted-foreground hover:bg-slate-200/50"
+                    className={`h-auto cursor-pointer rounded-full border-none px-5 py-1.5 text-base transition-all ${isActive
+                      ? "bg-white text-black shadow-sm"
+                      : "bg-transparent text-muted-foreground hover:bg-slate-200/50"
                       }`}
                   >
                     {group.name} ({count})
@@ -485,17 +482,11 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
         )}
 
         <Link href={`/educator/exams/${examId}/questions`}>
-          <Button className="h-11 rounded-full bg-[#5199F6] px-5 text-[15px] font-medium shadow-[0_14px_28px_-16px_rgba(81,153,246,0.8)] hover:bg-[#4389E4]">
+          <Button className="h-11 rounded-xl bg-[#5199F6] px-5 text-[15px] font-medium shadow-[0_14px_28px_-16px_rgba(81,153,246,0.8)] hover:bg-[#4389E4]">
             Асуултууд харах
           </Button>
         </Link>
       </div>
-
-      {groupFilter && (
-        <div className="rounded-2xl border border-[#E8E8E8] bg-[#FBFBFB] px-4 py-3 text-sm text-[#6B7280]">
-          Шүүж харж буй бүлэг дээр {displayStats.total} сурагч байна.
-        </div>
-      )}
 
       <div className="space-y-6">
         <ResultsInsightsPanel
@@ -514,33 +505,33 @@ export default async function ExamResultsPage({ params, searchParams }: Props) {
 
         <div>
           {filtered.length === 0 ? (
-            <Card className="rounded-[28px] border border-[#ECECEC] shadow-[0_18px_44px_-28px_rgba(15,23,42,0.18)]">
+            <Card className="rounded-[28px]  shadow-[0_18px_44px_-28px_rgba(15,23,42,0.18)]">
               <CardContent className="py-10 text-center text-muted-foreground">
                 Оролцогч байхгүй байна.
               </CardContent>
             </Card>
           ) : (
-            <Card className="overflow-hidden rounded-[28px] border border-[#ECECEC] shadow-[0_18px_44px_-28px_rgba(15,23,42,0.18)]">
+            <Card className="overflow-hidden rounded-xl  shadow-[0_18px_44px_-28px_rgba(15,23,42,0.18)]">
               <CardContent className="overflow-x-auto p-0">
                 <table className="w-full min-w-[880px] text-sm">
                   <thead>
                     <tr className="border-b border-[#ECECEC] bg-[#FFFFFF]">
-                      <th className="px-5 py-4 text-left text-[15px] font-semibold text-[#111827]">
+                      <th className="px-5 py-2 text-left text-[15px] font-bold text-[#111827]">
                         Сурагчид
                       </th>
-                      <th className="px-4 py-4 text-left text-[15px] font-semibold text-[#111827]">
+                      <th className="px-4 py-2 text-left text-[15px] font-bold text-[#111827]">
                         Бүлэг
                       </th>
-                      <th className="px-4 py-4 text-left text-[15px] font-semibold text-[#111827]">
+                      <th className="px-4 py-2 text-left text-[15px] font-bold text-[#111827]">
                         Оноо
                       </th>
-                      <th className="px-4 py-4 text-center text-[15px] font-semibold text-[#111827]">
+                      <th className="px-4 py-2 text-center text-[15px] font-bold text-[#111827]">
                         Дүн
                       </th>
-                      <th className="px-4 py-4 text-center text-[15px] font-semibold text-[#111827]">
+                      <th className="px-4 py-2 text-center text-[15px] font-bold text-[#111827]">
                         Төлөв
                       </th>
-                      <th className="px-5 py-4 text-right text-[15px] font-semibold text-[#111827]">
+                      <th className="px-5 py-2 text-right text-[15px] font-bold text-[#111827]">
                         Үйлдэл
                       </th>
                     </tr>
