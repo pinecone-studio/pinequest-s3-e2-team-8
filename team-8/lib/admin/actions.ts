@@ -2,10 +2,19 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   buildExamLifecycleMap,
   type ExamLifecycleSummary,
 } from "@/lib/exam-lifecycle";
+import { getExamPublishGuardError } from "@/lib/exam-readiness";
+import { syncExamRecipients } from "@/lib/exam-recipients";
+import {
+  buildPublishedExamSnapshot,
+  isSnapshotColumnMissingError,
+  primePublishedExamSnapshotCache,
+} from "@/lib/exam-snapshot";
+import { prewarmExamCache } from "@/lib/student/actions";
 
 
 export async function getAdminStats() {
@@ -197,6 +206,139 @@ export async function getAdminExamOverview(): Promise<AdminExamOverview[]> {
       lifecycle: lifecycleMap.get(exam.id) ?? null,
     };
   });
+}
+
+async function requireAdminUser() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Нэвтрээгүй байна", userId: null };
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (!profile || profile.role !== "admin") {
+    return { error: "Админ эрх шаардлагатай", userId: null };
+  }
+
+  return { error: null, userId: user.id };
+}
+
+export async function approveAdminExam(examId: string) {
+  const auth = await requireAdminUser();
+  if (auth.error || !auth.userId) return { error: auth.error };
+
+  const admin = createAdminClient();
+
+  const { data: exam } = await admin
+    .from("exams")
+    .select("id, is_published")
+    .eq("id", examId)
+    .maybeSingle();
+
+  if (!exam) return { error: "Шалгалт олдсонгүй" };
+  if (exam.is_published) return { error: "Энэ шалгалт аль хэдийн батлагдсан." };
+
+  const publishGuardError = await getExamPublishGuardError(
+    admin,
+    auth.userId,
+    examId
+  );
+  if (publishGuardError) {
+    return { error: publishGuardError };
+  }
+
+  const syncResult = await syncExamRecipients(admin, examId, auth.userId);
+  if (!syncResult.success) {
+    return { error: syncResult.error };
+  }
+
+  const snapshot = await buildPublishedExamSnapshot(admin, examId);
+  if (!snapshot) {
+    return { error: "Шалгалтын snapshot үүсгэж чадсангүй" };
+  }
+
+  try {
+    await prewarmExamCache(examId, snapshot);
+  } catch (prewarmError) {
+    return {
+      error:
+        prewarmError instanceof Error
+          ? `Шалгалтын cache бэлтгэхэд алдаа гарлаа: ${prewarmError.message}`
+          : "Шалгалтын cache бэлтгэхэд алдаа гарлаа",
+    };
+  }
+
+  const publishPayload = {
+    is_published: true,
+    published_snapshot: snapshot,
+    published_at: snapshot.exam.published_at,
+  };
+
+  const { error } = await admin
+    .from("exams")
+    .update(publishPayload)
+    .eq("id", examId);
+
+  if (error && isSnapshotColumnMissingError(error.code)) {
+    const fallback = await admin
+      .from("exams")
+      .update({ is_published: true })
+      .eq("id", examId);
+
+    if (fallback.error) return { error: fallback.error.message };
+  } else if (error) {
+    return { error: error.message };
+  } else {
+    await primePublishedExamSnapshotCache(examId, snapshot);
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/teachers/exams");
+  revalidatePath("/educator");
+  revalidatePath(`/educator/exams/${examId}`);
+  revalidatePath("/student");
+  revalidatePath("/student/exams");
+  revalidatePath("/student/schedule");
+  revalidatePath("/student/results");
+  revalidatePath(`/student/exams/${examId}/take`);
+  revalidatePath(`/student/exams/${examId}/result`);
+
+  return { success: true };
+}
+
+export async function rejectAdminExam(examId: string) {
+  const auth = await requireAdminUser();
+  if (auth.error || !auth.userId) return { error: auth.error };
+
+  const admin = createAdminClient();
+
+  const { data: exam } = await admin
+    .from("exams")
+    .select("id, is_published")
+    .eq("id", examId)
+    .maybeSingle();
+
+  if (!exam) return { error: "Шалгалт олдсонгүй" };
+  if (exam.is_published) {
+    return { error: "Батлагдсан шалгалтыг татгалзах боломжгүй." };
+  }
+
+  const { error } = await admin.from("exams").delete().eq("id", examId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/teachers/exams");
+  revalidatePath("/educator");
+
+  return { success: true };
 }
 
 // ── Teacher subject & assignment management ───────────────────────────────────

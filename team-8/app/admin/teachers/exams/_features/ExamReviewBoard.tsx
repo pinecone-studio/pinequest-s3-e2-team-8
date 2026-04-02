@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import {
   Atom,
   BookOpen,
@@ -11,6 +11,7 @@ import {
   Search,
   Sigma,
 } from "lucide-react";
+import { approveAdminExam, rejectAdminExam } from "@/lib/admin/actions";
 import { cn } from "@/lib/utils";
 import type { AdminExamOverview } from "@/lib/admin/actions";
 
@@ -91,12 +92,47 @@ function getSubjectPresentation(subjectName: string | null) {
 }
 
 function ExamCard({ exam }: { exam: AdminExamOverview }) {
+  const [isPending, startTransition] = useTransition();
   const lifecycleKey = exam.lifecycle?.key ?? "draft";
   const lifecycleLabel = exam.lifecycle?.label ?? "Ноорог";
   const { Icon, iconClassName } = getSubjectPresentation(exam.subjectName);
 
+  function handleApprove() {
+    const confirmed = window.confirm(
+      `"${exam.title}" шалгалтыг баталж, сурагчдад нээх үү?`,
+    );
+    if (!confirmed) return;
+
+    startTransition(async () => {
+      const result = await approveAdminExam(exam.id);
+      if (result?.error) {
+        window.alert(result.error);
+        return;
+      }
+
+      window.alert("Шалгалтыг амжилттай баталлаа.");
+    });
+  }
+
+  function handleReject() {
+    const confirmed = window.confirm(
+      `"${exam.title}" шалгалтыг татгалзаж устгах уу? Энэ үйлдлийг буцаах боломжгүй.`,
+    );
+    if (!confirmed) return;
+
+    startTransition(async () => {
+      const result = await rejectAdminExam(exam.id);
+      if (result?.error) {
+        window.alert(result.error);
+        return;
+      }
+
+      window.alert("Шалгалтыг татгалзаж устгалаа.");
+    });
+  }
+
   return (
-    <article className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm mt-4">
+    <article className="flex flex-col gap-3 rounded-lg justify-between border border-zinc-200 bg-white p-5 shadow-sm mt-4">
       <div className="flex items-start justify-center">
         <div
           className={cn(
@@ -132,12 +168,22 @@ function ExamCard({ exam }: { exam: AdminExamOverview }) {
         </span>
       </div>
       <div className="grid grid-cols-2 gap-3.5 font-medium">
-        <div className="flex justify-center border border-gray-300 rounded-lg py-1 px-8.5 bg-[#FAFAFA]">
+        <button
+          type="button"
+          onClick={handleReject}
+          disabled={isPending || exam.isPublished}
+          className="flex justify-center rounded-lg border border-gray-300 bg-[#FAFAFA] py-1 px-8.5 transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-50"
+        >
           Татгалзах
-        </div>{" "}
-        <div className="flex justify-center border border-gray-300 rounded-lg py-1 px-8.5 bg-[#FAFAFA]">
+        </button>
+        <button
+          type="button"
+          onClick={handleApprove}
+          disabled={isPending || exam.isPublished}
+          className="flex justify-center rounded-lg border border-gray-300 bg-[#FAFAFA] py-1 px-8.5 transition-colors hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-50"
+        >
           Батлах
-        </div>
+        </button>
       </div>
     </article>
   );
