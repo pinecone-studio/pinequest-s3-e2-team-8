@@ -232,6 +232,7 @@ export default async function EducatorDashboard() {
             alt="Dashboard Image"
             width={290}
             height={270}
+            className="h-auto w-auto"
           />
         </div>
       </div>

@@ -71,6 +71,7 @@ interface ExamTakerProps {
   exam: Record<string, unknown>;
   questions: QuestionItem[];
   sessionId: string;
+  runtimeToken: string | null;
   savedAnswers: Record<string, string>;
   initialAnswerAnalytics: Record<string, AnswerChangeAnalytics>;
   initialTimeLeftSeconds: number;
@@ -314,6 +315,7 @@ export default function ExamTaker({
   exam,
   questions,
   sessionId,
+  runtimeToken,
   savedAnswers,
   initialAnswerAnalytics,
   initialTimeLeftSeconds,
@@ -561,6 +563,10 @@ export default function ExamTaker({
         proctoring_mode: String(exam.proctoring_mode ?? "off"),
         platform,
         orientation,
+      }, {
+        runtimeToken,
+      }).catch((error) => {
+        console.warn("[ExamTaker] logProctorEvent failed", error);
       });
     },
     [
@@ -569,6 +575,7 @@ export default function ExamTaker({
       exam.proctoring_mode,
       orientation,
       platform,
+      runtimeToken,
       sessionId,
       shouldUseSpotChecks,
       spotCheckOpen,
@@ -605,6 +612,10 @@ export default function ExamTaker({
           risk_score: nextRiskScore,
           question_id: currentQuestionRef.current?.id ?? null,
           question_number: currentIndexRef.current + 1,
+        }, {
+          runtimeToken,
+        }).catch((error) => {
+          console.warn("[ExamTaker] logProctorEvent failed", error);
         });
       }
 
@@ -612,7 +623,14 @@ export default function ExamTaker({
         handleSubmitRef.current();
       }
     },
-    [challengeOpen, isStrictMode, queueSpotCheck, sessionId, shouldUseSpotChecks]
+    [
+      challengeOpen,
+      isStrictMode,
+      queueSpotCheck,
+      runtimeToken,
+      sessionId,
+      shouldUseSpotChecks,
+    ]
   );
 
   const emitProctorEvent = useCallback(
@@ -658,6 +676,10 @@ export default function ExamTaker({
         platform,
         orientation,
         ...metadata,
+      }, {
+        runtimeToken,
+      }).catch((error) => {
+        console.warn("[ExamTaker] logProctorEvent failed", error);
       });
 
       if (
@@ -677,6 +699,7 @@ export default function ExamTaker({
       maybeOpenChallenge,
       orientation,
       platform,
+      runtimeToken,
       sessionId,
     ]
   );
@@ -1172,7 +1195,7 @@ export default function ExamTaker({
     if (!heartbeatIntervalMs) return;
 
     const interval = window.setInterval(() => {
-      void recordExamHeartbeat(sessionId).then((result) => {
+      void recordExamHeartbeat(sessionId, runtimeToken).then((result) => {
         if (result && "error" in result) {
           emitProctorEvent("heartbeat_lost", { reason: result.error ?? "heartbeat_failed" }, 5000);
         }
@@ -1180,7 +1203,7 @@ export default function ExamTaker({
     }, heartbeatIntervalMs);
 
     return () => window.clearInterval(interval);
-  }, [emitProctorEvent, heartbeatIntervalMs, sessionId]);
+  }, [emitProctorEvent, heartbeatIntervalMs, runtimeToken, sessionId]);
 
   useEffect(() => {
     if (!challengeOpen) return;

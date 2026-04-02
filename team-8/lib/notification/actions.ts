@@ -13,6 +13,7 @@ export type NotificationType =
   | "exam_reminder_1hour"
   | "ai_grading_complete"
   | "new_exam_assigned"
+  | "essay_review_resolved"
   | "general";
 
 type EmailDeliveryType =
@@ -909,6 +910,81 @@ export async function notifyTeacherOfSubmission(
   );
 }
 
+export async function notifyTeachersOfEssayReviewRequest(params: {
+  examId: string;
+  examTitle: string;
+  studentName: string;
+  sessionId: string;
+  answerId: string;
+}) {
+  const admin = createAdminClient();
+  const teacherIds = await getExamManagerIds(admin, params.examId);
+
+  if (teacherIds.length === 0) return;
+
+  await createBulkNotifications(
+    teacherIds.map((teacherId) => ({
+      userId: teacherId,
+      type: "general",
+      title: "Essay review request ирлээ",
+      message: `${params.studentName} "${params.examTitle}" шалгалтын essay хариултад review хүсэлт илгээлээ.`,
+      link: `/educator/grading/${params.sessionId}`,
+      metadata: {
+        examId: params.examId,
+        sessionId: params.sessionId,
+        answerId: params.answerId,
+      },
+      dedupeKey: buildDedupeKey(
+        "essay_review_request",
+        params.examId,
+        params.answerId,
+        teacherId,
+      ),
+    }))
+  );
+}
+
+export async function notifyTeachersOfActionRequiredSubmission(params: {
+  examId: string;
+  examTitle: string;
+  studentName: string;
+  sessionId: string;
+  reason: "essay_review" | "proctor_flag" | "essay_review_and_proctor_flag";
+}) {
+  const admin = createAdminClient();
+  const teacherIds = await getExamManagerIds(admin, params.examId);
+
+  if (teacherIds.length === 0) return;
+
+  const reasonText =
+    params.reason === "proctor_flag"
+      ? "proctor flag илэрсэн"
+      : params.reason === "essay_review_and_proctor_flag"
+        ? "essay шалгалт ба proctor flag аль аль нь байгаа"
+        : "essay хариулт багшийн хяналт шаардаж байна";
+
+  await createBulkNotifications(
+    teacherIds.map((teacherId) => ({
+      userId: teacherId,
+      type: "exam_submitted",
+      title: "Хяналт шаардсан шалгалт ирлээ",
+      message: `${params.studentName} "${params.examTitle}" шалгалтаа илгээлээ. ${reasonText}.`,
+      link: `/educator/exams/${params.examId}/results`,
+      metadata: {
+        examId: params.examId,
+        sessionId: params.sessionId,
+        reason: params.reason,
+      },
+      dedupeKey: buildDedupeKey(
+        "exam_submission_action_required",
+        params.examId,
+        params.sessionId,
+        teacherId,
+      ),
+    }))
+  );
+}
+
 /** Багш дүн баталгаажуулсан → Сурагчид мэдэгдэх + email */
 export async function notifyStudentOfGrading(
   sessionId: string,
@@ -1115,6 +1191,41 @@ export async function notifyTeacherOfAIGrading(
     link: `/educator/grading/${sessionId}`,
     metadata: { sessionId, gradedCount },
     dedupeKey: buildDedupeKey("ai_grading_complete", teacherId, sessionId),
+  });
+}
+
+export async function notifyStudentOfReviewResolved(params: {
+  sessionId: string;
+  userId: string;
+  examId: string;
+  examTitle: string;
+  totalScore: number;
+  maxScore: number;
+}) {
+  const percentage =
+    params.maxScore > 0
+      ? Math.round((params.totalScore / params.maxScore) * 100)
+      : 0;
+
+  await createNotification({
+    userId: params.userId,
+    type: "essay_review_resolved",
+    title: "Эссэ хариултын хяналт дууслаа",
+    message: `"${params.examTitle}" шалгалтын review request шийдэгдэж, шинэ дүн ${params.totalScore}/${params.maxScore} (${percentage}%) боллоо.`,
+    link: `/student/exams/${params.examId}/result`,
+    metadata: {
+      examId: params.examId,
+      sessionId: params.sessionId,
+      totalScore: params.totalScore,
+      maxScore: params.maxScore,
+      percentage,
+    },
+    dedupeKey: buildDedupeKey(
+      "essay_review_resolved",
+      params.examId,
+      params.sessionId,
+      params.userId,
+    ),
   });
 }
 

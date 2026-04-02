@@ -7,6 +7,7 @@ import {
 } from "@/lib/student-learning/actions";
 import StudyPlanPanel from "./_features/StudyPlanPanel";
 import PracticeBuilder from "./_features/PracticeBuilder";
+import LearningAutoRefresh from "./_features/LearningAutoRefresh";
 
 const LEARNING_ERROR_MESSAGES: Record<string, string> = {
   practice_empty: "Practice шалгалтын өгөгдөл дутуу байна. Шинээр practice үүсгээд дахин оролдоно уу.",
@@ -40,6 +41,7 @@ export default async function StudentLearningPage({
   if (overview.subjects.length === 0) {
     return (
       <div className="space-y-6">
+        <LearningAutoRefresh active={overview.isRefreshing} />
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Learning Hub</h2>
           <p className="text-muted-foreground">
@@ -61,6 +63,7 @@ export default async function StudentLearningPage({
   if (!overview.selectedSubjectId || !selectedSubject) {
     return (
       <div className="space-y-6">
+        <LearningAutoRefresh active={overview.isRefreshing} />
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Learning Hub</h2>
         </div>
@@ -81,6 +84,7 @@ export default async function StudentLearningPage({
 
   return (
     <div className="space-y-6 pb-10">
+      <LearningAutoRefresh active={overview.isRefreshing} />
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Learning Hub</h2>
@@ -200,6 +204,16 @@ export default async function StudentLearningPage({
           subjectId={selectedSubjectId}
           plan={plan}
           isStale={isStale}
+          status={
+            studyPlanState && !("error" in studyPlanState)
+              ? studyPlanState.status
+              : "idle"
+          }
+          lastError={
+            studyPlanState && !("error" in studyPlanState)
+              ? studyPlanState.lastError
+              : null
+          }
           isRefreshing={
             Boolean(subjectLearning.isRefreshing) ||
             Boolean(studyPlanState && !("error" in studyPlanState) && studyPlanState.isRefreshing)

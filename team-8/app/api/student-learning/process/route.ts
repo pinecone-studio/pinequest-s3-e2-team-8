@@ -1,20 +1,24 @@
 import { NextResponse } from "next/server";
 import { isAuthorizedCronRequest } from "@/lib/notification/cron";
-import { processPendingExamResults } from "@/lib/student/actions";
+import { processPendingStudentLearningJobs } from "@/lib/student-learning/actions";
 
 export async function GET(request: Request) {
   if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json(
       { ok: false, error: "Unauthorized" },
-      { status: 401 },
+      { status: 401 }
     );
   }
 
   const url = new URL(request.url);
-  const limit = Number(url.searchParams.get("limit") ?? 10);
 
   try {
-    const result = await processPendingExamResults(limit);
+    const result = await processPendingStudentLearningJobs({
+      masteryBatchSize: Number(url.searchParams.get("masteryLimit") ?? 10),
+      studyPlanBatchSize: Number(url.searchParams.get("studyPlanLimit") ?? 2),
+      practiceBuildBatchSize: Number(url.searchParams.get("practiceLimit") ?? 2),
+    });
+
     return NextResponse.json({
       ok: true,
       checkedAt: new Date().toISOString(),
@@ -26,7 +30,7 @@ export async function GET(request: Request) {
         ok: false,
         error: error instanceof Error ? error.message : "unknown_error",
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

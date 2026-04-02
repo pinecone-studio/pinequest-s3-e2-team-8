@@ -1,5 +1,9 @@
 import Link from "next/link";
-import { getGradingStats, getPendingSubmissions } from "@/lib/grading/actions";
+import {
+  getGradingStats,
+  getPendingSubmissions,
+  type PendingReviewSession,
+} from "@/lib/grading/actions";
 import { formatDateTimeUB } from "@/lib/utils/date";
 import {
   Card,
@@ -54,8 +58,8 @@ function StatCard({
 }
 
 export default async function GradingPage() {
-  const submissions = await getPendingSubmissions();
-  const gradingStats = await getGradingStats();
+  const submissions: PendingReviewSession[] = await getPendingSubmissions();
+  const gradingStats = await getGradingStats(submissions.length);
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-3">
@@ -81,7 +85,7 @@ export default async function GradingPage() {
       <div className="rounded-2xl bg-white p-5 shadow">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-[18px] font-semibold text-[#111111]">
-            Сурагчдын хариулт засах
+            Review request ирсэн essay-үүд
           </h2>
           <div className="flex items-center gap-2 rounded-full border border-[#e6e6e6] bg-white p-1 text-sm">
             <button
@@ -108,7 +112,7 @@ export default async function GradingPage() {
         {submissions.length === 0 ? (
           <Card>
             <CardContent className="py-10 text-center text-muted-foreground">
-              Шалгах хариулт байхгүй байна.
+              Хянах review request одоогоор алга байна.
             </CardContent>
           </Card>
         ) : (
@@ -120,7 +124,9 @@ export default async function GradingPage() {
               const profile = (sub as any).profiles;
               const pct =
                 sub.max_score && sub.max_score > 0
-                  ? Math.round((sub.total_score / sub.max_score) * 100)
+                  ? Math.round(
+                      ((sub.total_score ?? 0) / sub.max_score) * 100,
+                    )
                   : null;
 
               return (
@@ -144,11 +150,14 @@ export default async function GradingPage() {
                               Оноо: {pct}/100
                             </Badge>
                           ) : null}
+                          <Badge className="rounded-full bg-[#fff4db] px-3 py-1 text-[12px] font-medium text-[#9a6700]">
+                            Report: {Number(sub.active_review_count ?? 0)}
+                          </Badge>
                         </div>
                         <CardDescription className="mt-2 text-[13px] text-[#6f6f6f]">
-                          {exam?.title ?? "Шалгалт"} | Илгээсэн:{" "}
-                          {sub.submitted_at
-                            ? formatDateTimeUB(sub.submitted_at)
+                          {exam?.title ?? "Шалгалт"} | Review хүсэлт:{" "}
+                          {sub.latest_review_requested_at
+                            ? formatDateTimeUB(sub.latest_review_requested_at)
                             : "—"}
                         </CardDescription>
                       </div>
@@ -158,7 +167,7 @@ export default async function GradingPage() {
                           variant="outline"
                           className="rounded-full px-4"
                         >
-                          Засах
+                          Хянах
                         </Button>
                       </Link>
                     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,18 +11,35 @@ export default function StudyPlanPanel({
   subjectId,
   plan,
   isStale,
+  status,
+  lastError,
   isRefreshing,
   disabled,
 }: {
   subjectId: string;
   plan: StudentSubjectStudyPlan | null;
   isStale: boolean;
+  status: "idle" | "pending" | "ready" | "failed";
+  lastError: string | null;
   isRefreshing: boolean;
   disabled: boolean;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const shouldPoll = status === "pending" || isRefreshing;
+
+  useEffect(() => {
+    if (!shouldPoll) return;
+
+    const intervalId = window.setInterval(() => {
+      router.refresh();
+    }, 4000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [router, shouldPoll]);
 
   const handleRefresh = () => {
     startTransition(async () => {
@@ -36,6 +53,9 @@ export default function StudyPlanPanel({
       router.refresh();
     });
   };
+
+  const effectiveError = error ?? lastError;
+  const hasPendingPlan = status === "pending";
 
   return (
     <div className="rounded-2xl border bg-white p-5 shadow-sm">
@@ -52,6 +72,12 @@ export default function StudyPlanPanel({
               {isStale ? "Шинэчлэлт хэрэгтэй" : "Cache бэлэн"}
             </Badge>
           )}
+          {status === "pending" && (
+            <Badge variant="secondary">AI боловсруулж байна</Badge>
+          )}
+          {status === "failed" && (
+            <Badge variant="outline">Сүүлчийн оролдлого амжилтгүй</Badge>
+          )}
           {isRefreshing && (
             <Badge variant="outline">Mastery шинэчлэгдэж байна</Badge>
           )}
@@ -59,10 +85,10 @@ export default function StudyPlanPanel({
             type="button"
             size="sm"
             variant={plan ? "outline" : "default"}
-            disabled={disabled || isPending}
+            disabled={disabled || isPending || hasPendingPlan || isRefreshing}
             onClick={handleRefresh}
           >
-            {isPending
+            {isPending || hasPendingPlan
               ? "AI боловсруулж байна..."
               : plan
                 ? "Дахин боловсруулах"
@@ -71,9 +97,9 @@ export default function StudyPlanPanel({
         </div>
       </div>
 
-      {error && (
+      {effectiveError && (status === "failed" || Boolean(error)) && (
         <div className="mt-4 rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-          {error}
+          {effectiveError}
         </div>
       )}
 
@@ -83,10 +109,17 @@ export default function StudyPlanPanel({
             ? isRefreshing
               ? "Mastery profile шинэчлэгдэж байна. Дараа нь AI төлөвлөгөө гарна."
               : "Энэ хичээл дээр topic-level data хангалтгүй байна."
-            : "AI таны сул сэдвүүд дээр тулгуурлан 3 алхамтай хувийн төлөвлөгөө гаргана."}
+            : hasPendingPlan
+              ? "AI таны хувийн төлөвлөгөөг бэлтгэж байна. Дуусмагц энэ хэсэг автоматаар шинэчлэгдэнэ."
+              : "AI таны сул сэдвүүд дээр тулгуурлан 3 алхамтай хувийн төлөвлөгөө гаргана."}
         </div>
       ) : (
         <div className="mt-4 space-y-5">
+          {hasPendingPlan && (
+            <div className="rounded-xl border border-[#4078C1]/30 bg-[#ECF1F9] p-4 text-sm text-[#1E4F8F]">
+              Шинэ AI төлөвлөгөө боловсруулж байна. Одоогоор өмнөх хадгалсан төлөвлөгөөг харуулж байна.
+            </div>
+          )}
           <div className="rounded-xl bg-zinc-50 p-4">
             <p className="text-sm leading-6 text-zinc-700">{plan.summary}</p>
           </div>

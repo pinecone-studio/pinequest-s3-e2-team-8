@@ -244,6 +244,14 @@ export default async function StudentPracticeResultPage({
                   text={question.content}
                   className="prose prose-sm max-w-none text-zinc-900"
                 />
+                {question.image_url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={question.image_url}
+                    alt="Practice асуултын зураг"
+                    className="max-h-64 rounded-xl"
+                  />
+                )}
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="rounded-xl bg-zinc-50 p-4">

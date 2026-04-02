@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getModel } from "@/lib/ai/config";
@@ -26,13 +27,14 @@ import {
   roundToTwo,
   shouldIncludeTopicInProjection,
 } from "@/lib/student-learning/utils";
+import {
+  gradePracticeQuestion,
+  normalizeDraftAnswersForQuestions,
+  parseDraftAnswerRecord,
+  parseStringArray,
+} from "@/lib/student-learning/practice-utils";
 
 type SupabaseAdminClient = ReturnType<typeof createAdminClient>;
-
-type SubjectRow = {
-  id: string;
-  name: string;
-};
 
 type TopicAggregate = {
   student_id: string;
@@ -112,6 +114,8 @@ type PracticeAttemptRow = {
   total_score: number | null;
   max_score: number | null;
   attempt_number: number;
+  draft_answers: Record<string, string> | null;
+  draft_saved_at: string | null;
   student_practice_exams:
     | {
         id: string;
@@ -151,6 +155,46 @@ type GeneratedPracticeQuestion = {
   explanation?: unknown;
 };
 
+type PracticeTopicSnapshot = Pick<
+  StudentLearningTopicSummary,
+  | "subject_id"
+  | "subject_name"
+  | "topic_key"
+  | "topic_label"
+  | "mastery_score"
+  | "official_question_count"
+  | "practice_question_count"
+  | "official_percentage"
+  | "practice_percentage"
+>;
+
+type StudyPlanJobRow = {
+  student_id: string;
+  subject_id: string;
+  mastery_updated_at: string;
+  pending_mastery_updated_at: string | null;
+  plan_json: GeneratedStudyPlan | null;
+  generated_at: string;
+  requested_at: string;
+  status: "pending" | "ready" | "failed";
+  last_error: string | null;
+  subjects?: { name: string } | { name: string }[] | null;
+};
+
+type QueuedPracticeExamRow = {
+  id: string;
+  student_id: string;
+  subject_id: string;
+  title: string;
+  description: string | null;
+  selected_topics: unknown;
+  generated_metadata: Record<string, unknown> | null;
+  build_requested_at: string | null;
+  status: "building" | "ready" | "failed";
+  build_error: string | null;
+  subjects?: { name: string } | { name: string }[] | null;
+};
+
 type PracticeExamCreationResult =
   | { error: string }
   | { success: true; redirectTo: string };
@@ -160,9 +204,10 @@ type PracticeHistoryItem = {
   title: string;
   question_count: number;
   created_at: string;
-  status: "in_progress" | "graded";
+  status: "building" | "failed" | "in_progress" | "graded";
   submitted_at: string | null;
   percentage: number | null;
+  build_error: string | null;
 };
 
 type MasteryRefreshQueueRow = {
@@ -180,7 +225,27 @@ type MasteryRefreshQueueRow = {
 
 const FULL_MASTERY_REFRESH_SCOPE_KEY = "__all__";
 const DEFAULT_MASTERY_REFRESH_BATCH_SIZE = 10;
+const DEFAULT_STUDY_PLAN_BATCH_SIZE = 2;
+const DEFAULT_PRACTICE_BUILD_BATCH_SIZE = 2;
 const MAX_MASTERY_REFRESH_BACKOFF_MINUTES = 30;
+
+function scheduleStudentLearningProcessing() {
+  try {
+    after(async () => {
+      try {
+        await processPendingStudentLearningJobs({
+          masteryBatchSize: DEFAULT_MASTERY_REFRESH_BATCH_SIZE,
+          studyPlanBatchSize: 1,
+          practiceBuildBatchSize: 1,
+        });
+      } catch (error) {
+        console.error("Failed to process student learning jobs after response", error);
+      }
+    });
+  } catch (error) {
+    console.error("Failed to schedule student learning jobs", error);
+  }
+}
 
 type LearningOverviewData = {
   subjects: StudentLearningSubjectSummary[];
@@ -209,6 +274,8 @@ type LearningPageData =
             plan: StudentSubjectStudyPlan | null;
             isStale: boolean;
             isRefreshing: boolean;
+            status: "idle" | "pending" | "ready" | "failed";
+            lastError: string | null;
           }
         | null;
     };
@@ -218,48 +285,17 @@ function getRelationObject<T>(value: T | T[] | null | undefined) {
   return value ?? null;
 }
 
-function parseStringArray(value: unknown) {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item ?? "").trim()).filter(Boolean);
-  }
+function isMissingColumnError(
+  error: { message?: string | null } | null | undefined,
+  table: string,
+  column: string
+) {
+  const message = String(error?.message ?? "");
 
-  try {
-    const parsed = JSON.parse(String(value ?? "[]")) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.map((item) => String(item ?? "").trim()).filter(Boolean)
-      : [];
-  } catch {
-    return String(value ?? "")
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-}
-
-function normalizeTextAnswer(value: unknown) {
-  return String(value ?? "").trim().toLocaleLowerCase("mn-MN");
-}
-
-function areArraysEqual(left: string[], right: string[]) {
   return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
+    message.includes(`column ${table}.${column} does not exist`) ||
+    message.includes(`Could not find the '${column}' column of '${table}'`)
   );
-}
-
-function parseMatchingPairs(options: unknown) {
-  if (!Array.isArray(options)) return [];
-
-  return options
-    .map((option) => {
-      const [left, ...rightParts] = String(option).split("|||");
-      const right = rightParts.join("|||").trim();
-      if (!left || !right) return null;
-      return { left: left.trim(), right };
-    })
-    .filter(
-      (item): item is { left: string; right: string } => Boolean(item)
-    );
 }
 
 function extractJsonObject(text: string) {
@@ -354,21 +390,6 @@ async function getStudentGradeLevel(admin: SupabaseAdminClient, studentId: strin
       if (right[1] !== left[1]) return right[1] - left[1];
       return right[0] - left[0];
     })[0]?.[0] ?? null;
-}
-
-async function getSubjectsByIds(admin: SupabaseAdminClient, subjectIds: string[]) {
-  if (subjectIds.length === 0) return new Map<string, SubjectRow>();
-
-  const { data, error } = await admin
-    .from("subjects")
-    .select("id, name")
-    .in("id", subjectIds);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return new Map((data ?? []).map((subject) => [subject.id, subject as SubjectRow]));
 }
 
 function appendTopicContribution(
@@ -587,7 +608,9 @@ export async function enqueueStudentTopicMasteryRefresh(
   subjectId?: string | null
 ) {
   const admin = createAdminClient();
-  return enqueueStudentTopicMasteryRefreshInternal(admin, studentId, subjectId);
+  const result = await enqueueStudentTopicMasteryRefreshInternal(admin, studentId, subjectId);
+  scheduleStudentLearningProcessing();
+  return result;
 }
 
 export async function processPendingStudentMasteryRefreshJobs(
@@ -661,7 +684,33 @@ export async function recomputeStudentTopicMastery(
   const nowIso = new Date().toISOString();
   const perSubject = new Map<string, Map<string, TopicAggregate>>();
 
-  const { data: officialSessions, error: officialSessionsError } = await admin
+  let scopedOfficialExamIds: string[] | null = null;
+  let scopedPracticeExamIds: string[] | null = null;
+
+  if (subjectId) {
+    const [{ data: officialExamRows, error: officialExamError }, { data: practiceExamRows, error: practiceExamError }] =
+      await Promise.all([
+        admin.from("exams").select("id").eq("subject_id", subjectId),
+        admin
+          .from("student_practice_exams")
+          .select("id")
+          .eq("student_id", studentId)
+          .eq("subject_id", subjectId),
+      ]);
+
+    if (officialExamError) {
+      throw new Error(officialExamError.message);
+    }
+
+    if (practiceExamError) {
+      throw new Error(practiceExamError.message);
+    }
+
+    scopedOfficialExamIds = (officialExamRows ?? []).map((row) => String(row.id));
+    scopedPracticeExamIds = (practiceExamRows ?? []).map((row) => String(row.id));
+  }
+
+  let officialSessionsQuery = admin
     .from("exam_sessions")
     .select(
       "id, exam_id, status, total_score, max_score, attempt_number, submitted_at, started_at, exams(subject_id, title)"
@@ -669,16 +718,21 @@ export async function recomputeStudentTopicMastery(
     .eq("user_id", studentId)
     .in("status", ["graded", "timed_out"]);
 
+  if (scopedOfficialExamIds) {
+    if (scopedOfficialExamIds.length === 0) {
+      scopedOfficialExamIds = [];
+    } else {
+      officialSessionsQuery = officialSessionsQuery.in("exam_id", scopedOfficialExamIds);
+    }
+  }
+
+  const { data: officialSessions, error: officialSessionsError } = await officialSessionsQuery;
+
   if (officialSessionsError) {
     throw new Error(officialSessionsError.message);
   }
 
-  const filteredOfficialSessions = ((officialSessions ?? []) as OfficialSessionRow[]).filter(
-    (session) => {
-      const exam = getRelationObject(session.exams);
-      return !subjectId || exam?.subject_id === subjectId;
-    }
-  );
+  const filteredOfficialSessions = (officialSessions ?? []) as OfficialSessionRow[];
 
   const sessionsByExam = new Map<string, OfficialSessionRow[]>();
   for (const session of filteredOfficialSessions) {
@@ -772,24 +826,29 @@ export async function recomputeStudentTopicMastery(
     }
   }
 
-  const { data: practiceAttempts, error: practiceAttemptsError } = await admin
+  let practiceAttemptsQuery = admin
     .from("student_practice_attempts")
     .select(
-      "id, practice_exam_id, student_id, status, started_at, submitted_at, total_score, max_score, attempt_number, student_practice_exams(id, subject_id, title)"
+      "id, practice_exam_id, student_id, status, started_at, submitted_at, total_score, max_score, attempt_number, draft_answers, draft_saved_at, student_practice_exams(id, subject_id, title)"
     )
     .eq("student_id", studentId)
     .eq("status", "graded");
+
+  if (scopedPracticeExamIds) {
+    if (scopedPracticeExamIds.length === 0) {
+      scopedPracticeExamIds = [];
+    } else {
+      practiceAttemptsQuery = practiceAttemptsQuery.in("practice_exam_id", scopedPracticeExamIds);
+    }
+  }
+
+  const { data: practiceAttempts, error: practiceAttemptsError } = await practiceAttemptsQuery;
 
   if (practiceAttemptsError) {
     throw new Error(practiceAttemptsError.message);
   }
 
-  const filteredPracticeAttempts = ((practiceAttempts ?? []) as PracticeAttemptRow[]).filter(
-    (attempt) => {
-      const exam = getRelationObject(attempt.student_practice_exams);
-      return !subjectId || exam?.subject_id === subjectId;
-    }
-  );
+  const filteredPracticeAttempts = (practiceAttempts ?? []) as PracticeAttemptRow[];
 
   const practiceExamIds = [...new Set(filteredPracticeAttempts.map((attempt) => attempt.practice_exam_id))];
   const practiceAttemptIds = filteredPracticeAttempts.map((attempt) => attempt.id);
@@ -900,6 +959,7 @@ async function ensureStudentTopicMasteryAvailable(
   if ((data?.length ?? 0) === 0) {
     if (!isRefreshing) {
       await enqueueStudentTopicMasteryRefreshInternal(admin, studentId);
+      scheduleStudentLearningProcessing();
     }
 
     return {
@@ -1039,24 +1099,50 @@ async function getPracticeHistoryForSubject(
   studentId: string,
   subjectId: string
 ): Promise<PracticeHistoryItem[]> {
-  const { data: practiceExams, error: practiceError } = await admin
+  const practiceResult = await admin
     .from("student_practice_exams")
-    .select("id, title, question_count, created_at")
+    .select("id, title, question_count, created_at, status, build_error")
     .eq("student_id", studentId)
     .eq("subject_id", subjectId)
     .order("created_at", { ascending: false })
     .limit(8);
 
-  if (practiceError) {
-    throw new Error(practiceError.message);
-  }
-
-  const exams = (practiceExams ?? []) as Array<{
+  let practiceExams: Array<{
     id: string;
     title: string;
     question_count: number | null;
     created_at: string;
-  }>;
+    status?: "building" | "ready" | "failed";
+    build_error?: string | null;
+  }> = [];
+  let usesLegacyPracticeSchema = false;
+
+  if (
+    practiceResult.error &&
+    (isMissingColumnError(practiceResult.error, "student_practice_exams", "status") ||
+      isMissingColumnError(practiceResult.error, "student_practice_exams", "build_error"))
+  ) {
+    usesLegacyPracticeSchema = true;
+    const legacyResult = await admin
+      .from("student_practice_exams")
+      .select("id, title, question_count, created_at")
+      .eq("student_id", studentId)
+      .eq("subject_id", subjectId)
+      .order("created_at", { ascending: false })
+      .limit(8);
+
+    if (legacyResult.error) {
+      throw new Error(legacyResult.error.message);
+    }
+
+    practiceExams = legacyResult.data ?? [];
+  } else if (practiceResult.error) {
+    throw new Error(practiceResult.error.message);
+  } else {
+    practiceExams = practiceResult.data ?? [];
+  }
+
+  const exams = practiceExams;
   if (exams.length === 0) return [];
 
   const examIds = exams.map((exam) => exam.id);
@@ -1126,9 +1212,15 @@ async function getPracticeHistoryForSubject(
       title: exam.title,
       question_count: Number(exam.question_count ?? 0),
       created_at: exam.created_at,
-      status: attempt?.status ?? "in_progress",
+      status:
+        !usesLegacyPracticeSchema && exam.status === "building"
+          ? "building"
+          : !usesLegacyPracticeSchema && exam.status === "failed"
+            ? "failed"
+            : attempt?.status ?? "in_progress",
       submitted_at: attempt?.submitted_at ?? null,
       percentage,
+      build_error: usesLegacyPracticeSchema ? null : exam.build_error ?? null,
     };
   });
 }
@@ -1141,48 +1233,122 @@ async function getStudentSubjectStudyPlanForContext(
   isRefreshing: boolean
 ) {
   if (!masteryUpdatedAt) {
-    return { plan: null, isStale: false, isRefreshing };
+    return {
+      plan: null,
+      isStale: false,
+      isRefreshing,
+      status: "idle" as const,
+      lastError: null,
+    };
   }
 
-  const { data, error } = await admin
+  const planResult = await admin
     .from("student_subject_study_plans")
-    .select("student_id, subject_id, mastery_updated_at, plan_json, generated_at")
+    .select(
+      "student_id, subject_id, mastery_updated_at, pending_mastery_updated_at, plan_json, generated_at, requested_at, status, last_error"
+    )
     .eq("student_id", studentId)
     .eq("subject_id", subjectId)
     .maybeSingle();
 
-  if (error) {
-    throw new Error(error.message);
+  let data:
+    | {
+        student_id: string;
+        subject_id: string;
+        mastery_updated_at: string;
+        pending_mastery_updated_at?: string | null;
+        plan_json: GeneratedStudyPlan | null;
+        generated_at: string;
+        requested_at?: string | null;
+        status?: "pending" | "ready" | "failed";
+        last_error?: string | null;
+      }
+    | null = null;
+  let usesLegacyPlanSchema = false;
+
+  if (
+    planResult.error &&
+    (isMissingColumnError(planResult.error, "student_subject_study_plans", "pending_mastery_updated_at") ||
+      isMissingColumnError(planResult.error, "student_subject_study_plans", "requested_at") ||
+      isMissingColumnError(planResult.error, "student_subject_study_plans", "status") ||
+      isMissingColumnError(planResult.error, "student_subject_study_plans", "last_error"))
+  ) {
+    usesLegacyPlanSchema = true;
+    const legacyResult = await admin
+      .from("student_subject_study_plans")
+      .select("student_id, subject_id, mastery_updated_at, plan_json, generated_at")
+      .eq("student_id", studentId)
+      .eq("subject_id", subjectId)
+      .maybeSingle();
+
+    if (legacyResult.error) {
+      throw new Error(legacyResult.error.message);
+    }
+
+    data = legacyResult.data ?? null;
+  } else if (planResult.error) {
+    throw new Error(planResult.error.message);
+  } else {
+    data = planResult.data ?? null;
   }
 
   if (!data) {
-    return { plan: null, isStale: false, isRefreshing };
+    return {
+      plan: null,
+      isStale: false,
+      isRefreshing,
+      status: "idle" as const,
+      lastError: null,
+    };
   }
 
   const isStale =
     new Date(String(data.mastery_updated_at)).getTime() <
     new Date(masteryUpdatedAt).getTime();
   const planJson = (data.plan_json ?? {}) as GeneratedStudyPlan;
+  const hasRenderablePlan =
+    String(planJson.summary ?? "").trim() !== "" ||
+    (Array.isArray(planJson.priorities) && planJson.priorities.length > 0) ||
+    (Array.isArray(planJson.steps) && planJson.steps.length > 0) ||
+    (Array.isArray(planJson.next_practice_focus) && planJson.next_practice_focus.length > 0);
 
   return {
-    plan: {
-      student_id: studentId,
-      subject_id: subjectId,
-      mastery_updated_at: String(data.mastery_updated_at),
-      generated_at: String(data.generated_at),
-      summary: String(planJson.summary ?? ""),
-      priorities: Array.isArray(planJson.priorities)
-        ? planJson.priorities.map((item) => String(item))
-        : [],
-      steps: Array.isArray(planJson.steps)
-        ? planJson.steps.map((item) => String(item))
-        : [],
-      next_practice_focus: Array.isArray(planJson.next_practice_focus)
-        ? planJson.next_practice_focus.map((item) => String(item))
-        : [],
-    } satisfies StudentSubjectStudyPlan,
+    plan: hasRenderablePlan
+      ? ({
+          student_id: studentId,
+          subject_id: subjectId,
+          mastery_updated_at: String(data.mastery_updated_at),
+          pending_mastery_updated_at: data.pending_mastery_updated_at
+            ? String(data.pending_mastery_updated_at)
+            : null,
+          generated_at: String(data.generated_at),
+          requested_at: String(data.requested_at ?? data.generated_at),
+          status: usesLegacyPlanSchema ? "ready" : data.status ?? "ready",
+          last_error:
+            usesLegacyPlanSchema || !data.last_error
+              ? null
+              : String(data.last_error),
+          summary: String(planJson.summary ?? ""),
+          priorities: Array.isArray(planJson.priorities)
+            ? planJson.priorities.map((item) => String(item))
+            : [],
+          steps: Array.isArray(planJson.steps)
+            ? planJson.steps.map((item) => String(item))
+            : [],
+          next_practice_focus: Array.isArray(planJson.next_practice_focus)
+            ? planJson.next_practice_focus.map((item) => String(item))
+            : [],
+        } satisfies StudentSubjectStudyPlan)
+      : null,
     isStale,
     isRefreshing,
+    status:
+      !usesLegacyPlanSchema &&
+      (data.status === "pending" || data.status === "ready" || data.status === "failed")
+        ? data.status
+        : "ready",
+    lastError:
+      usesLegacyPlanSchema || !data.last_error ? null : String(data.last_error),
   };
 }
 
@@ -1410,26 +1576,76 @@ export async function refreshStudentSubjectStudyPlan(subjectId: string) {
     return { error: "Энэ хичээлд study plan үүсгэх mastery data алга." };
   }
 
-  const plan = await generateStudyPlanWithAI({
-    subjectName: subjectLearning.subject.subject_name,
-    weakTopics: subjectLearning.topics,
-    subjectSummary: subjectLearning.subject,
-  });
-
-  const { error } = await admin
+  const { data: existingPlan, error: existingPlanError } = await admin
     .from("student_subject_study_plans")
-    .upsert(
-      {
-        student_id: context.userId,
-        subject_id: subjectId,
-        mastery_updated_at: masteryUpdatedAt,
-        plan_json: plan,
-        generated_at: new Date().toISOString(),
-      },
-      {
-        onConflict: "student_id,subject_id",
-      }
-    );
+    .select("student_id")
+    .eq("student_id", context.userId)
+    .eq("subject_id", subjectId)
+    .maybeSingle();
+
+  if (existingPlanError) {
+    return { error: existingPlanError.message };
+  }
+
+  const requestedAt = new Date().toISOString();
+  const payload = {
+    pending_mastery_updated_at: masteryUpdatedAt,
+    requested_at: requestedAt,
+    status: "pending" as const,
+    last_error: null,
+  };
+
+  const { error } = existingPlan
+    ? await admin
+        .from("student_subject_study_plans")
+        .update(payload)
+        .eq("student_id", context.userId)
+        .eq("subject_id", subjectId)
+    : await admin
+        .from("student_subject_study_plans")
+        .insert({
+          student_id: context.userId,
+          subject_id: subjectId,
+          mastery_updated_at: masteryUpdatedAt,
+          ...payload,
+        });
+
+  if (
+    error &&
+    (isMissingColumnError(error, "student_subject_study_plans", "pending_mastery_updated_at") ||
+      isMissingColumnError(error, "student_subject_study_plans", "requested_at") ||
+      isMissingColumnError(error, "student_subject_study_plans", "status") ||
+      isMissingColumnError(error, "student_subject_study_plans", "last_error"))
+  ) {
+    const plan = await generateStudyPlanWithAI({
+      subjectName: subjectLearning.subject.subject_name,
+      weakTopics: subjectLearning.topics,
+      subjectSummary: subjectLearning.subject,
+    });
+
+    const legacyUpsert = await admin
+      .from("student_subject_study_plans")
+      .upsert(
+        {
+          student_id: context.userId,
+          subject_id: subjectId,
+          mastery_updated_at: masteryUpdatedAt,
+          plan_json: plan,
+          generated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "student_id,subject_id",
+        }
+      );
+
+    if (legacyUpsert.error) {
+      return { error: legacyUpsert.error.message };
+    }
+
+    revalidatePath("/student");
+    revalidatePath("/student/learning");
+    return { success: true };
+  }
 
   if (error) {
     return { error: error.message };
@@ -1437,6 +1653,7 @@ export async function refreshStudentSubjectStudyPlan(subjectId: string) {
 
   revalidatePath("/student");
   revalidatePath("/student/learning");
+  scheduleStudentLearningProcessing();
 
   return { success: true };
 }
@@ -1723,6 +1940,185 @@ async function loadBankCandidates(
   return Array.from(merged.values());
 }
 
+function serializePracticeTopicSnapshot(topics: StudentLearningTopicSummary[]) {
+  return topics.map((topic) => ({
+    subject_id: topic.subject_id,
+    subject_name: topic.subject_name,
+    topic_key: topic.topic_key,
+    topic_label: topic.topic_label,
+    mastery_score: topic.mastery_score,
+    official_question_count: topic.official_question_count,
+    practice_question_count: topic.practice_question_count,
+    official_percentage: topic.official_percentage,
+    practice_percentage: topic.practice_percentage,
+  })) satisfies PracticeTopicSnapshot[];
+}
+
+function parsePracticeTopicSnapshot(value: unknown) {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const raw = item as Record<string, unknown>;
+      const topicKey = String(raw.topic_key ?? "").trim();
+      const topicLabel = String(raw.topic_label ?? "").trim();
+      if (!topicKey || !topicLabel) return null;
+
+      return {
+        subject_id: String(raw.subject_id ?? "").trim(),
+        subject_name: String(raw.subject_name ?? "Хичээл").trim() || "Хичээл",
+        topic_key: topicKey,
+        topic_label: topicLabel,
+        mastery_score: Number(raw.mastery_score ?? 0),
+        official_question_count: Number(raw.official_question_count ?? 0),
+        practice_question_count: Number(raw.practice_question_count ?? 0),
+        official_percentage:
+          raw.official_percentage === null || raw.official_percentage === undefined
+            ? null
+            : Number(raw.official_percentage),
+        practice_percentage:
+          raw.practice_percentage === null || raw.practice_percentage === undefined
+            ? null
+            : Number(raw.practice_percentage),
+      } satisfies PracticeTopicSnapshot;
+    })
+    .filter((item): item is PracticeTopicSnapshot => Boolean(item));
+}
+
+function getPracticeTopicSnapshotFromMetadata(metadata: Record<string, unknown> | null | undefined) {
+  if (!metadata) return [];
+  return parsePracticeTopicSnapshot(metadata.selected_topics_snapshot);
+}
+
+function createPracticeQuestionRows(
+  subjectId: string,
+  questions: Array<{
+    sourceType: "bank" | "ai";
+    sourceQuestionBankId: string | null;
+    topicKey: string;
+    subtopic: string;
+    type: QuestionType;
+    content: string;
+    contentHtml: string | null;
+    imageUrl: string | null;
+    options: string[] | null;
+    correctAnswer: string | null;
+    points: number;
+    explanation: string | null;
+  }>
+) {
+  return questions.map((question, index) => ({
+    subject_id: subjectId,
+    source_type: question.sourceType,
+    source_question_bank_id: question.sourceQuestionBankId,
+    topic_key: question.topicKey,
+    subtopic: question.subtopic,
+    type: question.type,
+    content: question.content,
+    content_html: question.contentHtml,
+    image_url: question.imageUrl,
+    options: question.options,
+    correct_answer: question.correctAnswer,
+    points: question.points,
+    order_index: index,
+    explanation: question.explanation,
+  }));
+}
+
+async function createStudentPracticeExamLegacy(
+  admin: SupabaseAdminClient,
+  input: {
+    subjectId: string;
+    selectedTopics: StudentLearningTopicSummary[];
+    studentId: string;
+    subjectName: string;
+  }
+) {
+  const gradeLevel = await getStudentGradeLevel(admin, input.studentId);
+  const bankCandidates = await loadBankCandidates(admin, {
+    subjectId: input.subjectId,
+    gradeLevel,
+    selectedTopics: input.selectedTopics,
+  });
+
+  const selectedBankQuestions = pickBalancedBankQuestions(
+    bankCandidates,
+    input.selectedTopics,
+    DEFAULT_PRACTICE_QUESTION_COUNT
+  );
+
+  let aiQuestions: Array<{
+    sourceType: "ai";
+    sourceQuestionBankId: null;
+    topicKey: string;
+    subtopic: string;
+    type: QuestionType;
+    content: string;
+    contentHtml: null;
+    imageUrl: null;
+    options: string[] | null;
+    correctAnswer: string | null;
+    points: number;
+    explanation: string | null;
+  }> = [];
+
+  if (selectedBankQuestions.length < DEFAULT_PRACTICE_QUESTION_COUNT) {
+    try {
+      aiQuestions = await generatePracticeQuestionsWithAI({
+        subjectName: input.subjectName,
+        gradeLevel,
+        topics: input.selectedTopics,
+        questionCount: DEFAULT_PRACTICE_QUESTION_COUNT - selectedBankQuestions.length,
+      });
+    } catch (aiError) {
+      if (selectedBankQuestions.length === 0) {
+        throw aiError;
+      }
+    }
+  }
+
+  const finalQuestions = [...selectedBankQuestions, ...aiQuestions].slice(
+    0,
+    DEFAULT_PRACTICE_QUESTION_COUNT
+  );
+
+  if (finalQuestions.length === 0) {
+    return { error: "Practice асуулт үүсгэж чадсангүй. Дараа дахин оролдоно уу." } as const;
+  }
+
+  const { data: practiceExamId, error: practiceExamError } = await admin.rpc(
+    "create_student_practice_exam_bundle",
+    {
+      p_student_id: input.studentId,
+      p_subject_id: input.subjectId,
+      p_title: `${input.subjectName} - Хувийн дасгал`,
+      p_description: "AI болон curated bank дээр суурилсан хувийн practice дасгал.",
+      p_selected_topics: input.selectedTopics.map((topic) => ({
+        topic_key: topic.topic_key,
+        topic_label: topic.topic_label,
+      })),
+      p_generated_metadata: {
+        bank_question_count: selectedBankQuestions.length,
+        ai_question_count: Math.max(finalQuestions.length - selectedBankQuestions.length, 0),
+        grade_level: gradeLevel,
+      },
+      p_questions: createPracticeQuestionRows(input.subjectId, finalQuestions),
+    }
+  );
+
+  if (practiceExamError || !practiceExamId) {
+    return {
+      error: practiceExamError?.message ?? "Practice exam үүсгэхэд алдаа гарлаа.",
+    } as const;
+  }
+
+  return {
+    success: true as const,
+    redirectTo: `/student/learning/practice/${String(practiceExamId)}`,
+  };
+}
+
 export async function createStudentPracticeExam(input: {
   subjectId: string;
   topicKeys: string[];
@@ -1751,104 +2147,388 @@ export async function createStudentPracticeExam(input: {
     };
   }
 
-  const [subjectMap, gradeLevel] = await Promise.all([
-    getSubjectsByIds(admin, [input.subjectId]),
-    getStudentGradeLevel(admin, context.userId),
-  ]);
-
-  const subjectName = subjectMap.get(input.subjectId)?.name ?? subjectLearning.subject.subject_name;
-  const bankCandidates = await loadBankCandidates(admin, {
-    subjectId: input.subjectId,
-    gradeLevel,
-    selectedTopics,
-  });
-
-  const selectedBankQuestions = pickBalancedBankQuestions(
-    bankCandidates,
-    selectedTopics,
-    DEFAULT_PRACTICE_QUESTION_COUNT
-  );
-
-  let aiQuestions: Array<{
-    sourceType: "ai";
-    sourceQuestionBankId: null;
-    topicKey: string;
-    subtopic: string;
-    type: QuestionType;
-    content: string;
-    contentHtml: null;
-    imageUrl: null;
-    options: string[] | null;
-    correctAnswer: string | null;
-    points: number;
-    explanation: string | null;
-  }> = [];
-
-  if (selectedBankQuestions.length < DEFAULT_PRACTICE_QUESTION_COUNT) {
-    aiQuestions = await generatePracticeQuestionsWithAI({
-      subjectName,
-      gradeLevel,
-      topics: selectedTopics,
-      questionCount: DEFAULT_PRACTICE_QUESTION_COUNT - selectedBankQuestions.length,
-    });
-  }
-
-  const finalQuestions = [...selectedBankQuestions, ...aiQuestions].slice(
-    0,
-    DEFAULT_PRACTICE_QUESTION_COUNT
-  );
-
-  if (finalQuestions.length === 0) {
-    return { error: "Practice асуулт үүсгэж чадсангүй. Дараа дахин оролдоно уу." };
-  }
-
-  const questionRows = finalQuestions.map((question, index) => ({
-    subject_id: input.subjectId,
-    source_type: question.sourceType,
-    source_question_bank_id: question.sourceQuestionBankId,
-    topic_key: question.topicKey,
-    subtopic: question.subtopic,
-    type: question.type,
-    content: question.content,
-    content_html: question.contentHtml,
-    image_url: question.imageUrl,
-    options: question.options,
-    correct_answer: question.correctAnswer,
-    points: question.points,
-    order_index: index,
-    explanation: question.explanation,
-  }));
-
-  const { data: practiceExamId, error: practiceExamError } = await admin.rpc(
-    "create_student_practice_exam_bundle",
-    {
-      p_student_id: context.userId,
-      p_subject_id: input.subjectId,
-      p_title: `${subjectName} - Хувийн дасгал`,
-      p_description: "AI болон curated bank дээр суурилсан хувийн practice дасгал.",
-      p_selected_topics: selectedTopics.map((topic) => ({
+  const { data: practiceExam, error: practiceExamError } = await admin
+    .from("student_practice_exams")
+    .insert({
+      student_id: context.userId,
+      subject_id: input.subjectId,
+      title: `${subjectLearning.subject.subject_name} - Хувийн дасгал`,
+      description: "AI болон curated bank дээр суурилсан хувийн practice дасгал.",
+      selected_topics: selectedTopics.map((topic) => ({
         topic_key: topic.topic_key,
         topic_label: topic.topic_label,
       })),
-      p_generated_metadata: {
-        bank_question_count: selectedBankQuestions.length,
-        ai_question_count: Math.max(finalQuestions.length - selectedBankQuestions.length, 0),
-        grade_level: gradeLevel,
+      generated_metadata: {
+        selected_topics_snapshot: serializePracticeTopicSnapshot(selectedTopics),
+        requested_question_count: DEFAULT_PRACTICE_QUESTION_COUNT,
       },
-      p_questions: questionRows,
-    }
-  );
+      question_count: 0,
+      status: "building",
+      build_error: null,
+      build_requested_at: new Date().toISOString(),
+      ready_at: null,
+    })
+    .select("id")
+    .maybeSingle();
 
-  if (practiceExamError || !practiceExamId) {
+  if (
+    practiceExamError &&
+    (isMissingColumnError(practiceExamError, "student_practice_exams", "status") ||
+      isMissingColumnError(practiceExamError, "student_practice_exams", "build_requested_at") ||
+      isMissingColumnError(practiceExamError, "student_practice_exams", "ready_at"))
+  ) {
+    const legacyResult = await createStudentPracticeExamLegacy(admin, {
+      subjectId: input.subjectId,
+      selectedTopics,
+      studentId: context.userId,
+      subjectName: subjectLearning.subject.subject_name,
+    });
+
+    if ("error" in legacyResult) {
+      return legacyResult;
+    }
+
+    revalidatePath("/student");
+    revalidatePath("/student/learning");
+    return legacyResult;
+  }
+
+  if (practiceExamError || !practiceExam?.id) {
     return { error: practiceExamError?.message ?? "Practice exam үүсгэхэд алдаа гарлаа." };
   }
 
   revalidatePath("/student");
   revalidatePath("/student/learning");
+  scheduleStudentLearningProcessing();
 
   return {
     success: true,
-    redirectTo: `/student/learning/practice/${String(practiceExamId)}`,
+    redirectTo: `/student/learning/practice/${String(practiceExam.id)}`,
+  };
+}
+
+async function claimPendingStudyPlanJob(
+  admin: SupabaseAdminClient,
+  row: StudyPlanJobRow
+) {
+  const claimAt = new Date().toISOString();
+  const { data, error } = await admin
+    .from("student_subject_study_plans")
+    .update({
+      requested_at: claimAt,
+      last_error: null,
+    })
+    .eq("student_id", row.student_id)
+    .eq("subject_id", row.subject_id)
+    .eq("status", "pending")
+    .eq("requested_at", row.requested_at)
+    .select("student_id")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return Boolean(data);
+}
+
+async function processPendingStudentStudyPlanJobs(limit = DEFAULT_STUDY_PLAN_BATCH_SIZE) {
+  const admin = createAdminClient();
+  const safeLimit = Math.max(1, Math.min(Number(limit || 0), 10));
+  const { data, error } = await admin
+    .from("student_subject_study_plans")
+    .select(
+      "student_id, subject_id, mastery_updated_at, pending_mastery_updated_at, plan_json, generated_at, requested_at, status, last_error, subjects(name)"
+    )
+    .eq("status", "pending")
+    .order("requested_at", { ascending: true })
+    .limit(safeLimit);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  let processed = 0;
+  let succeeded = 0;
+  let failed = 0;
+
+  for (const row of (data ?? []) as StudyPlanJobRow[]) {
+    const claimed = await claimPendingStudyPlanJob(admin, row);
+    if (!claimed) continue;
+
+    processed += 1;
+
+    try {
+      const overview = await getLearningOverviewForStudent(row.student_id);
+      const subjectLearning = getSubjectLearningFromOverview(overview, row.subject_id);
+      const masteryUpdatedAt = overview.subjectUpdatedAtById.get(row.subject_id) ?? null;
+
+      if (!subjectLearning || !masteryUpdatedAt) {
+        throw new Error("Study plan үүсгэх mastery өгөгдөл алга.");
+      }
+
+      const plan = await generateStudyPlanWithAI({
+        subjectName: subjectLearning.subject.subject_name,
+        weakTopics: subjectLearning.topics,
+        subjectSummary: subjectLearning.subject,
+      });
+
+      const { error: updateError } = await admin
+        .from("student_subject_study_plans")
+        .update({
+          mastery_updated_at: masteryUpdatedAt,
+          pending_mastery_updated_at: masteryUpdatedAt,
+          plan_json: plan,
+          generated_at: new Date().toISOString(),
+          status: "ready",
+          last_error: null,
+        })
+        .eq("student_id", row.student_id)
+        .eq("subject_id", row.subject_id);
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+
+      succeeded += 1;
+    } catch (planError) {
+      failed += 1;
+      const { error: updateError } = await admin
+        .from("student_subject_study_plans")
+        .update({
+          status: "failed",
+          last_error:
+            planError instanceof Error ? planError.message : "study_plan_generation_failed",
+        })
+        .eq("student_id", row.student_id)
+        .eq("subject_id", row.subject_id);
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+    }
+  }
+
+  return { processed, succeeded, failed, claimed: (data ?? []).length };
+}
+
+async function claimPendingPracticeBuild(
+  admin: SupabaseAdminClient,
+  practiceExam: QueuedPracticeExamRow
+) {
+  const currentBuildRequestedAt = practiceExam.build_requested_at;
+  if (!currentBuildRequestedAt) return false;
+
+  const { data, error } = await admin
+    .from("student_practice_exams")
+    .update({
+      build_requested_at: new Date().toISOString(),
+      build_error: null,
+    })
+    .eq("id", practiceExam.id)
+    .eq("status", "building")
+    .eq("build_requested_at", currentBuildRequestedAt)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return Boolean(data);
+}
+
+async function markPracticeBuildFailed(
+  admin: SupabaseAdminClient,
+  practiceExamId: string,
+  message: string
+) {
+  const { error } = await admin
+    .from("student_practice_exams")
+    .update({
+      status: "failed",
+      build_error: message,
+      ready_at: null,
+      question_count: 0,
+    })
+    .eq("id", practiceExamId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+async function processPendingPracticeBuildJobs(limit = DEFAULT_PRACTICE_BUILD_BATCH_SIZE) {
+  const admin = createAdminClient();
+  const safeLimit = Math.max(1, Math.min(Number(limit || 0), 10));
+  const { data, error } = await admin
+    .from("student_practice_exams")
+    .select(
+      "id, student_id, subject_id, title, description, selected_topics, generated_metadata, build_requested_at, status, build_error, subjects(name)"
+    )
+    .eq("status", "building")
+    .order("build_requested_at", { ascending: true })
+    .limit(safeLimit);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  let processed = 0;
+  let succeeded = 0;
+  let failed = 0;
+
+  for (const practiceExam of (data ?? []) as QueuedPracticeExamRow[]) {
+    const claimed = await claimPendingPracticeBuild(admin, practiceExam);
+    if (!claimed) continue;
+
+    processed += 1;
+
+    try {
+      const selectedTopicsSnapshot = getPracticeTopicSnapshotFromMetadata(
+        practiceExam.generated_metadata
+      );
+      const fallbackTopics = Array.isArray(practiceExam.selected_topics)
+        ? parsePracticeTopicSnapshot(
+            practiceExam.selected_topics.map((topic) => {
+              if (!topic || typeof topic !== "object") return null;
+              const raw = topic as Record<string, unknown>;
+              return {
+                subject_id: practiceExam.subject_id,
+                subject_name:
+                  getRelationObject(practiceExam.subjects)?.name ?? "Хичээл",
+                topic_key: raw.topic_key,
+                topic_label: raw.topic_label,
+                mastery_score: 0,
+                official_question_count: 0,
+                practice_question_count: 0,
+                official_percentage: null,
+                practice_percentage: null,
+              };
+            }).filter(Boolean)
+          )
+        : [];
+      const selectedTopics =
+        selectedTopicsSnapshot.length > 0 ? selectedTopicsSnapshot : fallbackTopics;
+
+      if (selectedTopics.length === 0) {
+        throw new Error("Practice бэлтгэх topic snapshot олдсонгүй.");
+      }
+
+      const requestedQuestionCount = Math.max(
+        1,
+        Math.min(
+          Number(practiceExam.generated_metadata?.requested_question_count ?? DEFAULT_PRACTICE_QUESTION_COUNT),
+          DEFAULT_PRACTICE_QUESTION_COUNT
+        )
+      );
+      const gradeLevel =
+        typeof practiceExam.generated_metadata?.grade_level === "number"
+          ? Number(practiceExam.generated_metadata.grade_level)
+          : await getStudentGradeLevel(admin, practiceExam.student_id);
+      const subjectName =
+        getRelationObject(practiceExam.subjects)?.name ??
+        selectedTopics[0]?.subject_name ??
+        "Хичээл";
+
+      const bankCandidates = await loadBankCandidates(admin, {
+        subjectId: practiceExam.subject_id,
+        gradeLevel,
+        selectedTopics,
+      });
+
+      const selectedBankQuestions = pickBalancedBankQuestions(
+        bankCandidates,
+        selectedTopics,
+        requestedQuestionCount
+      );
+
+      let aiQuestions: Array<{
+        sourceType: "ai";
+        sourceQuestionBankId: null;
+        topicKey: string;
+        subtopic: string;
+        type: QuestionType;
+        content: string;
+        contentHtml: null;
+        imageUrl: null;
+        options: string[] | null;
+        correctAnswer: string | null;
+        points: number;
+        explanation: string | null;
+      }> = [];
+
+      if (selectedBankQuestions.length < requestedQuestionCount) {
+        try {
+          aiQuestions = await generatePracticeQuestionsWithAI({
+            subjectName,
+            gradeLevel,
+            topics: selectedTopics,
+            questionCount: requestedQuestionCount - selectedBankQuestions.length,
+          });
+        } catch (aiError) {
+          if (selectedBankQuestions.length === 0) {
+            throw aiError;
+          }
+        }
+      }
+
+      const finalQuestions = [...selectedBankQuestions, ...aiQuestions].slice(
+        0,
+        requestedQuestionCount
+      );
+
+      if (finalQuestions.length === 0) {
+        throw new Error("Practice асуулт үүсгэж чадсангүй.");
+      }
+
+      const { error: finalizeError } = await admin.rpc(
+        "finalize_student_practice_exam_build",
+        {
+          p_practice_exam_id: practiceExam.id,
+          p_questions: createPracticeQuestionRows(practiceExam.subject_id, finalQuestions),
+          p_generated_metadata: {
+            bank_question_count: selectedBankQuestions.length,
+            ai_question_count: Math.max(
+              finalQuestions.length - selectedBankQuestions.length,
+              0
+            ),
+            grade_level: gradeLevel,
+          },
+        }
+      );
+
+      if (finalizeError) {
+        throw new Error(finalizeError.message);
+      }
+
+      succeeded += 1;
+    } catch (buildError) {
+      failed += 1;
+      await markPracticeBuildFailed(
+        admin,
+        practiceExam.id,
+        buildError instanceof Error ? buildError.message : "practice_build_failed"
+      );
+    }
+  }
+
+  return { processed, succeeded, failed, claimed: (data ?? []).length };
+}
+
+export async function processPendingStudentLearningJobs(options?: {
+  masteryBatchSize?: number;
+  studyPlanBatchSize?: number;
+  practiceBuildBatchSize?: number;
+}) {
+  const mastery = await processPendingStudentMasteryRefreshJobs(options?.masteryBatchSize);
+  const studyPlans = await processPendingStudentStudyPlanJobs(options?.studyPlanBatchSize);
+  const practiceBuilds = await processPendingPracticeBuildJobs(options?.practiceBuildBatchSize);
+
+  return {
+    mastery,
+    studyPlans,
+    practiceBuilds,
   };
 }
 
@@ -1857,21 +2537,68 @@ async function getStudentPracticeExamBase(
   studentId: string,
   practiceExamId: string
 ) {
-  const { data: exam, error: examError } = await admin
+  const examResult = await admin
     .from("student_practice_exams")
-    .select("id, student_id, subject_id, title, description, selected_topics, question_count, created_at, subjects(name)")
+    .select(
+      "id, student_id, subject_id, title, description, selected_topics, generated_metadata, question_count, created_at, status, build_error, build_requested_at, ready_at, subjects(name)"
+    )
     .eq("id", practiceExamId)
     .eq("student_id", studentId)
     .maybeSingle();
 
-  if (examError || !exam) {
+  let exam:
+    | {
+        id: string;
+        subject_id: string;
+        title: string;
+        description: string | null;
+        selected_topics: unknown;
+        generated_metadata?: Record<string, unknown> | null;
+        question_count: number | null;
+        created_at: string;
+        status?: "building" | "ready" | "failed";
+        build_error?: string | null;
+        build_requested_at?: string | null;
+        ready_at?: string | null;
+        subjects?: { name: string } | { name: string }[] | null;
+      }
+    | null = null;
+  let usesLegacyExamSchema = false;
+
+  if (
+    examResult.error &&
+    (isMissingColumnError(examResult.error, "student_practice_exams", "status") ||
+      isMissingColumnError(examResult.error, "student_practice_exams", "build_error") ||
+      isMissingColumnError(examResult.error, "student_practice_exams", "build_requested_at") ||
+      isMissingColumnError(examResult.error, "student_practice_exams", "ready_at"))
+  ) {
+    usesLegacyExamSchema = true;
+    const legacyExamResult = await admin
+      .from("student_practice_exams")
+      .select(
+        "id, student_id, subject_id, title, description, selected_topics, generated_metadata, question_count, created_at, subjects(name)"
+      )
+      .eq("id", practiceExamId)
+      .eq("student_id", studentId)
+      .maybeSingle();
+
+    if (legacyExamResult.error) {
+      return null;
+    }
+
+    exam = legacyExamResult.data ?? null;
+  } else {
+    exam = examResult.data ?? null;
+  }
+
+  if (!exam) {
     return null;
   }
 
-  const { data: attempt, error: attemptError } = await admin
+  const attemptResult = await admin
     .from("student_practice_attempts")
     .select(
-      "id, practice_exam_id, student_id, status, started_at, submitted_at, total_score, max_score, attempt_number"
+      "id, practice_exam_id, student_id, status, started_at, submitted_at, total_score, max_score, attempt_number, draft_answers, draft_saved_at"
     )
     .eq("practice_exam_id", practiceExamId)
     .eq("student_id", studentId)
@@ -1880,8 +2607,50 @@ async function getStudentPracticeExamBase(
     .limit(1)
     .maybeSingle();
 
-  if (attemptError) {
-    throw new Error(attemptError.message);
+  let attempt:
+    | {
+        id: string;
+        practice_exam_id: string;
+        student_id: string;
+        status: "in_progress" | "graded";
+        started_at: string;
+        submitted_at: string | null;
+        total_score: number | null;
+        max_score: number | null;
+        attempt_number: number;
+        draft_answers?: Record<string, string> | null;
+        draft_saved_at?: string | null;
+      }
+    | null = null;
+  let usesLegacyAttemptSchema = false;
+
+  if (
+    attemptResult.error &&
+    (isMissingColumnError(attemptResult.error, "student_practice_attempts", "draft_answers") ||
+      isMissingColumnError(attemptResult.error, "student_practice_attempts", "draft_saved_at"))
+  ) {
+    usesLegacyAttemptSchema = true;
+    const legacyAttemptResult = await admin
+      .from("student_practice_attempts")
+      .select(
+        "id, practice_exam_id, student_id, status, started_at, submitted_at, total_score, max_score, attempt_number"
+      )
+      .eq("practice_exam_id", practiceExamId)
+      .eq("student_id", studentId)
+      .order("started_at", { ascending: false })
+      .order("attempt_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (legacyAttemptResult.error) {
+      throw new Error(legacyAttemptResult.error.message);
+    }
+
+    attempt = legacyAttemptResult.data ?? null;
+  } else if (attemptResult.error) {
+    throw new Error(attemptResult.error.message);
+  } else {
+    attempt = attemptResult.data ?? null;
   }
 
   const subject = getRelationObject(exam.subjects as { name: string } | { name: string }[] | null);
@@ -1893,11 +2662,30 @@ async function getStudentPracticeExamBase(
       description: exam.description,
       subject_id: exam.subject_id,
       subject_name: subject?.name ?? "Хичээл",
+      generated_metadata:
+        exam.generated_metadata && typeof exam.generated_metadata === "object"
+          ? (exam.generated_metadata as Record<string, unknown>)
+          : null,
+      status: usesLegacyExamSchema ? "ready" : exam.status ?? "ready",
+      build_error: usesLegacyExamSchema ? null : exam.build_error ?? null,
+      build_requested_at:
+        usesLegacyExamSchema ? null : exam.build_requested_at ?? null,
+      ready_at: usesLegacyExamSchema ? null : exam.ready_at ?? null,
       selected_topics: Array.isArray(exam.selected_topics) ? exam.selected_topics : [],
       question_count: Number(exam.question_count ?? 0),
       created_at: exam.created_at,
     },
-    attempt: attempt as StudentPracticeAttempt | null,
+    attempt: attempt
+      ? ({
+          ...(attempt as StudentPracticeAttempt),
+          draft_answers: usesLegacyAttemptSchema
+            ? {}
+            : parseDraftAnswerRecord(attempt.draft_answers),
+          draft_saved_at: usesLegacyAttemptSchema
+            ? null
+            : attempt.draft_saved_at ?? null,
+        } satisfies StudentPracticeAttempt)
+      : null,
   };
 }
 
@@ -1918,6 +2706,23 @@ async function getStudentPracticeQuestionsForTake(
   }
 
   return (data ?? []) as StudentPracticeQuestionForTake[];
+}
+
+async function getStudentPracticeQuestionsForDraft(
+  admin: SupabaseAdminClient,
+  practiceExamId: string
+) {
+  const { data, error } = await admin
+    .from("student_practice_questions")
+    .select("id, type")
+    .eq("practice_exam_id", practiceExamId)
+    .order("order_index", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as Array<Pick<StudentPracticeQuestionForTake, "id" | "type">>;
 }
 
 async function getStudentPracticeQuestionsForGrading(
@@ -1964,18 +2769,21 @@ export async function getStudentPracticeExamForTake(practiceExamId: string) {
   }
 
   const admin = createAdminClient();
-  const [base, questions] = await Promise.all([
-    getStudentPracticeExamBase(admin, context.userId, practiceExamId),
-    getStudentPracticeQuestionsForTake(admin, practiceExamId),
-  ]);
+  const base = await getStudentPracticeExamBase(admin, context.userId, practiceExamId);
 
   if (!base) {
     return null;
   }
 
+  const questions =
+    base.exam.status === "ready"
+      ? await getStudentPracticeQuestionsForTake(admin, practiceExamId)
+      : [];
+
   return {
     ...base,
     questions,
+    savedAnswers: base.attempt?.draft_answers ?? {},
   };
 }
 
@@ -2013,53 +2821,109 @@ export async function getStudentPracticeResult(practiceExamId: string) {
   };
 }
 
-function gradePracticeQuestion(
-  question: StudentPracticeQuestion,
-  rawAnswer: string | null | undefined
+export async function retryStudentPracticeExamBuild(practiceExamId: string) {
+  const context = await getAuthenticatedStudentContext();
+  if ("error" in context) {
+    return { error: context.error };
+  }
+
+  const admin = createAdminClient();
+  const practice = await getStudentPracticeExamBase(admin, context.userId, practiceExamId);
+  if (!practice) {
+    return { error: "Practice шалгалт олдсонгүй." };
+  }
+  if (practice.exam.status !== "failed") {
+    return { error: "Энэ practice-г дахин бэлтгэх боломжгүй байна." };
+  }
+
+  const resetTimestamp = new Date().toISOString();
+  const [{ error: deleteAttemptError }, { error: deleteQuestionError }, { error: updateError }] =
+    await Promise.all([
+      admin.from("student_practice_attempts").delete().eq("practice_exam_id", practiceExamId),
+      admin.from("student_practice_questions").delete().eq("practice_exam_id", practiceExamId),
+      admin
+        .from("student_practice_exams")
+        .update({
+          status: "building",
+          build_error: null,
+          build_requested_at: resetTimestamp,
+          ready_at: null,
+          question_count: 0,
+        })
+        .eq("id", practiceExamId)
+        .eq("student_id", context.userId),
+    ]);
+
+  if (deleteAttemptError) {
+    return { error: deleteAttemptError.message };
+  }
+
+  if (deleteQuestionError) {
+    return { error: deleteQuestionError.message };
+  }
+
+  if (updateError) {
+    return { error: updateError.message };
+  }
+
+  revalidatePath("/student/learning");
+  revalidatePath(`/student/learning/practice/${practiceExamId}`);
+  scheduleStudentLearningProcessing();
+
+  return { success: true };
+}
+
+export async function saveStudentPracticeDraft(
+  practiceExamId: string,
+  answers: Record<string, string>
 ) {
-  if (question.type === "multiple_choice" || question.type === "fill_blank") {
-    const isCorrect =
-      normalizeTextAnswer(rawAnswer) === normalizeTextAnswer(question.correct_answer);
+  const context = await getAuthenticatedStudentContext();
+  if ("error" in context) {
+    return { error: context.error };
+  }
+
+  const admin = createAdminClient();
+  const [practice, draftQuestions] = await Promise.all([
+    getStudentPracticeExamBase(admin, context.userId, practiceExamId),
+    getStudentPracticeQuestionsForDraft(admin, practiceExamId),
+  ]);
+
+  if (!practice?.attempt || practice.exam.status !== "ready") {
+    return { error: "Practice draft хадгалах боломжгүй байна." };
+  }
+
+  if (practice.attempt.status === "graded") {
     return {
-      is_correct: isCorrect,
-      score: isCorrect ? Number(question.points ?? 0) : 0,
+      success: true as const,
+      savedAt: practice.attempt.draft_saved_at ?? new Date().toISOString(),
     };
   }
 
-  if (question.type === "multiple_response") {
-    const submitted = parseStringArray(rawAnswer)
-      .map((item) => normalizeTextAnswer(item))
-      .sort();
-    const expected = parseStringArray(question.correct_answer)
-      .map((item) => normalizeTextAnswer(item))
-      .sort();
-    const isCorrect =
-      submitted.length > 0 && areArraysEqual(submitted, expected);
-    return {
-      is_correct: isCorrect,
-      score: isCorrect ? Number(question.points ?? 0) : 0,
-    };
+  const normalizedAnswers = normalizeDraftAnswersForQuestions(draftQuestions, answers);
+  const savedAt = new Date().toISOString();
+  const { error } = await admin
+    .from("student_practice_attempts")
+    .update({
+      draft_answers: normalizedAnswers,
+      draft_saved_at: savedAt,
+    })
+    .eq("id", practice.attempt.id)
+    .eq("student_id", context.userId)
+    .eq("status", "in_progress");
+
+  if (
+    error &&
+    (isMissingColumnError(error, "student_practice_attempts", "draft_answers") ||
+      isMissingColumnError(error, "student_practice_attempts", "draft_saved_at"))
+  ) {
+    return { success: true as const, savedAt };
   }
 
-  if (question.type === "matching") {
-    try {
-      const parsed = JSON.parse(String(rawAnswer ?? "{}")) as Record<string, string>;
-      const expectedPairs = parseMatchingPairs(question.options);
-      const isCorrect =
-        expectedPairs.length > 0 &&
-        expectedPairs.every(
-          (pair) => normalizeTextAnswer(parsed[pair.left]) === normalizeTextAnswer(pair.right)
-        );
-      return {
-        is_correct: isCorrect,
-        score: isCorrect ? Number(question.points ?? 0) : 0,
-      };
-    } catch {
-      return { is_correct: false, score: 0 };
-    }
+  if (error) {
+    return { error: error.message };
   }
 
-  return { is_correct: false, score: 0 };
+  return { success: true as const, savedAt };
 }
 
 export async function submitStudentPracticeExam(
@@ -2080,6 +2944,9 @@ export async function submitStudentPracticeExam(
   if (!practice?.attempt) {
     return { error: "Practice attempt олдсонгүй." };
   }
+  if (practice.exam.status !== "ready") {
+    return { error: "Practice шалгалт хараахан бэлэн болоогүй байна." };
+  }
   if (practice.questions.length === 0) {
     return { error: "Practice асуулт олдсонгүй." };
   }
@@ -2088,9 +2955,14 @@ export async function submitStudentPracticeExam(
     return { success: true, redirectTo: `/student/learning/practice/${practiceExamId}/result` };
   }
 
+  const normalizedAnswers =
+    Object.keys(answers).length > 0
+      ? normalizeDraftAnswersForQuestions(practice.questions, answers)
+      : parseDraftAnswerRecord(practice.attempt.draft_answers);
+
   let totalScore = 0;
   const answerRows = practice.questions.map((question) => {
-    const answerValue = answers[question.id] ?? null;
+    const answerValue = normalizedAnswers[question.id] ?? null;
     const graded = gradePracticeQuestion(question, answerValue);
     totalScore += graded.score;
 
@@ -2126,6 +2998,8 @@ export async function submitStudentPracticeExam(
       submitted_at: new Date().toISOString(),
       total_score: roundToTwo(totalScore),
       max_score: maxScore,
+      draft_answers: {},
+      draft_saved_at: null,
     })
     .eq("id", practice.attempt.id)
     .eq("student_id", context.userId);

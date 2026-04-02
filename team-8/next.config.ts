@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
     root: path.resolve(__dirname),
   },
   experimental: {
+    turbopackFileSystemCacheForDev: false,
     serverActions: {
       bodySizeLimit: "4mb",
     },

@@ -562,6 +562,120 @@ export async function ensureQuestionVariantPresets(
   return (data ?? []) as StoredQuestionVariantPreset[];
 }
 
+export async function ensureSessionVariantsForSession(
+  supabase: SupabaseServerClient,
+  params: {
+    sessionId: string;
+    userId: string;
+    questions: VariantQuestionBase[];
+    variantSlot: number;
+    existingMap?: Map<string, StoredQuestionVariant>;
+  }
+) {
+  const existingMap =
+    params.existingMap ??
+    (await getSessionQuestionVariantMap(supabase, params.sessionId));
+  const rows: Array<{
+    session_id: string;
+    question_id: string;
+    user_id: string;
+    type: QuestionType;
+    content: string;
+    content_html: string | null;
+    image_url: string | null;
+    options: string[] | null;
+    correct_answer: string | null;
+    explanation: string | null;
+  }> = [];
+
+  const fixedQuestions = params.questions.filter(
+    (question) =>
+      Boolean(question.ai_variant_enabled) &&
+      getResolvedVariantMode(question) === "two_fixed" &&
+      !existingMap.has(question.id)
+  );
+
+  if (fixedQuestions.length > 0) {
+    const presetMap = await getQuestionVariantPresetMap(
+      supabase,
+      fixedQuestions.map((question) => question.id)
+    );
+
+    rows.push(
+      ...fixedQuestions.map((question) => {
+        const presets = presetMap.get(question.id) ?? [];
+        const matchedPreset =
+          presets.find((preset) => preset.slot === params.variantSlot) ??
+          presets[0];
+        const variant = matchedPreset ?? buildFallbackVariant(question);
+
+        return {
+          session_id: params.sessionId,
+          question_id: question.id,
+          user_id: params.userId,
+          type: variant.type,
+          content: variant.content,
+          content_html: variant.content_html,
+          image_url: variant.image_url,
+          options: variant.options,
+          correct_answer: variant.correct_answer,
+          explanation: variant.explanation,
+        };
+      })
+    );
+  }
+
+  const perStudentQuestions = params.questions.filter(
+    (question) =>
+      Boolean(question.ai_variant_enabled) &&
+      getResolvedVariantMode(question) === "per_student" &&
+      !existingMap.has(question.id)
+  );
+
+  if (perStudentQuestions.length > 0) {
+    let candidates: GeneratedVariantCandidate[] = [];
+
+    try {
+      candidates = await callGeminiForQuestionVariants(
+        params.sessionId,
+        perStudentQuestions
+      );
+    } catch (error) {
+      console.error("[question-variants] generation failed", error);
+    }
+
+    const candidateMap = new Map(
+      candidates.map((candidate) => [
+        String(candidate.question_id ?? ""),
+        candidate,
+      ])
+    );
+
+    rows.push(
+      ...perStudentQuestions.map((question) => {
+        const normalized =
+          normalizeGeneratedVariant(question, candidateMap.get(question.id)) ??
+          buildFallbackVariant(question);
+
+        return {
+          session_id: params.sessionId,
+          question_id: question.id,
+          user_id: params.userId,
+          type: normalized.type,
+          content: normalized.content,
+          content_html: normalized.content_html,
+          image_url: normalized.image_url,
+          options: normalized.options,
+          correct_answer: normalized.correct_answer,
+          explanation: normalized.explanation,
+        };
+      })
+    );
+  }
+
+  return upsertSessionVariantRows(supabase, existingMap, rows);
+}
+
 export async function ensureSessionFixedQuestionVariants(
   supabase: SupabaseServerClient,
   params: {

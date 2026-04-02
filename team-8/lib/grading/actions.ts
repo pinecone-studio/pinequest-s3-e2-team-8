@@ -19,6 +19,7 @@ import { attachPassagesToAnswers } from "@/lib/question-passages";
 import {
   notifyStudentOfGrading,
   notifyParentOfGrading,
+  notifyStudentOfReviewResolved,
 } from "@/lib/notification/actions";
 import { enqueueStudentTopicMasteryRefresh } from "@/lib/student-learning/actions";
 
@@ -49,7 +50,7 @@ async function recalculateSessionTotals(
   supabase: Awaited<ReturnType<typeof createClient>>,
   sessionId: string,
   examId: string,
-  nextStatus?: "graded" | "submitted"
+  nextStatus?: "graded" | "submitted" | "timed_out"
 ) {
   const snapshot = await getStoredPublishedExamSnapshot(supabase, examId);
 
@@ -82,7 +83,7 @@ async function recalculateSessionTotals(
   const updatePayload: {
     total_score: number;
     max_score: number;
-    status?: "graded" | "submitted";
+    status?: "graded" | "submitted" | "timed_out";
   } = {
     total_score: totalScore,
     max_score: maxScore,
@@ -104,110 +105,133 @@ async function recalculateSessionTotals(
   return { totalScore, maxScore };
 }
 
-export async function getPendingSubmissions() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return [];
+type ManagedExamScope = {
+  admin: boolean;
+  examIds: string[];
+  ownExamIdSet: Set<string>;
+  scopedExamGroups: Map<string, Set<string>>;
+};
 
-  const admin = await isAdminUser(supabase, user.id);
+export type PendingReviewSession = {
+  id: string;
+  exam_id: string;
+  user_id: string;
+  status: string;
+  total_score: number | null;
+  max_score: number | null;
+  submitted_at: string | null;
+  started_at: string | null;
+  active_review_count: number;
+  latest_review_requested_at: string | null;
+  exams?:
+    | { title: string }
+    | { title: string }[]
+    | null;
+  profiles?:
+    | { full_name: string | null; email: string | null; avatar_url: string | null }
+    | { full_name: string | null; email: string | null; avatar_url: string | null }[]
+    | null;
+  answers?: { id: string; review_requested_at: string | null }[];
+};
 
-  // Collect exam IDs: owned + exams in teacher's subject scope
-  const examIdSet = new Set<string>();
-
+async function getManagedExamScope(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+): Promise<ManagedExamScope> {
+  const admin = await isAdminUser(supabase, userId);
   if (admin) {
-    // Admin sees all pending submissions
-      const { data } = await supabase
-        .from("exam_sessions")
-        .select(
-          "*, exams!exam_sessions_exam_id_fkey(title), profiles!exam_sessions_user_id_fkey(full_name, email, avatar_url)"
-        )
-        .eq("status", "submitted")
-        .order("submitted_at", { ascending: true });
-    return data ?? [];
+    return {
+      admin: true,
+      examIds: [],
+      ownExamIdSet: new Set<string>(),
+      scopedExamGroups: new Map<string, Set<string>>(),
+    };
   }
 
-  // Teacher's own exams
+  const examIdSet = new Set<string>();
   const { data: ownExams } = await supabase
     .from("exams")
     .select("id")
-    .eq("created_by", user.id);
+    .eq("created_by", userId);
 
-  const ownExamIdSet = new Set((ownExams ?? []).map((exam) => exam.id));
+  const ownExamIdSet = new Set((ownExams ?? []).map((exam) => String(exam.id)));
   for (const examId of ownExamIdSet) examIdSet.add(examId);
 
-  // Exams assigned to groups where teacher has an active teaching_assignment
-  // (subject must match — group-specific, not subject-wide)
   const scopedExamGroups = new Map<string, Set<string>>();
   const { data: teachingRows } = await supabase
     .from("teaching_assignments")
     .select("group_id, subject_id")
-    .eq("teacher_id", user.id)
+    .eq("teacher_id", userId)
     .eq("is_active", true);
 
   if (teachingRows && teachingRows.length > 0) {
-    const groupIds = [...new Set(teachingRows.map((r) => r.group_id))];
-
+    const groupIds = [...new Set(teachingRows.map((row) => row.group_id))];
     const { data: assignedExams } = await supabase
       .from("exam_assignments")
       .select("exam_id, group_id, exams(subject_id)")
       .in("group_id", groupIds);
 
-    for (const ae of assignedExams ?? []) {
-      const examSubjectId = Array.isArray(ae.exams)
-        ? ae.exams[0]?.subject_id
-        : (ae.exams as { subject_id: string } | null)?.subject_id;
-
-      // Must match both subject AND the specific group (not just subject-wide)
-      const validTA = teachingRows.find(
-        (ta) => ta.subject_id === examSubjectId && ta.group_id === ae.group_id
+    for (const assignedExam of assignedExams ?? []) {
+      const examSubjectId = Array.isArray(assignedExam.exams)
+        ? assignedExam.exams[0]?.subject_id
+        : (assignedExam.exams as { subject_id: string } | null)?.subject_id;
+      const validAssignment = teachingRows.find(
+        (row) =>
+          row.subject_id === examSubjectId &&
+          row.group_id === assignedExam.group_id,
       );
-      if (!validTA) continue;
-      examIdSet.add(ae.exam_id);
-      if (!ownExamIdSet.has(ae.exam_id)) {
-        const groups = scopedExamGroups.get(ae.exam_id) ?? new Set<string>();
-        groups.add(ae.group_id);
-        scopedExamGroups.set(ae.exam_id, groups);
+      if (!validAssignment) continue;
+
+      const examId = String(assignedExam.exam_id);
+      examIdSet.add(examId);
+
+      if (!ownExamIdSet.has(examId)) {
+        const groups = scopedExamGroups.get(examId) ?? new Set<string>();
+        groups.add(String(assignedExam.group_id));
+        scopedExamGroups.set(examId, groups);
       }
     }
   }
 
-  const examIds = [...examIdSet];
-  if (examIds.length === 0) return [];
+  return {
+    admin: false,
+    examIds: [...examIdSet],
+    ownExamIdSet,
+    scopedExamGroups,
+  };
+}
 
-  const { data } = await supabase
-    .from("exam_sessions")
-    .select(
-      "*, exams!exam_sessions_exam_id_fkey(title), profiles!exam_sessions_user_id_fkey(full_name, email, avatar_url)"
-    )
-    .in("exam_id", examIds)
-    .eq("status", "submitted")
-    .order("submitted_at", { ascending: true });
-
-  const sessions = data ?? [];
-  if (sessions.length === 0 || scopedExamGroups.size === 0) {
+async function filterManagedSessionsByGroupScope<
+  T extends { exam_id: string; user_id: string }
+>(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  sessions: T[],
+  scope: ManagedExamScope,
+) {
+  if (scope.admin || sessions.length === 0 || scope.scopedExamGroups.size === 0) {
     return sessions;
   }
 
   const scopedStudentIds = Array.from(
     new Set(
       sessions
-        .filter((session) => !ownExamIdSet.has(session.exam_id))
-        .map((session) => session.user_id as string)
-    )
+        .filter((session) => !scope.ownExamIdSet.has(String(session.exam_id)))
+        .map((session) => String(session.user_id)),
+    ),
   );
+
   if (scopedStudentIds.length === 0) {
     return sessions;
   }
 
   const scopedGroupIds = Array.from(
     new Set(
-      Array.from(scopedExamGroups.values()).flatMap((groupIds) =>
-        Array.from(groupIds)
-      )
-    )
+      Array.from(scope.scopedExamGroups.values()).flatMap((groupIds) =>
+        Array.from(groupIds),
+      ),
+    ),
   );
+
   const { data: memberRows } = await supabase
     .from("student_group_members")
     .select("student_id, group_id")
@@ -216,21 +240,157 @@ export async function getPendingSubmissions() {
 
   const studentGroups = new Map<string, Set<string>>();
   for (const row of memberRows ?? []) {
-    const groups = studentGroups.get(row.student_id) ?? new Set<string>();
-    groups.add(row.group_id);
-    studentGroups.set(row.student_id, groups);
+    const groups = studentGroups.get(String(row.student_id)) ?? new Set<string>();
+    groups.add(String(row.group_id));
+    studentGroups.set(String(row.student_id), groups);
   }
 
   return sessions.filter((session) => {
-    if (ownExamIdSet.has(session.exam_id)) return true;
-    const allowedGroups = scopedExamGroups.get(session.exam_id);
-    const currentGroups = studentGroups.get(session.user_id as string);
+    const examId = String(session.exam_id);
+    const studentId = String(session.user_id);
+
+    if (scope.ownExamIdSet.has(examId)) return true;
+
+    const allowedGroups = scope.scopedExamGroups.get(examId);
+    const currentGroups = studentGroups.get(studentId);
     if (!allowedGroups || !currentGroups) return false;
+
     return Array.from(currentGroups).some((groupId) => allowedGroups.has(groupId));
   });
 }
 
-export async function getGradingStats() {
+function getRequestedReviewMetadata(
+  answers:
+    | { id: string; review_requested_at: string | null }[]
+    | { id: string; review_requested_at: string | null }[]
+    | null
+    | undefined,
+) {
+  const requestedAnswers = Array.isArray(answers) ? answers : [];
+  const latestReviewRequestedAt = requestedAnswers.reduce<string | null>(
+    (latest, answer) => {
+      if (!answer.review_requested_at) return latest;
+      if (!latest) return answer.review_requested_at;
+
+      return new Date(answer.review_requested_at).getTime() >
+        new Date(latest).getTime()
+        ? answer.review_requested_at
+        : latest;
+    },
+    null,
+  );
+
+  return {
+    active_review_count: requestedAnswers.length,
+    latest_review_requested_at: latestReviewRequestedAt,
+  };
+}
+
+export async function getPendingSubmissions(): Promise<PendingReviewSession[]> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+  const scope = await getManagedExamScope(supabase, user.id);
+
+  let query = supabase
+    .from("exam_sessions")
+    .select(
+      "id, exam_id, user_id, status, total_score, max_score, submitted_at, started_at, exams!exam_sessions_exam_id_fkey(title), profiles!exam_sessions_user_id_fkey(full_name, email, avatar_url), answers!inner(id, review_requested_at)",
+    )
+    .eq("answers.review_status", "requested");
+
+  if (!scope.admin) {
+    if (scope.examIds.length === 0) return [];
+    query = query.in("exam_id", scope.examIds);
+  }
+
+  const { data } = await query;
+  const sessionMap = new Map<string, Record<string, unknown>>();
+
+  for (const session of data ?? []) {
+    const sessionId = String(session.id);
+    const requestedAnswers = Array.isArray(session.answers)
+      ? (session.answers as { id: string; review_requested_at: string | null }[])
+      : [];
+    const existing = sessionMap.get(sessionId);
+    const mergedAnswers = [
+      ...(Array.isArray(existing?.answers)
+        ? (existing?.answers as { id: string; review_requested_at: string | null }[])
+        : []),
+      ...requestedAnswers,
+    ];
+
+    sessionMap.set(sessionId, {
+      ...(existing ?? {}),
+      ...session,
+      answers: mergedAnswers,
+      ...getRequestedReviewMetadata(mergedAnswers),
+    });
+  }
+
+  const filteredSessions = await filterManagedSessionsByGroupScope(
+    supabase,
+    Array.from(sessionMap.values()) as Array<{
+      id: string;
+      exam_id: string;
+      user_id: string;
+      status: string;
+      total_score: number | null;
+      max_score: number | null;
+      submitted_at?: string | null;
+      started_at?: string | null;
+      latest_review_requested_at?: string | null;
+      active_review_count: number;
+      exams?:
+        | { title: string }
+        | { title: string }[]
+        | null;
+      profiles?:
+        | {
+            full_name: string | null;
+            email: string | null;
+            avatar_url: string | null;
+          }
+        | {
+            full_name: string | null;
+            email: string | null;
+            avatar_url: string | null;
+          }[]
+        | null;
+      answers?: { id: string; review_requested_at: string | null }[];
+    }>,
+    scope,
+  );
+
+  return filteredSessions
+    .map((session) => ({
+      ...session,
+      submitted_at: session.submitted_at ?? null,
+      started_at: session.started_at ?? null,
+      latest_review_requested_at: session.latest_review_requested_at ?? null,
+      active_review_count: Number(session.active_review_count ?? 0),
+    }))
+    .sort((left, right) => {
+      const leftTime = new Date(
+        String(
+          left.latest_review_requested_at ?? left.submitted_at ?? left.started_at ?? 0,
+        ),
+      ).getTime();
+      const rightTime = new Date(
+        String(
+          right.latest_review_requested_at ??
+            right.submitted_at ??
+            right.started_at ??
+            0,
+        ),
+      ).getTime();
+      return leftTime - rightTime;
+    });
+}
+
+export async function getGradingStats(pendingReviewCount?: number) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -238,148 +398,44 @@ export async function getGradingStats() {
   if (!user) {
     return { toBeGraded: 0, ongoing: 0, graded: 0 };
   }
+  const scope = await getManagedExamScope(supabase, user.id);
+  const statusScope = ["in_progress", "graded", "timed_out"] as const;
+  const toBeGraded = pendingReviewCount ?? (await getPendingSubmissions()).length;
 
-  const admin = await isAdminUser(supabase, user.id);
-  const statusScope = ["submitted", "in_progress", "graded"] as const;
-
-  if (admin) {
-    const { data } = await supabase
-      .from("exam_sessions")
-      .select("status")
-      .in("status", statusScope);
-
-    const counts = (data ?? []).reduce(
-      (acc, row) => {
-        if (row.status === "submitted") acc.toBeGraded += 1;
-        if (row.status === "in_progress") acc.ongoing += 1;
-        if (row.status === "graded") acc.graded += 1;
-        return acc;
-      },
-      { toBeGraded: 0, ongoing: 0, graded: 0 }
-    );
-
-    return counts;
-  }
-
-  // Collect exam IDs: owned + exams in teacher's subject scope
-  const examIdSet = new Set<string>();
-
-  // Teacher's own exams
-  const { data: ownExams } = await supabase
-    .from("exams")
-    .select("id")
-    .eq("created_by", user.id);
-
-  const ownExamIdSet = new Set((ownExams ?? []).map((exam) => exam.id));
-  for (const examId of ownExamIdSet) examIdSet.add(examId);
-
-  // Exams assigned to groups where teacher has an active teaching_assignment
-  // (subject must match — group-specific, not subject-wide)
-  const scopedExamGroups = new Map<string, Set<string>>();
-  const { data: teachingRows } = await supabase
-    .from("teaching_assignments")
-    .select("group_id, subject_id")
-    .eq("teacher_id", user.id)
-    .eq("is_active", true);
-
-  if (teachingRows && teachingRows.length > 0) {
-    const groupIds = [...new Set(teachingRows.map((r) => r.group_id))];
-
-    const { data: assignedExams } = await supabase
-      .from("exam_assignments")
-      .select("exam_id, group_id, exams(subject_id)")
-      .in("group_id", groupIds);
-
-    for (const ae of assignedExams ?? []) {
-      const examSubjectId = Array.isArray(ae.exams)
-        ? ae.exams[0]?.subject_id
-        : (ae.exams as { subject_id: string } | null)?.subject_id;
-
-      // Must match both subject AND the specific group (not just subject-wide)
-      const validTA = teachingRows.find(
-        (ta) => ta.subject_id === examSubjectId && ta.group_id === ae.group_id
-      );
-      if (!validTA) continue;
-      examIdSet.add(ae.exam_id);
-      if (!ownExamIdSet.has(ae.exam_id)) {
-        const groups = scopedExamGroups.get(ae.exam_id) ?? new Set<string>();
-        groups.add(ae.group_id);
-        scopedExamGroups.set(ae.exam_id, groups);
-      }
-    }
-  }
-
-  const examIds = [...examIdSet];
-  if (examIds.length === 0) {
-    return { toBeGraded: 0, ongoing: 0, graded: 0 };
-  }
-
-  const { data } = await supabase
+  let query = supabase
     .from("exam_sessions")
     .select("user_id, exam_id, status")
-    .in("exam_id", examIds)
     .in("status", statusScope);
 
-  let sessions = data ?? [];
-  if (sessions.length === 0 || scopedExamGroups.size === 0) {
-    return sessions.reduce(
-      (acc, row) => {
-        if (row.status === "submitted") acc.toBeGraded += 1;
-        if (row.status === "in_progress") acc.ongoing += 1;
-        if (row.status === "graded") acc.graded += 1;
-        return acc;
-      },
-      { toBeGraded: 0, ongoing: 0, graded: 0 }
-    );
-  }
-
-  const scopedStudentIds = Array.from(
-    new Set(
-      sessions
-        .filter((session) => !ownExamIdSet.has(session.exam_id))
-        .map((session) => session.user_id as string)
-    )
-  );
-  if (scopedStudentIds.length > 0) {
-    const scopedGroupIds = Array.from(
-      new Set(
-        Array.from(scopedExamGroups.values()).flatMap((groupIds) =>
-          Array.from(groupIds)
-        )
-      )
-    );
-    const { data: memberRows } = await supabase
-      .from("student_group_members")
-      .select("student_id, group_id")
-      .in("student_id", scopedStudentIds)
-      .in("group_id", scopedGroupIds);
-
-    const studentGroups = new Map<string, Set<string>>();
-    for (const row of memberRows ?? []) {
-      const groups = studentGroups.get(row.student_id) ?? new Set<string>();
-      groups.add(row.group_id);
-      studentGroups.set(row.student_id, groups);
+  if (!scope.admin) {
+    if (scope.examIds.length === 0) {
+      return { toBeGraded, ongoing: 0, graded: 0 };
     }
-
-    sessions = sessions.filter((session) => {
-      if (ownExamIdSet.has(session.exam_id)) return true;
-      const allowedGroups = scopedExamGroups.get(session.exam_id);
-      const currentGroups = studentGroups.get(session.user_id as string);
-      if (!allowedGroups || !currentGroups) return false;
-      return Array.from(currentGroups).some((groupId) =>
-        allowedGroups.has(groupId)
-      );
-    });
+    query = query.in("exam_id", scope.examIds);
   }
+
+  const { data } = await query;
+  const sessions = await filterManagedSessionsByGroupScope(
+    supabase,
+    (data ?? []).map((session) => ({
+      user_id: String(session.user_id),
+      exam_id: String(session.exam_id),
+      status: String(session.status),
+    })),
+    scope,
+  );
 
   return sessions.reduce(
     (acc, row) => {
-      if (row.status === "submitted") acc.toBeGraded += 1;
       if (row.status === "in_progress") acc.ongoing += 1;
-      if (row.status === "graded") acc.graded += 1;
+      if (row.status === "graded" || row.status === "timed_out") acc.graded += 1;
       return acc;
     },
-    { toBeGraded: 0, ongoing: 0, graded: 0 }
+    {
+      toBeGraded,
+      ongoing: 0,
+      graded: 0,
+    },
   );
 }
 
@@ -414,8 +470,11 @@ export async function getSessionForGrading(sessionId: string) {
     await Promise.all([
     supabase
       .from("answers")
-      .select("*, questions(*)")
+      .select(
+        "id, session_id, question_id, user_id, answer, score, feedback, ai_score, ai_feedback, ai_graded_at, review_status, review_requested_at, review_reason, review_resolved_at, questions(*)",
+      )
       .eq("session_id", sessionId)
+      .eq("review_status", "requested")
       .order("questions(order_index)", { ascending: true }),
     supabase
       .from("proctor_events")
@@ -433,11 +492,13 @@ export async function getSessionForGrading(sessionId: string) {
   const passageAwareAnswers =
     snapshot && snapshotQuestionMap.size > 0
       ? (answers ?? []).map((answer) => {
-          const questionId = String(
-            Array.isArray(answer.questions)
-              ? answer.questions[0]?.id
-              : answer.questions?.id
+          const baseQuestion = getRelationObject(
+            answer.questions as
+              | Record<string, unknown>
+              | Record<string, unknown>[]
+              | null,
           );
+          const questionId = String(baseQuestion?.id ?? "");
           const snapshotQuestion = snapshotQuestionMap.get(questionId);
 
           return snapshotQuestion
@@ -450,7 +511,12 @@ export async function getSessionForGrading(sessionId: string) {
               }
             : answer;
         })
-      : await attachPassagesToAnswers(supabase, answers ?? []);
+      : await attachPassagesToAnswers(
+          supabase,
+          ((answers ?? []) as unknown) as Array<{
+            questions?: ({ passage_id?: string | null } & Record<string, unknown>) | null;
+          }>,
+        );
 
   const variantAwareAnswers =
     snapshot && snapshotQuestionMap.size > 0
@@ -487,7 +553,22 @@ export async function getSessionForGrading(sessionId: string) {
             : answer;
         });
 
-  return { session, answers: variantAwareAnswers, proctorEvents };
+  const reportedAnswers = variantAwareAnswers.filter((answer) => {
+    const question = getRelationObject(
+      answer.questions as
+        | Record<string, unknown>
+        | Record<string, unknown>[]
+        | null
+    );
+
+    return question?.type === "essay";
+  });
+
+  if (reportedAnswers.length === 0) {
+    return null;
+  }
+
+  return { session, answers: reportedAnswers, proctorEvents };
 }
 
 export async function gradeAnswer(
@@ -563,6 +644,139 @@ export async function gradeAnswer(
   }
 
   revalidateExamResultPaths(question.exam_id, answer.session_id);
+  return { success: true, totalScore: totals.totalScore, maxScore: totals.maxScore };
+}
+
+export async function resolveReportedEssayReviews(
+  sessionId: string,
+  reviews: Array<{
+    answerId: string;
+    score: number;
+    feedback?: string | null;
+  }>,
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const { data: session } = await supabase
+    .from("exam_sessions")
+    .select("exam_id, user_id, status, exams(title, subject_id)")
+    .eq("id", sessionId)
+    .maybeSingle();
+
+  if (!session) return { error: "Session олдсонгүй" };
+
+  const canManage = await canManageExamStudent(
+    supabase,
+    session.exam_id,
+    user.id,
+    session.user_id,
+  );
+  if (!canManage) {
+    return { error: "Энэ шалгалтын review-г шийдэх эрх алга" };
+  }
+
+  const { data: requestedAnswers, error: answersError } = await supabase
+    .from("answers")
+    .select("id, score, ai_score, review_status, questions!inner(points, type)")
+    .eq("session_id", sessionId)
+    .eq("review_status", "requested");
+
+  if (answersError) return { error: answersError.message };
+
+  const essayAnswers = (requestedAnswers ?? []).filter((answer) => {
+    const question = getRelationObject(
+      answer.questions as
+        | { points: number | null; type: string }
+        | { points: number | null; type: string }[]
+        | null,
+    );
+
+    return question?.type === "essay";
+  });
+
+  if (essayAnswers.length === 0) {
+    return { error: "Шийдэх review request олдсонгүй" };
+  }
+
+  const reviewMap = new Map(reviews.map((review) => [review.answerId, review]));
+  const nowIso = new Date().toISOString();
+
+  for (const answer of essayAnswers) {
+    const question = getRelationObject(
+      answer.questions as
+        | { points: number | null; type: string }
+        | { points: number | null; type: string }[]
+        | null,
+    );
+    const maxPoints = Number(question?.points ?? 0);
+    const review = reviewMap.get(String(answer.id));
+    const nextScore = Math.max(
+      0,
+      Math.min(
+        maxPoints,
+        review?.score ?? Number(answer.score ?? answer.ai_score ?? 0),
+      ),
+    );
+    const nextFeedback =
+      typeof review?.feedback === "string" && review.feedback.trim().length > 0
+        ? review.feedback.trim()
+        : null;
+
+    const { error: updateError } = await supabase
+      .from("answers")
+      .update({
+        score: nextScore,
+        feedback: nextFeedback,
+        is_correct: null,
+        graded_by: user.id,
+        graded_at: nowIso,
+        score_source: "teacher",
+        review_status: "resolved",
+        review_resolved_at: nowIso,
+      })
+      .eq("id", answer.id)
+      .eq("review_status", "requested");
+
+    if (updateError) return { error: updateError.message };
+  }
+
+  const nextStatus = session.status === "timed_out" ? "timed_out" : "graded";
+  const totals = await recalculateSessionTotals(
+    supabase,
+    sessionId,
+    session.exam_id,
+    nextStatus,
+  );
+  if ("error" in totals) return { error: totals.error };
+
+  const exam = getRelationObject(
+    session.exams as
+      | { title: string; subject_id: string | null }
+      | { title: string; subject_id: string | null }[]
+      | null,
+  );
+
+  if (exam) {
+    notifyStudentOfReviewResolved({
+      sessionId,
+      userId: session.user_id,
+      examId: session.exam_id,
+      examTitle: exam.title,
+      totalScore: totals.totalScore,
+      maxScore: totals.maxScore ?? 0,
+    }).catch(() => {});
+  }
+
+  await enqueueStudentTopicMasteryRefresh(
+    session.user_id,
+    exam?.subject_id ?? null,
+  ).catch(() => {});
+
+  revalidateExamResultPaths(session.exam_id, sessionId);
   return { success: true, totalScore: totals.totalScore, maxScore: totals.maxScore };
 }
 

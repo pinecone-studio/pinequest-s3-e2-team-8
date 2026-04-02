@@ -18,6 +18,7 @@ interface ExamRunnerClientProps {
   exam: Record<string, unknown>;
   questions: Parameters<typeof ExamTaker>[0]["questions"];
   sessionId: string;
+  runtimeToken: string | null;
   savedAnswers: Record<string, string>;
   answerAnalytics: Record<string, AnswerChangeAnalytics>;
   initialTimeLeftSeconds: number;
@@ -27,6 +28,7 @@ export default function ExamRunnerClient({
   exam,
   questions,
   sessionId,
+  runtimeToken,
   savedAnswers,
   answerAnalytics,
   initialTimeLeftSeconds,
@@ -74,10 +76,20 @@ export default function ExamRunnerClient({
       const readiness = effectiveRuntimeReadiness;
       if (!readiness) return;
 
-      const result = await persistExamStartTelemetry(
-        sessionId,
-        readiness
-      );
+      let result:
+        | Awaited<ReturnType<typeof persistExamStartTelemetry>>
+        | null = null;
+
+      try {
+        result = await persistExamStartTelemetry(
+          sessionId,
+          readiness,
+          runtimeToken,
+        );
+      } catch (error) {
+        console.warn("[ExamRunnerClient] persistExamStartTelemetry failed", error);
+      }
+
       if (cancelled) return;
 
       if (result && !("error" in result)) {
@@ -103,6 +115,7 @@ export default function ExamRunnerClient({
     effectiveRuntimeReadiness,
     examId,
     sessionId,
+    runtimeToken,
     telemetryAlreadyPersisted,
     telemetryAttempt,
   ]);
@@ -148,6 +161,7 @@ export default function ExamRunnerClient({
       exam={exam}
       questions={questions}
       sessionId={sessionId}
+      runtimeToken={runtimeToken}
       savedAnswers={savedAnswers}
       initialAnswerAnalytics={answerAnalytics}
       initialTimeLeftSeconds={initialTimeLeftSeconds}
