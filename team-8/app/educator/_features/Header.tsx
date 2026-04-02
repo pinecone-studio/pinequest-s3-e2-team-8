@@ -36,7 +36,11 @@ export default function Header({ profile }: { profile: Profile }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const subjectId = searchParams.get("subjectId");
+  const isExamsPage = pathname === "/educator/exams";
+  const hideEntireHeader = pathname?.startsWith("/educator/exams/") &&
+    pathname?.endsWith("/results");
   const hideGreeting =
+    isExamsPage ||
     pathname === "/educator/groups" ||
     pathname?.startsWith("/educator/question-bank") ||
     pathname?.startsWith("/educator/grading");
@@ -50,9 +54,15 @@ export default function Header({ profile }: { profile: Profile }) {
     ? "/educator/question-bank/private"
     : "/educator/question-bank";
 
+  if (hideEntireHeader) {
+    return null;
+  }
+
   return (
     <header
-      className={`flex flex-col h-30.5 gap-5 py-2 sm:flex-row sm:items-center ${
+      className={`flex flex-col gap-5 sm:flex-row sm:items-center ${
+        isExamsPage ? "min-h-[72px] py-4" : "h-30.5 py-2"
+      } ${
         hideGreeting &&
         !showGroupsBackLink &&
         !showQuestionBankBackLink &&

@@ -1,26 +1,25 @@
 import Link from "next/link";
 import { getExams } from "@/lib/exam/actions";
-import { Button } from "@/components/ui/button";
 import ExamList from "./_features/ExamList";
-import { PlusCircle } from "lucide-react";
 
 export default async function ExamsPage() {
   const exams = await getExams();
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">Шалгалтууд</h2>
-        <Button
-          asChild
-          variant="secondary"
+    <div className="space-y-6 pb-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-[32px] font-semibold tracking-[-0.045em] text-[#111827]">
+          Шалгалтууд
+        </h2>
+
+        <Link
+          href="/educator/create-exam"
+          className="inline-flex h-11 items-center justify-center rounded-[14px] bg-[#4D97F8] px-5 text-[14px] font-semibold text-white shadow-[0_16px_28px_rgba(77,151,248,0.26)] transition hover:bg-[#3F88E8]"
         >
-          <Link href="/educator/create-exam">
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Шалгалт үүсгэх
-          </Link>
-        </Button>
+          Шалгалт үүсгэх
+        </Link>
       </div>
+
       <ExamList exams={exams as Parameters<typeof ExamList>[0]["exams"]} />
     </div>
   );
