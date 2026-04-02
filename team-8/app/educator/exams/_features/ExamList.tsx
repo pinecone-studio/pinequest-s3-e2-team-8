@@ -329,7 +329,7 @@ export default function ExamList({ exams }: Props) {
                   </h3>
                 </div>
 
-                <div className="space-y-4 xl:max-h-[840px] xl:overflow-y-auto xl:pr-1">
+                <div className="scrollbar-hidden space-y-4 xl:max-h-[840px] xl:overflow-y-auto xl:pr-1">
                   {items.length === 0 ? (
                     <div className="rounded-[22px] border border-dashed border-[#D9E3F2] bg-white/75 px-4 py-10 text-center text-[13px] text-[#8A95A8]">
                       {meta.emptyMessage}
