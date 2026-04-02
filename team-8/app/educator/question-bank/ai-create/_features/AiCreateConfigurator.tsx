@@ -313,49 +313,7 @@ export default function AiCreateConfigurator({
               </div>
             </div>
 
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 p-6">
-              <h3 className="text-sm font-semibold text-gray-900">
-                Сүүлд үүсгэсэн хүсэлт
-              </h3>
-
-              {generatedConfig ? (
-                <div className="mt-4 space-y-3 text-sm text-gray-700">
-                  <p>
-                    <span className="font-medium text-gray-900">Хугацаа:</span>{" "}
-                    {generatedConfig.createdAt}
-                  </p>
-                  <p>
-                    <span className="font-medium text-gray-900">Хичээл:</span>{" "}
-                    {generatedSubjectName}
-                  </p>
-                  <p>
-                    <span className="font-medium text-gray-900">Төрөл:</span>{" "}
-                    {getQuestionTypeLabel(generatedConfig.questionType)}
-                  </p>
-                  <p>
-                    <span className="font-medium text-gray-900">Анги:</span>{" "}
-                    {generatedConfig.grade === "all"
-                      ? "Бүх анги"
-                      : `${generatedConfig.grade}-р анги`}
-                  </p>
-                  <p>
-                    <span className="font-medium text-gray-900">
-                      Асуултын тоо:
-                    </span>{" "}
-                    {generatedConfig.questionCount}
-                  </p>
-                  <p className="whitespace-pre-wrap">
-                    <span className="font-medium text-gray-900">Заавар:</span>{" "}
-                    {generatedConfig.prompt || "Нэмэлт зааваргүй"}
-                  </p>
-                </div>
-              ) : (
-                <p className="mt-4 text-sm text-gray-500">
-                  Тохиргоогоо сонгоод `AI-аар үүсгэх` товч дарвал хүсэлтийн
-                  тойм энд харагдана.
-                </p>
-              )}
-            </div>
+           
           </div>
         </div>
       </div>
