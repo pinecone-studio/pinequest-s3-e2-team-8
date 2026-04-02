@@ -3218,6 +3218,7 @@ export async function requestEssayReview(
  */
 export async function getExamResult(examId: string) {
   const supabase = await createClient();
+  const admin = createAdminClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -3309,7 +3310,7 @@ export async function getExamResult(examId: string) {
     );
 
     const materialized = latestPendingReleasedSession
-      ? await materializeSessionScoresIfNeeded(supabase, {
+      ? await materializeSessionScoresIfNeeded(admin, {
           sessionId: String(latestPendingReleasedSession.id),
           examId,
           userId: user.id,
@@ -3322,6 +3323,18 @@ export async function getExamResult(examId: string) {
         "[getExamResult] materialize released session error:",
         materialized.error,
       );
+      // Refresh sessions even on error — a prior run may have already set total_score
+      const { data: refreshedAfterError } = await supabase
+        .from("exam_sessions")
+        .select(sessionSelect)
+        .eq("exam_id", examId)
+        .eq("user_id", user.id)
+        .in("status", ["in_progress", "submitted", "graded", "timed_out"])
+        .order("attempt_number", { ascending: false });
+      if (refreshedAfterError) {
+        sessions = refreshedAfterError;
+        latestSession = pickLatestAttempt(sessions) ?? latestSession;
+      }
     } else if (materialized && !materialized.gradingPending) {
       const { data: refreshedSessions, error: refreshedSessionError } =
         await supabase
@@ -3545,13 +3558,14 @@ export async function getExamResult(examId: string) {
  */
 export async function getStudentResults() {
   const supabase = await createClient();
+  const admin = createAdminClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return [];
 
   const materialized = await materializePendingReleasedSessionsForUser(
-    supabase,
+    admin,
     user.id,
     {
       maxToProcess: 2,
