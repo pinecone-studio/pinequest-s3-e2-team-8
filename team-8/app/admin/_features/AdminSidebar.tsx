@@ -48,12 +48,32 @@ const navItems: NavItem[] = [
     iconClassName: "h-5 w-5",
   },
   {
-    href: "/admin/users",
-    label: "Хэрэглэгчид",
+    href: "/admin/teachers/exams",
+    label: "Шалгалтууд",
     icon: BookOpen,
     iconClassName: "h-5 w-5",
   },
 ];
+
+function isNavItemActive(pathname: string, href: string) {
+  if (href === "/admin") {
+    return pathname === href;
+  }
+
+  if (href === "/admin/teachers") {
+    return (
+      pathname === href ||
+      pathname.startsWith("/admin/teachers/") &&
+        !pathname.startsWith("/admin/teachers/exams")
+    );
+  }
+
+  if (href === "/admin/teachers/exams") {
+    return pathname === href || pathname.startsWith("/admin/teachers/exams/");
+  }
+
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 export default function AdminSidebar() {
   const pathname = usePathname();
@@ -91,9 +111,7 @@ export default function AdminSidebar() {
 
           <nav className="flex flex-col gap-2">
             {navItems.map((item) => {
-              const isActive =
-                pathname === item.href ||
-                (item.href !== "/admin" && pathname.startsWith(item.href));
+              const isActive = isNavItemActive(pathname, item.href);
               const Icon = item.icon;
 
               return (

@@ -1,12 +1,6 @@
 import { getAllUsers } from "@/lib/admin/actions";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { ArrowLeft } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 
 function formatDateYMD(value: string) {
@@ -29,18 +23,27 @@ export default async function AdminUsersPage({
   const roleBadge = (r: string) => {
     if (r === "teacher")
       return (
-        <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+        <Badge
+          variant="secondary"
+          className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+        >
           Багш
         </Badge>
       );
     if (r === "admin")
       return (
-        <Badge variant="secondary" className="bg-purple-500/10 text-purple-700 dark:text-purple-300">
+        <Badge
+          variant="secondary"
+          className="bg-purple-500/10 text-purple-700 dark:text-purple-300"
+        >
           Менежер
         </Badge>
       );
     return (
-      <Badge variant="secondary" className="bg-blue-500/10 text-blue-700 dark:text-blue-300">
+      <Badge
+        variant="secondary"
+        className="bg-blue-500/10 text-blue-700 dark:text-blue-300"
+      >
         Сурагч
       </Badge>
     );
@@ -48,23 +51,6 @@ export default async function AdminUsersPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Link
-          href="/admin"
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-3 w-3" />
-          Буцах
-        </Link>
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Хэрэглэгчид</h2>
-          <p className="text-muted-foreground">
-            Нийт {users.length} хэрэглэгч
-          </p>
-        </div>
-      </div>
-
-      {/* Role filter */}
       <div className="flex gap-2">
         <Link href="/admin/users">
           <Badge

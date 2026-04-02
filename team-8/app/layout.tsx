@@ -3,6 +3,26 @@ import Script from "next/script";
 import RegisterServiceWorker from "./_components/RegisterServiceWorker";
 import "./globals.css";
 
+const mathJaxConfig = `
+  window.MathJax = {
+    loader: {
+      load: ['[tex]/ams', '[tex]/mhchem']
+    },
+    tex: {
+      inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
+      displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
+      processEscapes: true,
+      packages: { '[+]': ['ams', 'mhchem'] }
+    },
+    options: {
+      skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+    },
+    startup: {
+      typeset: false
+    }
+  };
+`;
+
 export const metadata: Metadata = {
   title: "PineExam - Pinecone Academy LMS",
   description: "Online Exam & Learning Management System",
@@ -39,27 +59,11 @@ export default function RootLayout({
     <html lang="en" className="h-full antialiased">
       <body suppressHydrationWarning className="min-h-full flex flex-col">
         <RegisterServiceWorker />
-        <Script id="mathjax-config" strategy="beforeInteractive">
-          {`
-            window.MathJax = {
-              loader: {
-                load: ['[tex]/ams', '[tex]/mhchem']
-              },
-              tex: {
-                inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
-                displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
-                processEscapes: true,
-                packages: { '[+]': ['ams', 'mhchem'] }
-              },
-              options: {
-                skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
-              },
-              startup: {
-                typeset: false
-              }
-            };
-          `}
-        </Script>
+        <Script
+          id="mathjax-config"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{ __html: mathJaxConfig }}
+        />
         <Script
           id="mathjax-script"
           src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"

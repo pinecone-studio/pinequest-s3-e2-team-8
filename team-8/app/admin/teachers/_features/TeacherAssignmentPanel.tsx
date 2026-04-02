@@ -5,8 +5,7 @@ import { addTeacherSubject, removeTeacherSubject } from "@/lib/admin/actions";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { ChevronDown, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type {
   Subject,
@@ -70,6 +69,22 @@ export default function TeacherAssignmentPanel({
 
     return nextMap;
   }, [teacher.assignments]);
+  const subjectChips = useMemo(() => {
+    const chips: string[] = [`${teacher.subjects.length} хичээл`];
+
+    teacher.subjects.forEach((subject) => {
+      chips.push(subject.name);
+
+      const grades = subjectGrades.get(subject.id) ?? [];
+      grades.forEach((grade) => {
+        if (!chips.includes(grade)) {
+          chips.push(grade);
+        }
+      });
+    });
+
+    return chips;
+  }, [subjectGrades, teacher.subjects]);
 
   function handleAddSubject() {
     if (!newSubjectId) return;
@@ -97,9 +112,15 @@ export default function TeacherAssignmentPanel({
   }
 
   return (
-    <div className="rounded-[26px]  py-0 shadow-none">
-      <div className="flex flex-col gap-0.5 ">
-        <div className="flex flex-col gap-0.5 md:flex-row md:items-start md:justify-between">
+    <div
+      className={cn(
+        "rounded-[24px] border border-transparent transition-all",
+        isExpanded &&
+          "border-[#edf2fb] bg-white shadow-[0_14px_36px_rgba(15,23,42,0.08)]",
+      )}
+    >
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="flex items-start gap-3">
             <Avatar size="lg" className="mt-0.5 bg-[#eef4ff] text-[#3156a6]">
               <AvatarFallback className="bg-[#eef4ff] font-medium text-[#3156a6]">
@@ -107,39 +128,43 @@ export default function TeacherAssignmentPanel({
               </AvatarFallback>
             </Avatar>
 
-            <div className="">
-              <h4 className="text-[14px] text-zinc-950">
+            <div>
+              <h4 className="text-[14px] font-medium text-zinc-950">
                 {teacher.full_name || "(Нэргүй багш)"}
               </h4>
               <p className="text-[12px] font-medium text-zinc-500">
                 {teacher.email}
               </p>
 
-              <div className="flex flex-wrap gap-2">
-                {teacher.subjects.length > 2 ? (
-                  <Badge
-                    variant="secondary"
-                    className="rounded-full bg-zinc-100 text-zinc-600"
-                  >
-                    +{teacher.subjects.length - 2}
-                  </Badge>
-                ) : null}
-              </div>
+              {isExpanded ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {subjectChips.map((chip) => (
+                    <Badge
+                      key={chip}
+                      variant="secondary"
+                      className="rounded-full border border-[#e5e7eb] bg-white px-3 py-1 text-[13px] font-medium text-zinc-700 shadow-none"
+                    >
+                      {chip}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
             </div>
           </div>
 
-          <div
-            className=" text-[#4078C1] font-semibold text-[16px] flex gap-2 items-center"
+          <button
+            type="button"
+            className="flex items-center gap-2 self-end text-[16px] font-semibold text-[#5f89d8] transition-colors hover:text-[#4078C1] md:self-start"
             onClick={() => setIsExpanded((current) => !current)}
           >
             Дэлгэрэнгүй
             <ChevronDown
               className={cn(
-                "ml-2 h-4 w-4 transition-transform",
+                "h-4 w-4 transition-transform",
                 isExpanded && "rotate-180",
               )}
             />
-          </div>
+          </button>
         </div>
 
         {error ? (
@@ -149,12 +174,8 @@ export default function TeacherAssignmentPanel({
         ) : null}
 
         {isExpanded ? (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-zinc-700">
-                Оноосон хичээлүүд
-              </p>
-
+          <div className="space-y-4 border-t border-[#edf2fb] pt-1">
+            <div className="space-y-3">
               {teacher.subjects.length > 0 ? (
                 <div className="space-y-2">
                   {teacher.subjects.map((subject) => {
@@ -163,13 +184,13 @@ export default function TeacherAssignmentPanel({
                     return (
                       <div
                         key={subject.id}
-                        className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-100 bg-zinc-50/70 px-3 py-3"
+                        className="flex items-center justify-between gap-3 rounded-[12px] bg-[#f4f4f5] px-4 py-4"
                       >
                         <div>
-                          <p className="font-medium text-zinc-900">
+                          <p className="text-[15px] font-semibold text-zinc-900">
                             {subject.name}
                           </p>
-                          <p className="text-xs text-zinc-500">
+                          <p className="mt-1 text-[14px] text-zinc-500">
                             {gradeLabels.length > 0
                               ? gradeLabels.join(", ")
                               : "Анги оноогоогүй"}
@@ -182,10 +203,10 @@ export default function TeacherAssignmentPanel({
                           size="sm"
                           onClick={() => handleRemoveSubject(subject.id)}
                           disabled={isPending}
-                          className="rounded-xl text-red-600 hover:bg-red-50 hover:text-red-700"
+                          className="h-10 w-10 rounded-xl p-0 text-[#ef6b63] hover:bg-[#ffe9e7] hover:text-[#df5148]"
+                          aria-label={`${subject.name} хичээлийг устгах`}
                         >
-                          <Trash2 className="mr-1 h-4 w-4" />
-                          Устгах
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     );
@@ -198,8 +219,8 @@ export default function TeacherAssignmentPanel({
               )}
             </div>
 
-            <div className="rounded-[24px] border border-dashed border-[#cfe0ff] bg-[#f8fbff] px-4 py-4">
-              <p className="text-sm font-medium text-[#1d3d8f]">
+            <div className="rounded-[16px] bg-[#eef5ff] px-4 py-4">
+              <p className="text-sm font-semibold text-[#5f89d8]">
                 Шинэ хичээл нэмэх
               </p>
               <p className="mt-1 text-sm text-zinc-500">
@@ -210,7 +231,7 @@ export default function TeacherAssignmentPanel({
                 <select
                   value={newSubjectId}
                   onChange={(event) => setNewSubjectId(event.target.value)}
-                  className="h-11 flex-1 rounded-2xl border border-zinc-200 bg-white px-3 text-sm outline-none transition focus:border-[#9fc3ff]"
+                  className="h-12 flex-1 rounded-[12px] border border-[#d8e3f8] bg-white px-4 text-sm outline-none transition focus:border-[#9fc3ff]"
                 >
                   <option value="">Хичээл сонгох</option>
                   {availableSubjects.map((subject) => (
@@ -224,9 +245,8 @@ export default function TeacherAssignmentPanel({
                   type="button"
                   onClick={handleAddSubject}
                   disabled={isPending || !newSubjectId}
-                  className="h-11 rounded-2xl bg-[#2F80ED] px-4 hover:bg-[#256ed0]"
+                  className="h-12 rounded-[12px] bg-[#6ea1f2] px-5 hover:bg-[#5b92eb]"
                 >
-                  <Plus className="mr-2 h-4 w-4" />
                   Хичээл нэмэх
                 </Button>
               </div>
