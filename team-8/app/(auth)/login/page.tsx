@@ -11,6 +11,7 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, Eye, EyeOff } from "lucide-react";
 import { login } from "@/lib/auth/actions";
+import Logo from "@/app/_icons/Logo";
 
 type LoginRole = "admin" | "teacher" | "student";
 
@@ -24,7 +25,7 @@ const DEMO_CREDENTIALS: Record<LoginRole, { email: string; password: string }> =
     password: "PineExam123!",
   },
   student: {
-    email: "studen42@pineexam.test",
+    email: "student42@pineexam.test",
     password: "PineExam123!",
   },
 };
@@ -91,22 +92,8 @@ function createMaskStyle(iconPath: string, color: string): CSSProperties {
 function BrandBlock() {
   return (
     <div className="mb-[20px] space-y-[9px] text-center">
-      <div className="inline-flex items-end justify-center gap-1">
-        <h1
-          className="font-['Trebuchet_MS','Arial_Rounded_MT_Bold',sans-serif] text-[23px] font-bold tracking-[-0.04em] text-[#f7e5b0] sm:text-[27px]"
-          style={{
-            textShadow:
-              "-1px -1px 0 #6a79a2, 1px -1px 0 #6a79a2, -1px 1px 0 #6a79a2, 1px 1px 0 #6a79a2, 0 1.5px 0 rgba(102,118,166,0.24)",
-          }}
-        >
-          Smart Exam
-        </h1>
-        <span className="mb-[2px] text-[7px] font-semibold tracking-[0.06em] text-[#6676a6] sm:text-[8px]">
-          v2.0
-        </span>
-      </div>
-
-      <p className="text-[12px] font-medium text-[#6e6e6e] sm:text-[13px]">
+      <div className="flex justify-center"><Logo/></div>
+   <p className="text-[14px] font-medium text-[#575555] ">
         Ухаалаг шалгалтын удирдлагын систем
       </p>
     </div>
@@ -137,12 +124,12 @@ function RoleCard({
       onClick={onClick}
       className={`flex flex-col items-center rounded-[8px] border border-[#d7d7d7] bg-white text-center shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-[0_6px_16px_rgba(0,0,0,0.08)] disabled:cursor-not-allowed disabled:opacity-70 ${
         featured
-          ? "min-h-[156px] w-[168px] px-4 py-[16px]"
-          : "min-h-[134px] px-4 py-[14px]"
+          ? "min-h-[207px] w-[279px] p-5 "
+          : "min-h-[178px] p-5"
       }`}
     >
       <span
-        className="flex h-[48px] w-[48px] items-center justify-center rounded-[8px]"
+        className="flex h-[60px] w-[60px] items-center justify-center rounded-[8px]"
         style={{ backgroundColor: meta.iconBox }}
       >
         <span aria-hidden="true" className="h-[22px] w-[22px]" style={iconStyle} />
@@ -178,21 +165,21 @@ function RolePicker({
   const currentYear = new Date().getFullYear();
 
   return (
-    <div className="w-full max-w-[382px] text-center">
+    <div className="flex justify-center">
+    <div className="w-360 flex flex-col items-center">
       <BrandBlock />
-
-      <section className="rounded-[16px] border border-[#e5e5e5] bg-white/92 px-[16px] pb-[14px] pt-[18px] shadow-[0_10px_24px_rgba(104,113,132,0.2)] backdrop-blur-[2px]">
-        <div className="space-y-[16px]">
-          <div className="space-y-[8px]">
-            <h2 className="text-[18px] font-semibold text-[#202020] sm:text-[19px]">
+      <section className="rounded-[16px] w-[505px] h-[553px] border border-[#e5e5e5] bg-[#FFFFFF] px-[16px] pb-[14px] pt-[18px] shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)] backdrop-blur-[2px]">
+        <div className="space-y-[30px]">
+          <div className="space-y-2.5 text-center">
+            <h2 className="text-[20px] font-semibold text-[#202020] sm:text-[19px]">
               Нэвтрэх
             </h2>
-            <p className="text-[14px] font-medium text-[#808080]">
+            <p className="text-[16px] font-medium text-[#6B6B6B]">
               Та ямар хэрэглэгч вэ?
             </p>
           </div>
 
-          <div className="flex justify-center">
+          <div className="flex justify-center ">
             <RoleCard
               role="admin"
               featured
@@ -216,9 +203,10 @@ function RolePicker({
         </div>
       </section>
 
-      <footer className="mt-[16px] text-[13px] font-medium text-[#8a8a8a]">
+      <footer className="mt-5 text-[15px] font-medium text-[#6B6B6B]">
         {currentYear} SmartExam. Бүх эрх хуулиар хамгаалагдсан.
       </footer>
+    </div>
     </div>
   );
 }
@@ -258,7 +246,7 @@ function RoleLoginCard({
 
       <section className="min-h-[412px] rounded-[19px] border border-[#ddd8d3] bg-white/94 px-[25px] pb-[22px] pt-[24px] shadow-[0_2px_4px_rgba(76,87,110,0.14),0_10px_24px_rgba(104,113,132,0.14)] backdrop-blur-[2px]">
         <div
-          className="mx-auto flex h-[48px] w-[48px] items-center justify-center rounded-[8px]"
+          className="mx-auto flex h-[60px] w-[60px] items-center justify-center rounded-[8px]"
           style={{ backgroundColor: meta.iconBox }}
         >
           <span aria-hidden="true" className="h-[22px] w-[22px]" style={iconStyle} />
@@ -431,7 +419,7 @@ function LoginPageContent() {
       ? "radial-gradient(circle at 50% 48%, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.97) 24%, rgba(250,247,255,0.95) 44%, rgba(236,225,255,0.9) 70%, rgba(207,183,255,0.86) 100%), radial-gradient(circle at 8% 10%, rgba(214,195,255,0.62) 0%, rgba(214,195,255,0) 32%), radial-gradient(circle at 96% 9%, rgba(238,186,210,0.55) 0%, rgba(238,186,210,0) 30%), radial-gradient(circle at 94% 82%, rgba(160,115,255,0.62) 0%, rgba(160,115,255,0) 30%), radial-gradient(circle at 7% 92%, rgba(255,211,219,0.46) 0%, rgba(255,211,219,0) 26%)"
       : selectedRole === "admin"
         ? "radial-gradient(circle at 50% 48%, rgba(255,255,255,0.985) 0%, rgba(255,255,255,0.97) 24%, rgba(244,246,255,0.95) 46%, rgba(224,213,244,0.9) 74%, rgba(202,188,232,0.84) 100%), radial-gradient(circle at 0% 0%, rgba(171,133,246,0.7) 0%, rgba(171,133,246,0) 42%), radial-gradient(circle at 0% 100%, rgba(245,157,118,0.72) 0%, rgba(245,157,118,0) 40%), radial-gradient(circle at 100% 96%, rgba(111,153,229,0.72) 0%, rgba(111,153,229,0) 42%), radial-gradient(circle at 100% 8%, rgba(193,210,243,0.5) 0%, rgba(193,210,243,0) 28%)"
-      : "radial-gradient(circle at 50% 48%, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.96) 24%, rgba(246,249,255,0.94) 44%, rgba(220,232,255,0.9) 70%, rgba(187,209,245,0.86) 100%), radial-gradient(circle at 7% 88%, rgba(126,165,237,0.6) 0%, rgba(126,165,237,0) 34%), radial-gradient(circle at 99% 10%, rgba(226,181,191,0.42) 0%, rgba(226,181,191,0) 28%), radial-gradient(circle at 99% 92%, rgba(147,166,216,0.45) 0%, rgba(147,166,216,0) 33%), radial-gradient(circle at 8% 12%, rgba(163,196,248,0.34) 0%, rgba(163,196,248,0) 28%)";
+      : "radial-gradient(circle at 25% 50%, rgba(120,165,220,0.9) 0%, rgba(120,165,220,0) 50%), radial-gradient(circle at 78% 12%, rgba(205,175,185,0.8) 0%, rgba(205,175,185,0) 42%), radial-gradient(circle at 88% 85%, rgba(160,185,215,0.65) 0%, rgba(160,185,215,0) 38%), radial-gradient(circle at 50% 50%, rgba(255,255,255,0.88) 0%, rgba(235,242,252,0.5) 60%, rgba(175,200,230,0.3) 100%)";
 
   return (
     <main
@@ -442,7 +430,7 @@ function LoginPageContent() {
             ? "#ecdffe"
             : selectedRole === "admin"
               ? "#d8cfe8"
-              : "#dbe9ff",
+              : "#c8d9ef",
         backgroundImage,
       }}
     >

@@ -603,7 +603,7 @@ export default function ExamForm({
       <div className="shrink-0">
         <Link
           href="/educator/exams"
-          className="inline-flex items-center gap-2 text-[13px] font-medium text-[#334155] transition hover:text-[#111827]"
+          className="inline-flex items-center gap-2 text-[13px] cursor-pointer font-medium text-[#334155] transition hover:text-[#111827]"
         >
           <ArrowLeft className="h-4 w-4" />
           Шалгалтууд руу буцах
