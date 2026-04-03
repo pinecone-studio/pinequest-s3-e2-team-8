@@ -230,7 +230,7 @@ export default function PrivateBankAddMaterial({
         }}
       >
         <DialogContent
-          className="flex h-[min(716px,90vh)] w-[min(430px,calc(100vw-2rem))] max-w-[430px] flex-col gap-0 overflow-hidden rounded-[8px] border border-border bg-white p-0 shadow-lg"
+          className="flex max-h-[min(716px,90vh)] w-[min(430px,calc(100vw-2rem))] max-w-[430px] flex-col gap-0 overflow-hidden rounded-[8px] border border-border bg-white p-0 shadow-lg"
           showCloseButton={false}
         >
           <div className="shrink-0 bg-white px-[16px] pt-[16px] pb-0">
@@ -256,6 +256,7 @@ export default function PrivateBankAddMaterial({
             </div>
           </div>
           <form
+            id="pb-text-form"
             onSubmit={handleTextSubmit}
             className="flex min-h-0 flex-1 flex-col gap-[16px] overflow-y-auto px-[16px] pt-[16px] pb-[2px]"
           >
@@ -399,14 +400,16 @@ export default function PrivateBankAddMaterial({
               </div>
             ) : null}
 
+          </form>
+          <div className="shrink-0 px-[16px] pb-[16px] pt-[8px]">
             {errorText ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
                 {errorText}
               </div>
             ) : null}
-
             <Button
               type="submit"
+              form="pb-text-form"
               disabled={pendingText || submitDisabled}
               className="h-11 w-full rounded-lg bg-[#5199F6] text-sm font-semibold text-white shadow-sm hover:bg-[#3d87f0] disabled:opacity-60"
             >
@@ -419,7 +422,7 @@ export default function PrivateBankAddMaterial({
                 "Хадгалах"
               )}
             </Button>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
 
