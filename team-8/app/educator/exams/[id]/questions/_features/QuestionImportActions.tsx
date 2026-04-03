@@ -17,9 +17,10 @@ import {
 import type {
   AiQuestionVariantMode,
   QuestionImportDraft,
-  QuestionImportMatchingPair,
-  QuestionType,
 } from "@/types";
+import QuestionDraftReviewList, {
+  summarizeQuestionDrafts,
+} from "@/app/educator/_components/QuestionDraftReviewList";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,16 +44,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
   AlertTriangle,
   BookOpen,
@@ -60,11 +51,11 @@ import {
   FileSpreadsheet,
   FileText,
   Loader2,
-  PlusCircle,
   Sparkles,
   Trash2,
   Upload,
 } from "lucide-react";
+import AIGenerateDialog from "./AIGenerateDialog";
 
 type FileImportType = "excel" | "word";
 
@@ -75,20 +66,14 @@ interface SelectedImportFile {
 
 interface QuestionImportActionsProps {
   examId: string;
+  subjectName: string;
+  sampleContext: string;
   aiVariantEnabled: boolean;
   aiVariantMode: AiQuestionVariantMode;
   onAiVariantEnabledChange: (value: boolean) => void;
   formulaToolOpen: boolean;
   onFormulaToolOpenChange: (value: boolean) => void;
 }
-
-const questionTypes: { value: QuestionType; label: string }[] = [
-  { value: "multiple_choice", label: "Нэг сонголттой" },
-  { value: "multiple_response", label: "Олон сонголттой" },
-  { value: "fill_blank", label: "Нөхөх" },
-  { value: "essay", label: "Эссэ / задгай" },
-  { value: "matching", label: "Холбох" },
-];
 
 const importTypeMeta: Record<
   FileImportType,
@@ -115,138 +100,10 @@ const importTypeMeta: Record<
   },
 };
 
-const hiddenCorrectAnswerWarningSnippets = [
-  "Зөв хариулт танигдсангүй",
-  "зөв хариулт олдсонгүй",
-];
-
-const hiddenCorrectAnswerErrorSnippets = [
-  "Зөв хариулт нь сонголтуудын нэг байх ёстой.",
-  "Дор хаяж 1 зөв хариулт сонгох хэрэгтэй.",
-  "Зөв хариултууд нь сонголтуудын дотор байх ёстой.",
-  "Нөхөх асуултын зөв хариултыг оруулна уу.",
-];
-
-function includesAnySnippet(value: string, snippets: string[]) {
-  return snippets.some((snippet) => value.includes(snippet));
-}
-
-function getVisibleDraftWarnings(draft: QuestionImportDraft) {
-  return draft.warnings.filter(
-    (warning) => !includesAnySnippet(warning, hiddenCorrectAnswerWarningSnippets)
-  );
-}
-
-function getVisibleDraftErrors(draft: QuestionImportDraft) {
-  return draft.errors.filter(
-    (error) => !includesAnySnippet(error, hiddenCorrectAnswerErrorSnippets)
-  );
-}
-
-function draftNeedsCorrectAnswerSelection(draft: QuestionImportDraft) {
-  if (draft.type === "multiple_choice") {
-    const options = draft.options.map((item) => item.trim()).filter(Boolean);
-    const answer = draft.correctAnswer.trim();
-
-    return !answer || !options.includes(answer);
-  }
-
-  if (draft.type === "multiple_response") {
-    const options = draft.options.map((item) => item.trim()).filter(Boolean);
-    const answers = draft.multipleCorrectAnswers
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    return answers.length === 0 || answers.some((answer) => !options.includes(answer));
-  }
-
-  if (draft.type === "fill_blank") {
-    return !draft.correctAnswer.trim();
-  }
-
-  return false;
-}
-
-function createEmptyMatchingPair(): QuestionImportMatchingPair {
-  return { left: "", right: "" };
-}
-
-function resetDraftForType(
-  draft: QuestionImportDraft,
-  nextType: QuestionType
-): QuestionImportDraft {
-  const nextOptions = draft.options.length >= 2 ? draft.options : ["", ""];
-  const nextPairs =
-    draft.matchingPairs.length >= 2
-      ? draft.matchingPairs
-      : [createEmptyMatchingPair(), createEmptyMatchingPair()];
-
-  if (nextType === "multiple_choice") {
-    return {
-      ...draft,
-      type: nextType,
-      options: nextOptions,
-      correctAnswer: draft.correctAnswer || draft.multipleCorrectAnswers[0] || "",
-      multipleCorrectAnswers: [],
-      matchingPairs: [],
-      errors: [],
-    };
-  }
-
-  if (nextType === "multiple_response") {
-    return {
-      ...draft,
-      type: nextType,
-      options: nextOptions,
-      correctAnswer: "",
-      multipleCorrectAnswers:
-        draft.multipleCorrectAnswers.length > 0
-          ? draft.multipleCorrectAnswers
-          : draft.correctAnswer
-            ? [draft.correctAnswer]
-            : [],
-      matchingPairs: [],
-      errors: [],
-    };
-  }
-
-  if (nextType === "fill_blank") {
-    return {
-      ...draft,
-      type: nextType,
-      options: [],
-      correctAnswer: draft.correctAnswer || draft.multipleCorrectAnswers[0] || "",
-      multipleCorrectAnswers: [],
-      matchingPairs: [],
-      errors: [],
-    };
-  }
-
-  if (nextType === "matching") {
-    return {
-      ...draft,
-      type: nextType,
-      options: [],
-      correctAnswer: "",
-      multipleCorrectAnswers: [],
-      matchingPairs: nextPairs,
-      errors: [],
-    };
-  }
-
-  return {
-    ...draft,
-    type: nextType,
-    options: [],
-    correctAnswer: "",
-    multipleCorrectAnswers: [],
-    matchingPairs: [],
-    errors: [],
-  };
-}
-
 export default function QuestionImportActions({
   examId,
+  subjectName,
+  sampleContext,
   aiVariantEnabled,
   aiVariantMode,
   onAiVariantEnabledChange,
@@ -267,22 +124,7 @@ export default function QuestionImportActions({
     word: null,
   });
 
-  const summary = useMemo(() => {
-    const invalidCount = drafts.filter((draft) => getVisibleDraftErrors(draft).length > 0).length;
-    const warningCount = drafts.filter(
-      (draft) => getVisibleDraftWarnings(draft).length > 0
-    ).length;
-    const missingCorrectAnswerCount = drafts.filter((draft) =>
-      draftNeedsCorrectAnswerSelection(draft)
-    ).length;
-
-    return {
-      total: drafts.length,
-      invalid: invalidCount,
-      warning: warningCount,
-      missingCorrectAnswer: missingCorrectAnswerCount,
-    };
-  }, [drafts]);
+  const summary = useMemo(() => summarizeQuestionDrafts(drafts), [drafts]);
 
   useEffect(() => {
     if (!successMessage) return;
@@ -349,107 +191,6 @@ export default function QuestionImportActions({
     event.target.value = "";
   }
 
-  function updateDraft(
-    draftId: string,
-    updater: (draft: QuestionImportDraft) => QuestionImportDraft
-  ) {
-    setDrafts((prev) =>
-      prev.map((draft) =>
-        draft.draftId === draftId ? { ...updater(draft), errors: [] } : draft
-      )
-    );
-  }
-
-  function removeDraft(draftId: string) {
-    setDrafts((prev) => prev.filter((draft) => draft.draftId !== draftId));
-  }
-
-  function updateOption(draftId: string, optionIndex: number, value: string) {
-    updateDraft(draftId, (draft) => {
-      const previousValue = draft.options[optionIndex];
-      const nextOptions = [...draft.options];
-      nextOptions[optionIndex] = value;
-
-      return {
-        ...draft,
-        options: nextOptions,
-        correctAnswer:
-          draft.correctAnswer === previousValue ? value : draft.correctAnswer,
-        multipleCorrectAnswers: draft.multipleCorrectAnswers.map((answer) =>
-          answer === previousValue ? value : answer
-        ),
-      };
-    });
-  }
-
-  function addOption(draftId: string) {
-    updateDraft(draftId, (draft) => ({
-      ...draft,
-      options: [...draft.options, ""],
-    }));
-  }
-
-  function removeOption(draftId: string, optionIndex: number) {
-    updateDraft(draftId, (draft) => {
-      const removedValue = draft.options[optionIndex];
-      const nextOptions = draft.options.filter((_, index) => index !== optionIndex);
-
-      return {
-        ...draft,
-        options: nextOptions.length >= 2 ? nextOptions : [...nextOptions, ""],
-        correctAnswer:
-          draft.correctAnswer === removedValue ? "" : draft.correctAnswer,
-        multipleCorrectAnswers: draft.multipleCorrectAnswers.filter(
-          (answer) => answer !== removedValue
-        ),
-      };
-    });
-  }
-
-  function toggleMultipleAnswer(draftId: string, option: string) {
-    updateDraft(draftId, (draft) => ({
-      ...draft,
-      multipleCorrectAnswers: draft.multipleCorrectAnswers.includes(option)
-        ? draft.multipleCorrectAnswers.filter((item) => item !== option)
-        : [...draft.multipleCorrectAnswers, option],
-    }));
-  }
-
-  function updateMatchingPair(
-    draftId: string,
-    pairIndex: number,
-    key: keyof QuestionImportMatchingPair,
-    value: string
-  ) {
-    updateDraft(draftId, (draft) => ({
-      ...draft,
-      matchingPairs: draft.matchingPairs.map((pair, index) =>
-        index === pairIndex ? { ...pair, [key]: value } : pair
-      ),
-    }));
-  }
-
-  function addMatchingPair(draftId: string) {
-    updateDraft(draftId, (draft) => ({
-      ...draft,
-      matchingPairs: [...draft.matchingPairs, createEmptyMatchingPair()],
-    }));
-  }
-
-  function removeMatchingPair(draftId: string, pairIndex: number) {
-    updateDraft(draftId, (draft) => {
-      const nextPairs = draft.matchingPairs.filter((_, index) => index !== pairIndex);
-
-      return {
-        ...draft,
-        matchingPairs:
-          nextPairs.length >= 2
-            ? nextPairs
-            : [...nextPairs, createEmptyMatchingPair()],
-      };
-    });
-  }
-
   async function confirmImport() {
     setError(null);
     setSuccessMessage(null);
@@ -475,153 +216,15 @@ export default function QuestionImportActions({
     router.refresh();
   }
 
-  function renderDraftFields(draft: QuestionImportDraft) {
-    if (draft.type === "multiple_choice" || draft.type === "multiple_response") {
-      return (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <Label>Сонголтууд</Label>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => addOption(draft.draftId)}
-            >
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Сонголт нэмэх
-            </Button>
-          </div>
-
-          {draft.options.map((option, index) => {
-            const isChecked =
-              draft.type === "multiple_choice"
-                ? draft.correctAnswer === option && option.trim() !== ""
-                : draft.multipleCorrectAnswers.includes(option) &&
-                  option.trim() !== "";
-
-            return (
-              <div key={`${draft.draftId}-option-${index}`} className="flex items-center gap-2">
-                <input
-                  type={draft.type === "multiple_choice" ? "radio" : "checkbox"}
-                  name={`${draft.draftId}-correct-option`}
-                  checked={isChecked}
-                  onChange={() =>
-                    draft.type === "multiple_choice"
-                      ? updateDraft(draft.draftId, (currentDraft) => ({
-                          ...currentDraft,
-                          correctAnswer: option,
-                        }))
-                      : toggleMultipleAnswer(draft.draftId, option)
-                  }
-                  className="h-4 w-4 shrink-0"
-                  disabled={!option.trim()}
-                />
-                <Input
-                  value={option}
-                  onChange={(event) =>
-                    updateOption(draft.draftId, index, event.target.value)
-                  }
-                  placeholder={`Сонголт ${index + 1}`}
-                />
-                {draft.options.length > 2 ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => removeOption(draft.draftId, index)}
-                  >
-                    <Trash2 className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
-
-    if (draft.type === "fill_blank") {
-      return (
-        <div className="space-y-2">
-          <Label>Зөв хариулт</Label>
-          <Input
-            value={draft.correctAnswer}
-            onChange={(event) =>
-              updateDraft(draft.draftId, (currentDraft) => ({
-                ...currentDraft,
-                correctAnswer: event.target.value,
-              }))
-            }
-            placeholder="Зөв хариултаа бичнэ үү"
-          />
-        </div>
-      );
-    }
-
-    if (draft.type === "matching") {
-      return (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <Label>Холбох мөрүүд</Label>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => addMatchingPair(draft.draftId)}
-            >
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Мөр нэмэх
-            </Button>
-          </div>
-
-          {draft.matchingPairs.map((pair, index) => (
-            <div
-              key={`${draft.draftId}-pair-${index}`}
-              className="grid gap-2 md:grid-cols-[1fr_auto_1fr_auto] md:items-center"
-            >
-              <Input
-                value={pair.left}
-                onChange={(event) =>
-                  updateMatchingPair(draft.draftId, index, "left", event.target.value)
-                }
-                placeholder={`Зүүн тал ${index + 1}`}
-              />
-              <span className="text-center text-sm text-muted-foreground">→</span>
-              <Input
-                value={pair.right}
-                onChange={(event) =>
-                  updateMatchingPair(draft.draftId, index, "right", event.target.value)
-                }
-                placeholder={`Баруун тал ${index + 1}`}
-              />
-              {draft.matchingPairs.length > 2 ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => removeMatchingPair(draft.draftId, index)}
-                >
-                  <Trash2 className="h-4 w-4 text-muted-foreground" />
-                </Button>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      );
-    }
-
-    return (
-      <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
-        Энэ асуулт одоогоор эссэ хэлбэрээр импортлогдоно. Шаардлагатай бол төрлийг нь
-        өөрчилж засна уу.
-      </div>
-    );
-  }
-
   return (
     <>
       <div className="space-y-3">
         <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
+            <AIGenerateDialog
+              examId={examId}
+              subjectName={subjectName}
+              sampleContext={sampleContext}
+            />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -924,123 +527,11 @@ export default function QuestionImportActions({
             </div>
           ) : null}
 
-          <div className="space-y-4">
-            {drafts.length === 0 ? (
-              <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-                Импортлох draft үлдээгүй байна.
-              </div>
-            ) : (
-              drafts.map((draft) => (
-                <div key={draft.draftId} className="space-y-4 rounded-xl border p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline">#{draft.sourceRow}</Badge>
-                      <Badge
-                        variant={
-                          getVisibleDraftErrors(draft).length > 0 ? "destructive" : "secondary"
-                        }
-                      >
-                        {questionTypes.find((item) => item.value === draft.type)?.label}
-                      </Badge>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="text-muted-foreground hover:text-destructive"
-                      onClick={() => removeDraft(draft.draftId)}
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Энэ draft-ийг хасах
-                    </Button>
-                  </div>
-
-                  {getVisibleDraftWarnings(draft).length > 0 ? (
-                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                      <p className="font-medium">Анхаарах зүйл</p>
-                      <ul className="mt-2 list-disc pl-5">
-                        {getVisibleDraftWarnings(draft).map((warning) => (
-                          <li key={`${draft.draftId}-${warning}`}>{warning}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-
-                  {getVisibleDraftErrors(draft).length > 0 ? (
-                    <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                      <p className="font-medium">Засах шаардлагатай</p>
-                      <ul className="mt-2 list-disc pl-5">
-                        {getVisibleDraftErrors(draft).map((item) => (
-                          <li key={`${draft.draftId}-${item}`}>{item}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-                    <div className="space-y-2">
-                      <Label>Асуулт</Label>
-                      <Textarea
-                        value={draft.content}
-                        onChange={(event) =>
-                          updateDraft(draft.draftId, (currentDraft) => ({
-                            ...currentDraft,
-                            content: event.target.value,
-                          }))
-                        }
-                        rows={4}
-                        placeholder="Асуултын агуулга"
-                      />
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_110px] lg:items-end">
-                      <div className="space-y-2">
-                        <Label>Асуултын төрөл</Label>
-                        <Select
-                          value={draft.type}
-                          onValueChange={(value) =>
-                            updateDraft(draft.draftId, (currentDraft) =>
-                              resetDraftForType(currentDraft, value as QuestionType)
-                            )
-                          }
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {questionTypes.map((item) => (
-                              <SelectItem key={item.value} value={item.value}>
-                                {item.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Оноо</Label>
-                        <Input
-                          className="text-center tabular-nums"
-                          type="number"
-                          min="0.5"
-                          step="0.5"
-                          value={draft.points}
-                          onChange={(event) =>
-                            updateDraft(draft.draftId, (currentDraft) => ({
-                              ...currentDraft,
-                              points: Number(event.target.value) || 1,
-                            }))
-                          }
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {renderDraftFields(draft)}
-                </div>
-              ))
-            )}
-          </div>
+          <QuestionDraftReviewList
+            drafts={drafts}
+            onDraftsChange={setDrafts}
+            emptyMessage="Импортлох draft үлдээгүй байна."
+          />
 
           <DialogFooter>
             <Button

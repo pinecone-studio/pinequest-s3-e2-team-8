@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { notFound } from "next/navigation";
+import { getSampleExamContext } from "@/lib/ai/actions";
 import { cn } from "@/lib/utils";
 import { getQuestionPageData } from "@/lib/question/actions";
 import AddQuestionForm from "./_features/AddQuestionForm";
@@ -12,9 +13,14 @@ interface Props {
 
 export default async function ExamQuestionsPage({ params }: Props) {
   const { id } = await params;
-  const data = await getQuestionPageData(id);
+  const [data, sampleExamContext] = await Promise.all([
+    getQuestionPageData(id),
+    getSampleExamContext(id).catch(() => null),
+  ]);
   if (!data) notFound();
   const { exam, questions, passages } = data;
+  const subjectName = sampleExamContext?.subjectName ?? "";
+  const sampleContext = sampleExamContext?.sampleContext ?? "";
   const steps = [
     { title: "Үндсэн мэдээлэл", href: `/educator/exams/${id}/edit` },
     { title: "Хуваарь", href: `/educator/exams/${id}/edit?step=schedule` },
@@ -99,6 +105,8 @@ export default async function ExamQuestionsPage({ params }: Props) {
               passages={passages}
               questions={questions}
               questionNumber={questions.length + 1}
+              subjectName={subjectName}
+              sampleContext={sampleContext}
             />
           )}
 

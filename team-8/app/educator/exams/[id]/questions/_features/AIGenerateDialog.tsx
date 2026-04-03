@@ -62,6 +62,7 @@ export default function AIGenerateDialog({
 
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const hasSampleContext = sampleContext.trim().length > 0;
 
   function toggleType(type: QuestionType) {
     setSelectedTypes((prev) =>
@@ -113,55 +114,79 @@ export default function AIGenerateDialog({
       <DialogTrigger asChild>
         <Button
           variant="outline"
-          className="border-purple-300 text-purple-700 hover:bg-purple-50"
+          className="h-10 w-full justify-between rounded-[10px] border-[#D7DEF3] bg-[#F7F9FF] px-4 text-[12px] font-medium text-[#2F4C98] shadow-none transition hover:bg-[#EEF3FF] sm:w-[160px]"
         >
           <Sparkles className="mr-2 h-4 w-4" />
           AI асуулт үүсгэх
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="overflow-hidden rounded-[30px] border border-[#D9E1EC] bg-[#FCFDFE] p-0 shadow-[0_24px_80px_-28px_rgba(15,23,42,0.32)] sm:max-w-[640px]">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-purple-600" />
-            AI-аар асуулт үүсгэх
-          </DialogTitle>
-          <DialogDescription>
-            Жишиг шалгалтын агуулга дээр суурилан Gemini AI шинэ асуултууд
-            боловсруулна.
-            {sampleContext && (
-              <span className="mt-1 block text-purple-600">
-                Жишиг шалгалтын мэдээлэл олдлоо — AI түүнд суурилна.
+          <div className="border-b border-[#E7EDF5] bg-white px-6 py-5 sm:px-7">
+            <DialogTitle className="flex items-center gap-2 text-[18px] font-semibold text-[#111827]">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-[#EEF3FF] text-[#2F4C98]">
+                <Sparkles className="h-5 w-5" />
               </span>
-            )}
-          </DialogDescription>
+              AI-аар асуулт үүсгэх
+            </DialogTitle>
+            <DialogDescription className="mt-3 text-sm leading-6 text-[#5B6476]">
+              Жишиг шалгалтын агуулга, сонгосон хичээл, ангийн түвшинд тулгуурлан
+              шинэ асуултууд боловсруулна.
+            </DialogDescription>
+            <div
+              className={`mt-4 rounded-[22px] border px-4 py-3 text-sm ${
+                hasSampleContext
+                  ? "border-[#D7DEF3] bg-[#F4F7FF] text-[#2F4C98]"
+                  : "border-[#E5E7EB] bg-[#F8FAFC] text-[#475467]"
+              }`}
+            >
+              {hasSampleContext
+                ? "Жишиг шалгалтын мэдээлэл олдлоо. AI ижил хэв маяг, түвшинд тулгуурлаж шинэ асуулт үүсгэнэ."
+                : "Жишиг шалгалтын мэдээлэл олдсонгүй. AI зөвхөн хичээл, дэд сэдэв, сонгосон төрлүүдэд тулгуурлаж асуулт үүсгэнэ."}
+            </div>
+          </div>
         </DialogHeader>
 
-        <div className="space-y-4">
-          {error && (
-            <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="space-y-5 px-6 py-5 sm:px-7 sm:py-6">
+          {error ? (
+            <div className="rounded-[20px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {error}
             </div>
-          )}
+          ) : null}
 
-          {successMessage && (
-            <div className="rounded-md bg-green-500/10 p-3 text-sm text-green-700">
+          {successMessage ? (
+            <div className="rounded-[20px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
               {successMessage}
             </div>
-          )}
+          ) : null}
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Хичээл</Label>
-              <Input value={subjectName || "Тодорхойгүй"} disabled />
+            <div className="space-y-2.5">
+              <Label className="text-[13px] font-semibold text-[#374151]">
+                Хичээл
+              </Label>
+              <Input
+                value={subjectName || "Тодорхойгүй"}
+                disabled
+                className="h-10 rounded-full border-[#E3E8EF] bg-[#F8FAFC] px-4 text-[12px] text-[#111827] shadow-none disabled:opacity-100"
+              />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="ai-grade-level">Анги</Label>
+            <div className="space-y-2.5">
+              <Label
+                htmlFor="ai-grade-level"
+                className="text-[13px] font-semibold text-[#374151]"
+              >
+                Анги
+              </Label>
               <Select value={gradeLevel} onValueChange={setGradeLevel}>
-                <SelectTrigger id="ai-grade-level">
+                <SelectTrigger
+                  id="ai-grade-level"
+                  className="h-10 rounded-full border-[#E3E8EF] bg-[#F8FAFC] px-4 text-[12px] text-[#111827] shadow-none focus-visible:ring-[#D5E3F7]"
+                >
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="rounded-2xl border-zinc-200 bg-white">
                   {[6, 7, 8, 9, 10, 11, 12].map((g) => (
                     <SelectItem key={g} value={String(g)}>
                       {g}-р анги
@@ -172,27 +197,35 @@ export default function AIGenerateDialog({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="ai-subtopic">Дэд сэдэв (заавал биш)</Label>
+          <div className="space-y-2.5">
+            <Label
+              htmlFor="ai-subtopic"
+              className="text-[13px] font-semibold text-[#374151]"
+            >
+              Дэд сэдэв
+            </Label>
             <Input
               id="ai-subtopic"
               value={subtopic}
               onChange={(e) => setSubtopic(e.target.value)}
               placeholder="Жишээ: Геометр, Тригонометр, Үсэгт илэрхийлэл..."
+              className="h-10 rounded-full border-[#E3E8EF] bg-[#F8FAFC] px-4 text-[12px] text-[#111827] shadow-none focus-visible:ring-[#D5E3F7]"
             />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Түвшин</Label>
+            <div className="space-y-2.5">
+              <Label className="text-[13px] font-semibold text-[#374151]">
+                Түвшин
+              </Label>
               <Select
                 value={difficultyLevel}
                 onValueChange={setDifficultyLevel}
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-10 rounded-full border-[#E3E8EF] bg-[#F8FAFC] px-4 text-[12px] text-[#111827] shadow-none focus-visible:ring-[#D5E3F7]">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="rounded-2xl border-zinc-200 bg-white">
                   <SelectItem value="1">Хөнгөн</SelectItem>
                   <SelectItem value="2">Дунд</SelectItem>
                   <SelectItem value="3">Хүнд</SelectItem>
@@ -200,8 +233,13 @@ export default function AIGenerateDialog({
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="ai-count">Асуултын тоо</Label>
+            <div className="space-y-2.5">
+              <Label
+                htmlFor="ai-count"
+                className="text-[13px] font-semibold text-[#374151]"
+              >
+                Асуултын тоо
+              </Label>
               <Input
                 id="ai-count"
                 type="number"
@@ -209,43 +247,50 @@ export default function AIGenerateDialog({
                 max={20}
                 value={questionCount}
                 onChange={(e) => setQuestionCount(e.target.value)}
+                className="h-10 rounded-full border-[#E3E8EF] bg-[#F8FAFC] px-4 text-[12px] text-[#111827] shadow-none focus-visible:ring-[#D5E3F7]"
               />
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Асуултын төрлүүд</Label>
+          <div className="space-y-3">
+            <Label className="text-[13px] font-semibold text-[#374151]">
+              Асуултын төрлүүд
+            </Label>
             <div className="flex flex-wrap gap-2">
-              {QUESTION_TYPE_OPTIONS.map((opt) => (
-                <Badge
-                  key={opt.value}
-                  variant={
-                    selectedTypes.includes(opt.value)
-                      ? "default"
-                      : "outline"
-                  }
-                  className={`cursor-pointer select-none ${
-                    selectedTypes.includes(opt.value)
-                      ? "bg-purple-600 hover:bg-purple-700"
-                      : "hover:bg-purple-50"
-                  }`}
-                  onClick={() => toggleType(opt.value)}
-                >
-                  {opt.label}
-                </Badge>
-              ))}
+              {QUESTION_TYPE_OPTIONS.map((opt) => {
+                const selected = selectedTypes.includes(opt.value);
+
+                return (
+                  <Badge
+                    key={opt.value}
+                    variant="outline"
+                    className={`cursor-pointer rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors ${
+                      selected
+                        ? "border-[#D7DEF3] bg-[#EEF3FF] text-[#2F4C98]"
+                        : "border-[#E5E7EB] bg-white text-[#475467] hover:border-[#D7DEF3] hover:bg-[#F8FAFF]"
+                    }`}
+                    onClick={() => toggleType(opt.value)}
+                  >
+                    {opt.label}
+                  </Badge>
+                );
+              })}
             </div>
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
+        <DialogFooter className="border-t border-[#E7EDF5] bg-white px-6 py-4 sm:px-7">
+          <Button
+            variant="outline"
+            onClick={() => setOpen(false)}
+            className="h-10 rounded-full border-[#E5E7EB] px-5 text-[12px] font-medium text-[#475467] shadow-none hover:bg-[#F8FAFC]"
+          >
             Болих
           </Button>
           <Button
             onClick={handleGenerate}
             disabled={isPending || selectedTypes.length === 0}
-            className="bg-purple-600 hover:bg-purple-700"
+            className="h-10 rounded-full bg-[#2F4C98] px-5 text-[12px] font-medium text-white hover:bg-[#263F80]"
           >
             {isPending ? (
               <>

@@ -33,6 +33,8 @@ interface Props {
   passages: QuestionPassage[];
   questions?: Question[];
   questionNumber?: number;
+  subjectName: string;
+  sampleContext: string;
 }
 
 interface MatchingPair {
@@ -82,6 +84,8 @@ export default function AddQuestionForm({
   passages,
   questions = [],
   questionNumber = 1,
+  subjectName,
+  sampleContext,
 }: Props) {
   const [type, setType] = useState<QuestionType>("multiple_choice");
   const [isFormulaToolOpen, setIsFormulaToolOpen] = useState(false);
@@ -343,6 +347,8 @@ export default function AddQuestionForm({
     <div className="space-y-4">
       <QuestionImportActions
         examId={examId}
+        subjectName={subjectName}
+        sampleContext={sampleContext}
         aiVariantEnabled={aiVariantEnabled}
         onAiVariantEnabledChange={setAiVariantEnabled}
         aiVariantMode={aiVariantMode}

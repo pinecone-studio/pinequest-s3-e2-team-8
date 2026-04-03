@@ -2232,45 +2232,6 @@ export async function importParsedQuestions(
     return { error: "Нийтлэгдсэн шалгалтад file import хийх боломжгүй" };
   }
 
-  function coerceDraft(rawDraft: unknown, index: number): QuestionImportDraft {
-    const draft = (rawDraft ?? {}) as Partial<QuestionImportDraft>;
-
-    return {
-      draftId: String(draft.draftId ?? `draft-${index + 1}`),
-      sourceRow: Number(draft.sourceRow) || index + 2,
-      type:
-        draft.type === "multiple_choice" ||
-        draft.type === "multiple_response" ||
-        draft.type === "fill_blank" ||
-        draft.type === "matching" ||
-        draft.type === "essay"
-          ? draft.type
-          : "essay",
-      content: String(draft.content ?? ""),
-      contentHtml: String(draft.contentHtml ?? ""),
-      imageUrl: String(draft.imageUrl ?? ""),
-      explanation: String(draft.explanation ?? ""),
-      points: Number(draft.points) || 1,
-      options: Array.isArray(draft.options)
-        ? draft.options.map((item) => String(item ?? ""))
-        : [],
-      correctAnswer: String(draft.correctAnswer ?? ""),
-      multipleCorrectAnswers: Array.isArray(draft.multipleCorrectAnswers)
-        ? draft.multipleCorrectAnswers.map((item) => String(item ?? ""))
-        : [],
-      matchingPairs: Array.isArray(draft.matchingPairs)
-        ? draft.matchingPairs.map((pair) => ({
-            left: String(pair?.left ?? ""),
-            right: String(pair?.right ?? ""),
-          }))
-        : [],
-      warnings: Array.isArray(draft.warnings)
-        ? draft.warnings.map((item) => String(item ?? ""))
-        : [],
-      errors: [],
-    };
-  }
-
   let parsedDrafts: QuestionImportDraft[];
   try {
     const parsed = JSON.parse(rawDrafts);
@@ -2278,7 +2239,9 @@ export async function importParsedQuestions(
       return { error: "Импортлох draft өгөгдөл буруу байна." };
     }
 
-    parsedDrafts = parsed.map((draft, index) => coerceDraft(draft, index));
+    parsedDrafts = parsed.map((draft, index) =>
+      coerceQuestionImportDraft(draft, index)
+    );
   } catch {
     return { error: "Импортлох draft өгөгдлийг уншиж чадсангүй." };
   }
@@ -2364,4 +2327,174 @@ export async function importParsedQuestions(
 
   await revalidateEducatorQuestionPage(examId);
   return { success: true, count: insertRows.length };
+}
+
+function coerceQuestionImportDraft(
+  rawDraft: unknown,
+  index: number
+): QuestionImportDraft {
+  const draft = (rawDraft ?? {}) as Partial<QuestionImportDraft>;
+
+  return {
+    draftId: String(draft.draftId ?? `draft-${index + 1}`),
+    sourceRow: Number(draft.sourceRow) || index + 1,
+    type:
+      draft.type === "multiple_choice" ||
+      draft.type === "multiple_response" ||
+      draft.type === "fill_blank" ||
+      draft.type === "matching" ||
+      draft.type === "essay"
+        ? draft.type
+        : "essay",
+    content: String(draft.content ?? ""),
+    contentHtml: String(draft.contentHtml ?? ""),
+    imageUrl: String(draft.imageUrl ?? ""),
+    explanation: String(draft.explanation ?? ""),
+    points: Number(draft.points) || 1,
+    options: Array.isArray(draft.options)
+      ? draft.options.map((item) => String(item ?? ""))
+      : [],
+    correctAnswer: String(draft.correctAnswer ?? ""),
+    multipleCorrectAnswers: Array.isArray(draft.multipleCorrectAnswers)
+      ? draft.multipleCorrectAnswers.map((item) => String(item ?? ""))
+      : [],
+    matchingPairs: Array.isArray(draft.matchingPairs)
+      ? draft.matchingPairs.map((pair) => ({
+          left: String(pair?.left ?? ""),
+          right: String(pair?.right ?? ""),
+        }))
+      : [],
+    warnings: Array.isArray(draft.warnings)
+      ? draft.warnings.map((item) => String(item ?? ""))
+      : [],
+    errors: [],
+  };
+}
+
+export async function saveGeneratedPrivateBankQuestions(input: {
+  subjectId: string;
+  gradeLevel: number | null;
+  drafts: QuestionImportDraft[];
+}) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Нэвтрээгүй байна" };
+
+  const subjectId = String(input.subjectId ?? "").trim();
+  if (!subjectId) {
+    return { error: "Хичээлээ сонгоно уу." };
+  }
+
+  const context = await getQuestionBankAccessContext(supabase, user.id);
+  if (!context.isAdmin && !context.allowedSubjectSet.has(subjectId)) {
+    return { error: "Энэ хичээлд материал хадгалах эрх байхгүй байна." };
+  }
+
+  if (!Array.isArray(input.drafts) || input.drafts.length === 0) {
+    return { error: "Хадгалах асуултаа сонгоно уу." };
+  }
+
+  const parsedDrafts = input.drafts.map((draft, index) =>
+    coerceQuestionImportDraft(draft, index)
+  );
+  const validatedDrafts = parsedDrafts.map((draft) => ({
+    ...draft,
+    errors: validateQuestionImportDraft(draft),
+  }));
+  const invalidDrafts = validatedDrafts.filter((draft) => draft.errors.length > 0);
+
+  if (invalidDrafts.length > 0) {
+    return {
+      error:
+        "Зарим AI асуултын бүтэц дутуу байна. Засварлаад дахин хадгална уу.",
+      drafts: validatedDrafts,
+    };
+  }
+
+  const rawGradeLevel =
+    typeof input.gradeLevel === "number" ? input.gradeLevel : Number.NaN;
+  const gradeLevel =
+    Number.isFinite(rawGradeLevel) && rawGradeLevel >= 1 && rawGradeLevel <= 12
+      ? Math.trunc(rawGradeLevel)
+      : null;
+
+  let rows: {
+    subject_id: string;
+    created_by: string;
+    visibility: "private";
+    type: string;
+    content: string;
+    content_html: string | null;
+    image_url: string | null;
+    options: string[] | null;
+    correct_answer: string | null;
+    points: number;
+    difficulty: "medium";
+    difficulty_level: 2;
+    grade_level: number | null;
+    subtopic: null;
+    tags: never[];
+    explanation: string | null;
+  }[];
+
+  try {
+    rows = validatedDrafts.map((draft) => {
+      const normalized = draftToQuestionFormShape(draft);
+      const payload = buildQuestionPayload(
+        normalized.type,
+        normalized.options,
+        normalized.correct_answer || null
+      );
+
+      if ("error" in payload) {
+        throw new Error(payload.error);
+      }
+
+      return {
+        subject_id: subjectId,
+        created_by: user.id,
+        visibility: "private" as const,
+        type: normalized.type,
+        content: normalized.content,
+        content_html: normalized.content_html || null,
+        image_url: normalized.image_url || null,
+        options: payload.options,
+        correct_answer: payload.correctAnswer,
+        points: Number.parseFloat(normalized.points) || 1,
+        difficulty: "medium" as const,
+        difficulty_level: 2 as const,
+        grade_level: gradeLevel,
+        subtopic: null,
+        tags: [] as never[],
+        explanation: normalized.explanation || null,
+      };
+    });
+  } catch (buildError) {
+    return {
+      error:
+        buildError instanceof Error
+          ? buildError.message
+          : "Асуулт бэлтгэхэд алдаа гарлаа.",
+    };
+  }
+
+  try {
+    const { error: insertError } = await supabase.from("question_bank").insert(rows);
+    if (insertError) return { error: insertError.message };
+  } catch (error) {
+    return {
+      error:
+        error instanceof Error
+          ? error.message
+          : "AI асуултуудыг private bank-д хадгалахад алдаа гарлаа.",
+    };
+  }
+
+  revalidatePath("/educator/question-bank");
+  revalidatePath("/educator/question-bank/private");
+  revalidatePath("/educator/question-bank/ai-create");
+
+  return { success: true, count: rows.length };
 }

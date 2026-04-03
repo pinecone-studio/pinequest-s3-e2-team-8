@@ -1885,11 +1885,16 @@ export async function refreshStudentSubjectStudyPlan(subjectId: string) {
       isMissingColumnError(error, "student_subject_study_plans", "status") ||
       isMissingColumnError(error, "student_subject_study_plans", "last_error"))
   ) {
-    const plan = await generateStudyPlanWithAI({
-      subjectName: subjectLearning.subject.subject_name,
-      weakTopics: subjectLearning.topics,
-      subjectSummary: subjectLearning.subject,
-    });
+    let plan: GeneratedStudyPlan;
+    try {
+      plan = await generateStudyPlanWithAI({
+        subjectName: subjectLearning.subject.subject_name,
+        weakTopics: subjectLearning.topics,
+        subjectSummary: subjectLearning.subject,
+      });
+    } catch {
+      return { error: "Study plan үүсгэхэд алдаа гарлаа. Дараа дахин оролдоно уу." };
+    }
 
     const legacyUpsert = await admin
       .from("student_subject_study_plans")
@@ -2031,7 +2036,14 @@ JSON array форматаар л хариул:
   }
 ]`;
 
-  const result = await model.generateContent(prompt);
+  let result;
+  try {
+    result = await model.generateContent(prompt);
+  } catch {
+    // 1 retry after 2s for transient Gemini errors (500, timeout, etc.)
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    result = await model.generateContent(prompt);
+  }
   const parsed = extractJsonArray(result.response.text().trim());
 
   const fallbackTopicLabel = input.topics[0]?.topic_label ?? "Practice";
