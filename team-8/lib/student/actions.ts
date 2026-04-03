@@ -47,6 +47,7 @@ import {
   notifyTeachersOfEssayReviewRequest,
 } from "@/lib/notification/actions";
 import {
+  isExamQueueConfigured,
   publishExamProcessingJob,
 } from "@/lib/aws/sqs";
 import type {
@@ -117,6 +118,14 @@ export type StudentSafeQuestion = {
   points: number;
   order_index: number;
   question_passages?: StudentQuestionPassage | null;
+};
+
+type InProgressSessionRow = {
+  id: string;
+  exam_id: string;
+  status: string;
+  started_at: string | null;
+  attempt_number: number;
 };
 
 type PrepareExamTakePayloadResult =
@@ -259,10 +268,10 @@ async function getInProgressSession(
   supabase: SupabaseServerClient,
   examId: string,
   userId: string
-) {
+) : Promise<InProgressSessionRow | null> {
   const { data } = await supabase
     .from("exam_sessions")
-    .select("*")
+    .select("id, exam_id, status, started_at, attempt_number")
     .eq("exam_id", examId)
     .eq("user_id", userId)
     .eq("status", "in_progress")
@@ -270,7 +279,7 @@ async function getInProgressSession(
     .limit(1)
     .maybeSingle();
 
-  return data;
+  return (data as InProgressSessionRow | null) ?? null;
 }
 
 async function getOwnedSessionById(
@@ -517,9 +526,13 @@ async function loadStudentExamPayload(
     return result;
   }
 
+  // Exclude correct_answer and explanation — students must not receive these.
+  // Grading is handled server-side by Lambda which queries the DB directly.
   const { data: questions } = await supabase
     .from("questions")
-    .select("*")
+    .select(
+      "id, type, passage_id, content, content_html, image_url, options, points, order_index, ai_variant_enabled, ai_variant_mode"
+    )
     .eq("exam_id", examId)
     .order("order_index", { ascending: true });
 
@@ -1367,15 +1380,37 @@ async function scheduleSubmittedSessionProcessing(input: {
       input.reason === "timeout" ? "timeout_finalize" : "student_submit",
     actionRequiredReason: input.actionRequiredReason ?? null,
   };
+  const queueConfigured = isExamQueueConfigured();
+  let publishFailed = false;
 
   try {
     const publishResult = await publishExamProcessingJob(job);
     if (publishResult.queued) {
       return;
     }
+    publishFailed = publishResult.fallbackRequired;
   } catch (error) {
+    publishFailed = true;
     console.error("[exam-processing-queue] Failed to publish exam job", error);
   }
+
+  const fallbackMetadata = {
+    sessionId: input.sessionId,
+    examId: input.examId,
+    reason: input.reason,
+    queueConfigured,
+    publishFailed,
+    environment:
+      process.env.VERCEL_ENV?.trim() ||
+      process.env.NODE_ENV?.trim() ||
+      "unknown",
+  };
+
+  const fallbackLabel = publishFailed
+    ? "[exam-processing-queue] Falling back to Vercel after() processing after queue publish failure"
+    : "[exam-processing-queue] Falling back to Vercel after() processing because queue is not configured";
+
+  console.warn(fallbackLabel, fallbackMetadata);
 
   try {
     after(async () => {
@@ -1386,12 +1421,18 @@ async function scheduleSubmittedSessionProcessing(input: {
       } catch (error) {
         console.error(
           "Failed to process submitted exam session after response",
-          error,
+          {
+            ...fallbackMetadata,
+            error,
+          },
         );
       }
     });
   } catch (error) {
-    console.error("Failed to schedule submitted exam session processing", error);
+    console.error("Failed to schedule submitted exam session processing", {
+      ...fallbackMetadata,
+      error,
+    });
   }
 }
 
@@ -2216,12 +2257,14 @@ async function startExamSessionForUserFallback(
   try {
     const { data: sessions } = await supabase
       .from("exam_sessions")
-      .select("*")
+      .select("id, exam_id, status, started_at, attempt_number")
       .eq("exam_id", examId)
       .eq("user_id", userId)
       .order("attempt_number", { ascending: false });
 
-    const concurrentInProgress = sessions?.find(
+    const typedSessions = (sessions ?? []) as InProgressSessionRow[];
+
+    const concurrentInProgress = typedSessions.find(
       (session) => session.status === "in_progress"
     );
 
@@ -2295,7 +2338,7 @@ async function startExamSessionForUserFallback(
       }
     }
 
-    const nextAttemptNumber = (sessions?.[0]?.attempt_number ?? 0) + 1;
+    const nextAttemptNumber = (typedSessions[0]?.attempt_number ?? 0) + 1;
     const maxAttempts = Number(exam.max_attempts ?? 1);
 
     if (nextAttemptNumber > maxAttempts) {

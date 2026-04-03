@@ -3573,6 +3573,10 @@ export async function retryStudentPracticeExamBuild(practiceExamId: string) {
     return { error: updateError.message };
   }
 
+  // Invalidate stale Redis cache so the rebuild fetches fresh questions (TTL = 86400s).
+  await redis.del(`practice:${practiceExamId}:questions`);
+  await redis.del(`practice:${practiceExamId}:build-ready`);
+
   revalidatePath("/student/learning");
   revalidatePath(`/student/learning/practice/${practiceExamId}`);
   scheduleStudentLearningProcessing({

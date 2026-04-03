@@ -1319,6 +1319,10 @@ export default function ExamTaker({
       // Алдаа буцаасан бол lastCheckpoint шинэчлэхгүй — дараагийн checkpoint дахин оролдоно
       if (!result || "error" in result) return;
       lastCheckpointRef.current = { ...currentAnswers };
+    } catch (err) {
+      // Network/server error — silent fail so the exam UI stays alive.
+      // Answers are backed up in localStorage; next checkpoint will retry.
+      console.error("[ExamTaker] checkpoint save failed:", err);
     } finally {
       isCheckpointingRef.current = false;
     }

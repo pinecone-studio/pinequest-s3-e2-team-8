@@ -1,4 +1,9 @@
 {
+  "regions": ["sin1"],
+  "functions": {
+    "app/student/exams/**": { "maxDuration": 60 },
+    "app/api/notifications/**": { "maxDuration": 30 }
+  },
   "crons": [
     {
       "path": "/api/notifications/weekly-parent-digest",

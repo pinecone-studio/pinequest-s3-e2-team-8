@@ -88,7 +88,9 @@ Use:
 ## Failure model
 
 - Student submit succeeds even if queue publish fails.
-- If queue publish fails on Vercel, the app falls back to `after(...)` processing.
+- If queue publish fails on Vercel, the app falls back to `after(...)` processing and emits a structured fallback log.
+- If AWS queue configuration is missing entirely, the app also falls back to `after(...)` processing and emits a warning log.
+- Production default should still be SQS-enabled. The `after(...)` path is an emergency safety net, not the normal processing path.
 - Manual recovery routes remain available:
   - `/api/exam-results/process`
   - `/api/student-learning/process`
