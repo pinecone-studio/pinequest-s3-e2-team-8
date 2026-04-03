@@ -290,7 +290,7 @@ export default function QuestionImportActions({
                   variant="outline"
                   className="h-10 w-full justify-between rounded-[10px] border-[#E5E7EB] bg-white px-4 text-[12px] font-medium text-[#374151] shadow-none sm:w-[160px]"
                 >
-                  Харагсдуулах
+                  Хэрэгслүүд
                   <ChevronDown className="ml-2 h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>

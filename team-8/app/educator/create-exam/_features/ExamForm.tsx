@@ -212,14 +212,14 @@ function GroupMultiSelectField({
 
       <PopoverContent
         align="start"
-        className="w-[640px] max-w-[90vw] rounded-[18px] border border-[#E2E8F0] p-2 shadow-[0_16px_30px_rgba(148,163,184,0.18)]"
+        className="w-[600px] max-w-[88vw] rounded-[16px] border border-[#E2E8F0] p-1.5 shadow-[0_16px_30px_rgba(148,163,184,0.18)]"
       >
         {availableGroups.length === 0 ? (
           <div className="rounded-[14px] px-4 py-5 text-[14px] text-[#6B7280]">
             Энэ хичээлд тохирох бүлэг одоогоор алга байна.
           </div>
         ) : (
-          <div className="grid gap-2">
+          <div className="grid max-h-[320px] gap-1.5 overflow-y-auto pr-1 sm:max-h-[360px]">
             {availableGroups.map((group) => {
               const selected = selectedGroupIds.includes(group.id);
 
@@ -229,29 +229,29 @@ function GroupMultiSelectField({
                   type="button"
                   onClick={() => onToggleGroup(group.id)}
                   className={cn(
-                    "flex items-center justify-between rounded-[14px] border px-4 py-3 text-left transition",
+                    "flex items-center justify-between rounded-[12px] border px-3 py-2.5 text-left transition",
                     selected
                       ? "border-[#4D97F8] bg-[#EDF5FF]"
                       : "border-[#E5E7EB] bg-white hover:border-[#C7D2E3] hover:bg-[#FAFCFF]",
                   )}
                 >
                   <div>
-                    <p className="text-[14px] font-medium text-[#111827]">
+                    <p className="text-[13px] font-medium text-[#111827]">
                       {group.name}
                     </p>
-                    <p className="mt-1 text-[12px] text-[#6B7280]">
+                    <p className="mt-0.5 text-[11px] text-[#6B7280]">
                       {formatGroupTypeLabel(group.group_type)}
                     </p>
                   </div>
                   <span
                     className={cn(
-                      "flex h-5 w-5 items-center justify-center rounded-full border",
+                      "flex h-[18px] w-[18px] items-center justify-center rounded-full border",
                       selected
                         ? "border-[#4D97F8] bg-[#4D97F8] text-white"
                         : "border-[#D1D5DB] bg-white text-transparent",
                     )}
                   >
-                    <Check className="h-3.5 w-3.5" />
+                    <Check className="h-3 w-3" />
                   </span>
                 </button>
               );

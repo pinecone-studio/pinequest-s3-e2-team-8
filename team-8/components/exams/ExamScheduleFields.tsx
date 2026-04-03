@@ -409,7 +409,7 @@ function SettingsRow({
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
-  description: string;
+  description?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -420,7 +420,9 @@ function SettingsRow({
         </div>
         <div className="min-w-0">
           <p className="text-[13px] font-semibold text-[#111827]">{title}</p>
-          <p className="text-[11px] text-[#8A94A6]">{description}</p>
+          {description ? (
+            <p className="text-[11px] text-[#8A94A6]">{description}</p>
+          ) : null}
         </div>
       </div>
       {children}
@@ -671,8 +673,8 @@ export function ExamSettingsSection({
 
         <SettingsRow
           icon={Monitor}
-          title="Сурагчийн төхөөрөмжийн бодлого"
-          description="Mobile-centered эсвэл desktop горим сонгоно."
+          title="Зөвхөн desktop-оор өгөх"
+          description="Гар утсаар шалгалтад орох боломжгүй."
         >
           <SettingsToggle
             checked={desktopOnly}

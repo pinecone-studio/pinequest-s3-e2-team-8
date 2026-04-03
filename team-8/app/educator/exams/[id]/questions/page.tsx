@@ -110,10 +110,10 @@ export default async function ExamQuestionsPage({ params }: Props) {
             />
           )}
 
-          <div className="flex flex-wrap items-center justify-end gap-3">
+          <div className="flex flex-nowrap items-center justify-end gap-2">
             <Link
               href={`/educator/exams/${id}/edit`}
-              className="inline-flex h-[30px] items-center justify-center rounded-[9px] border border-[#D5D9E2] bg-[#6F6F6F] px-4 text-[12px] font-medium text-white transition hover:bg-[#616161]"
+              className="inline-flex h-[36px] min-w-[110px] items-center justify-center rounded-[10px] border border-[#D5D9E2] bg-[#6F6F6F] px-5 text-[12px] font-medium text-white transition hover:bg-[#616161]"
             >
               Хадгалах
             </Link>
