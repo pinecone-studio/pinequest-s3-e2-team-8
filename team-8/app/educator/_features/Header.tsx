@@ -45,6 +45,7 @@ export default function Header({ profile }: { profile: Profile }) {
   const isExamBuilderPage =
     pathname === "/educator/create-exam" ||
     (pathname?.startsWith("/educator/exams/") && pathname?.endsWith("/edit"));
+  const isQuestionBankPage = pathname?.startsWith("/educator/question-bank");
 
   const hideGreeting =
     isExamsPage ||
@@ -164,7 +165,7 @@ export default function Header({ profile }: { profile: Profile }) {
           showDashboardBackLink
             ? "sm:ml-auto"
             : ""
-        }`}
+        } ${isQuestionBankPage ? "sm:mr-8" : ""}`}
       >
         <NotificationBell />
 
